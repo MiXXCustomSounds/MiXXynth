@@ -1,55 +1,36 @@
-# SPEC-MiXXynth — Draft v0.1 (for Q&A, no build)
+# SPEC-MiXXynth — v1.0 LOCKED (2026-10-14)
 
-Date: 2026-10-14. Status: DRAFT — no Source/, no CMakeLists, no DSP/UI code until sign-off.
-Separate project from MiXXFX. Bundle ID proposal: `com.mixx.mixxynth`, plugin code `Mxs1`.
+Status: LOCKED for scaffolding. No DSP/UI build until M1 scaffold green.
+Separate project from MiXXFX. Location: `c:\Users\fixxe\OneDrive\Documents\MiXXynth\`.
+License: **MIT** (maximum freedom: use, modify, disassemble, reassemble, free — attribution only).
 
-## 1. Positioning
-- Modern FM-forward synth with drag-drop modulation + built-in multi-FX, finished sounds in one plugin.
-- References: Vital/Serum (mod UX), Phase Plant (rack), Dexed/six-sines (FM), Surge (FX depth).
-- QUESTION S1: primary user — preset tweaker, performing producer, or deep FM programmer? Main rival to beat: Vital / Serum / Phase Plant / Dexed / other?
+## Locked decisions (S1–S10)
 
-## 2. Formats & MIDI
-- Proposal: VST3 + Standalone on Windows (mirror MiXXFX), JUCE 8, C++20, `IS_SYNTH TRUE`, `NEEDS_MIDI_INPUT TRUE`.
-- QUESTIONS S2: add CLAP (via clap-wrapper like six-sines)? MIDI out? MPE support v1 or later?
+- S1: Deep FM programmer first. Beat Dexed/six-sines on depth + usability.
+- S2: VST3 + Standalone now, CLAP later. MIDI in v1; MPE/MIDI-out deferred.
+- S3: 6-op FM/PM hybrid, 32 DX-style algorithms + free matrix. Clean-room params, no DX7 sysex import v1. Per-op ratio/level/feedback/key-scale, oversample + latency report.
+- S4: FM + full VA osc (saw/square/sub/noise) + multimode filter (LP/HP/BP + drive) in v1.
+- S5: Drag-drop mod: 4 LFOs + 3 ADSR + MSEG-lite + 4 macros, 32 slots, depth ring, bipolar, right-click clear, smoothed per-block, lock-free.
+- S6: Fixed FX tail: Hyper + Chorus + Delay + Reverb + Distortion + EQ + Limiter, per-FX on/off + mix.
+- S7: 32 voices, unison to 16, oldest/lowest steal, 2x/4x oversample, 44.1/48/96k. Mono/legato/portamento in build spec.
+- S8: Serum-1-style categorized bank. **Randomization CORE**: global smart randomize + per-section locks (FM/VA/Filter/Mod/FX), musical defaults, undo.
+- S9: Identity: black metallic + very dark oak + futuristic glow lights. Resizable, min 900x640, default 1440x900. Pages FM/VA-Mod/FX/Presets. Visualizers off audio thread.
+- S10: MIT open-source/freeware. Pamplejuce-style CMake 3.25+, Catch2, pluginval, GH Actions Win. Python 3.12 via winget. Telemetry opt-out decision at scaffold.
 
-## 3. FM engine
-- Proposal A (default): 6-op FM/PM hybrid a la six-sines (MIT-safe), 32 DX-style algorithms + free-matrix option, per-op ratio/level/feedback/key-scale, anti-aliased sine + oversample option with latency report.
-- Proposal B: 4-op lite (simpler UI, faster v1). Proposal C: 8-op + wavetable/warp-FM hybrid (Serum-style, biggest scope).
-- QUESTIONS S3: 4 / 6 / 8 ops? Fixed algorithms vs free matrix vs both? DX7 patch import (GPL-risky — avoid or clean-room)? Feedback + key-scaling depth?
+## Still to confirm at scaffold (yes/no)
 
-## 4. Subtractive layer
-- Proposal: per-voice VA osc (saw/square/sub/noise) -> multimode filter (LP/HP/BP + drive) -> amp, routable alongside FM ops.
-- QUESTIONS S4: include VA layer in v1 or FM-only v1? Filter topology (ladder/SEM/Sallen-Key)? Mono/poly filter behavior?
+1. Scaffold Pamplejuce template files now? (recommended yes)
+2. Clone six-sines to `reference/` for study (not linked)? (recommended yes)
+3. Install Python 3.12 via winget now? (recommended yes)
+4. Set `SUPERPOWERS_DISABLE_TELEMETRY=1`? (recommended yes for privacy)
+5. `hippo init` already done isolated — keep as-is? (yes)
 
-## 5. Modulation (drag-and-drop)
-- Proposal: 4 LFOs (sync/free, shapes + warp), 3 ADSR + 1 MSEG-lite, 4 macros, velocity/modwheel/aftertouch/MPE sources; drag chip -> knob, depth ring, bipolar, right-click clear; 32-slot matrix, smoothed per-block, lock-free.
-- QUESTIONS S5: LFO/env/macro counts? Poly vs mono LFOs? MSEG full editor or shapes only? MIDI-learn + MPE in v1?
+## Milestones
 
-## 6. Multi-FX rack
-- Proposal: synth-tailored tail — Hyper/Unison, Chorus, Delay (sync/free), Reverb, Distortion, EQ, Compressor/limiter — fixed order, per-FX on/off + mix, global dry/wet. Full reorderable rack (MiXXFX-style UX, fresh code) only if you demand it.
-- QUESTIONS S6: which FX in v1 (pick from above)? Fixed tail vs reorderable rack? Per-preset FX lock?
-
-## 7. Voices & performance
-- Proposal: 16-voice poly, legato/mono/unison (up to 8, detune/spread), steal oldest/lowest-level, 2x/4x oversample toggle, target <25% CPU @48k on 8-core for typical pad.
-- QUESTIONS S7: max voices/unison? Mono/legato/portamento needs? CPU budget + supported sample rates (44.1/48/96)?
-
-## 8. Presets & state
-- Proposal: JSON presets + factory bank 64 (bass/keys/pads/leads/plucks/FX), DAW state via APVTS, host automation for all performance params, A/B + init patch.
-- QUESTIONS S8: JSON vs XML (MiXXFX-style)? Factory count + categories? A/B, morph, randomize?
-
-## 9. UI/UX (impeccable will refine)
-- Proposal: resizable 900x640 min, 1440x900 default; pages: FM/Filter/Mod/FX/Presets; transient values on drag; waveform/filter/LFO visualizers (off audio thread); retro-futurist + walnut continuity with MiXXFX vs new identity (TBD with `/impeccable init`).
-- QUESTIONS S9: keep MiXXFX identity or new? Min/default size? Visualizers priority? Keyboard/tooltips/a11y bar?
-
-## 10. Build/test/release
-- Proposal: Pamplejuce-style layout (MIT) — CMake 3.25+, Catch2 tests, pluginval, GH Actions Win build, `VST3/` staging like MiXXFX. Install Python 3.12 via winget for skill tests.
-- QUESTIONS S10: Pamplejuce template files now? Clone six-sines to `reference/` for study? Python install now? Telemetry opt-out (`SUPERPOWERS_DISABLE_TELEMETRY=1`)? Open-source (MIT, allows GPL FX) vs closed-source (permissive-only FX)?
-
-## 11. Milestones (proposal)
-- M1: spec sign-off + template + CI green + empty synth voice passing pluginval
-- M2: FM core (1 algo -> N algos) + filter + envelopes, unit-tested
-- M3: drag-drop mod matrix + macros
-- M4: FX tail + presets + UI polish (impeccable audit)
+- M1: template + CI green + empty synth voice passing pluginval
+- M2: FM core (1 algo -> 32 + matrix) + VA + filter + envs, unit-tested
+- M3: drag-drop matrix + macros + MSEG-lite
+- M4: FX tail + Serum-style bank + randomize + UI polish (impeccable audit)
 - M5: beta bank + release VST3 + manual
 
-No code until you answer S1–S10 (at least S2/S3/S10 to unblock scaffolding).
+Bundle ID: `com.mixx.mixxynth`, code `Mxs1`. Formats: VST3 + Standalone (`IS_SYNTH TRUE`, `NEEDS_MIDI_INPUT TRUE`).
