@@ -26,3 +26,9 @@ node_modules/
 hippo.db*
 # Impeccable local overrides
 .impeccable/config.local.json
+.claude/settings.local.json
+# Reference clones (study-only, re-cloneable, keep repo lean)
+reference/
+# Local tool binaries (re-downloadable)
+tools/pluginval_Windows.zip
+tools/pluginval/
