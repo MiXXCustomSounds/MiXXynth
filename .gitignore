@@ -1,0 +1,28 @@
+build*/
+Build*/
+out/
+.vs/
+.vscode/ipch/
+VST3/
+*.user
+*.suo
+.vc.db
+JUCE/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+_deps/
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+# OneDrive lock
+*.tmp
+~$*
+# Node (for design/agent skills)
+node_modules/
+# Hippo local store (keep proprietary memory local, don't commit DB)
+.hippo/
+hippo.db*
+# Impeccable local overrides
+.impeccable/config.local.json
