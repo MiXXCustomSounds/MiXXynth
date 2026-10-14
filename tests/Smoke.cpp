@@ -63,6 +63,30 @@ int main()
     check (rmsTailEnd < rmsTailHead, "tail decays after note-off", rmsTailEnd);
     check (rmsTailEnd < 0.05, "tail near silence after 1s", rmsTailEnd);
 
+    // M1b-ii: per-op feedback must stay finite + bounded at max amount on all ops.
+    {
+        MiXXFmVoice fbVoice;
+        fbVoice.setSampleRate (sr);
+        MiXXFmVoice::VoiceParams fp;
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            fp.feedback[i] = 0.95f;
+        fp.index = 8.0f;
+
+        juce::AudioBuffer<float> fbuf (2, len);
+        juce::MidiBuffer fmidi;
+        fmidi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        fbVoice.renderBlock (fbuf, fmidi, fp);
+        const double fbRms = rmsOf (fbuf, static_cast<int> (sr * 0.1), static_cast<int> (sr * 0.5));
+
+        float peak = 0.0f;
+        for (int ch = 0; ch < fbuf.getNumChannels(); ++ch)
+            peak = juce::jmax (peak, fbuf.getMagnitude (ch, 0, len));
+
+        check (fbRms >= 0.0, "max feedback finite (no NaN/Inf)", fbRms);
+        check (fbRms > 0.001, "max feedback audible", fbRms);
+        check (peak <= 1.0f, "max feedback bounded (<=1.0)", peak);
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }

@@ -24,6 +24,12 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
+      - name: Build DSP smoke test
+        run: cmake --build build --config Release --target MiXXynthSmoke
+
+      - name: Run DSP smoke test (TDD gate)
+        run: ./build/Release/MiXXynthSmoke.exe
+
       - name: Build VST3 and Standalone
         run: cmake --build build --config Release --target MiXXynth_VST3 MiXXynth_Standalone
 

@@ -8,7 +8,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     setResizeLimits (900, 640, 2560, 1440);
     setSize (1440, 900);
 
-    title.setText ("MiXXynth — M1a shell (FM lands in M1b)", juce::dontSendNotification);
+    title.setText ("MiXXynth - M1b-ii (per-op FM feedback)", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (title);
 }

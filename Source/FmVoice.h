@@ -4,11 +4,12 @@
 
 #include <array>
 
-// M1b: mono 6-op FM voice, per-op DX-style ADSR envelopes, phase modulation.
-// Audible routing in M1b: Op1 modulates Op2's phase AND all six ops are mixed
-// to the output (proves every op param is live). Strict carrier/modulator
-// algorithm routing lands with the 32-algorithm matrix in M2.
-// Feedback param is stubbed (wired in M1b-ii). Polyphony/unison land in M2.
+// M1b-ii: mono 6-op FM voice, per-op DX-style ADSR, per-op self-feedback.
+// Audible routing: Op1 modulates Op2's phase (FM index) AND every op mixes
+// to the output directly (proves all params live). Each op also feeds its own
+// previous output back into its phase (smoothed fb amount, 1-sample delay,
+// DX-style, stable for fb < 1). Strict algorithm matrix lands in M2.
+// Polyphony/unison land in M2.
 class MiXXFmVoice
 {
 public:
@@ -22,8 +23,8 @@ public:
         float decay[numOps];
         float sustain[numOps];
         float release[numOps];
+        float feedback[numOps] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
         float index    = 3.0f;
-        float feedback = 0.0f; // stubbed in M1b
         float master   = 0.8f;
 
         VoiceParams()
@@ -51,6 +52,8 @@ private:
         float env = 0.0f;
         int stage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
         float releaseFrom = 0.0f;
+        float lastOut = 0.0f; // 1-sample delayed output for self-feedback
+        float fbSmooth = 0.0f; // smoothed feedback amount (zipper-free)
     };
 
     void noteOn (int noteNumber, float velocity);

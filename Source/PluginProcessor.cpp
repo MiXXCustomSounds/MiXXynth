@@ -3,8 +3,8 @@
 
 juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLayout()
 {
-    // M1b: per-op ratio/level/ADSR x6 + index + feedback(stub) + master.
-    // 6*6 + 3 = 39 params. All automatable, all in DAW state.
+    // M1b-ii: per-op ratio/level/feedback/ADSR x6 + index + master.
+    // 6*7 + 2 = 44 params. All automatable, all in DAW state.
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
     for (int i = 0; i < MiXXFmVoice::numOps; ++i)
@@ -17,6 +17,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
             "op" + n + "level", "Op " + n + " Level",
             juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f),
             (i < 2 ? 0.8f : 0.12f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "feedback", "Op " + n + " Feedback",
+            juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "attack", "Op " + n + " Attack",
             juce::NormalisableRange<float> (0.001f, 2.0f, 0.001f, 0.4f), 0.01f));
@@ -34,9 +37,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "fmIndex", "FM Index",
         juce::NormalisableRange<float> (0.0f, 12.0f, 0.001f), 3.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        "fmFeedback", "FM Feedback (M1b-ii)",
-        juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "masterGain", "Master Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.8f));
@@ -74,16 +74,16 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     for (int i = 0; i < MiXXFmVoice::numOps; ++i)
     {
         const juce::String n = juce::String (i + 1);
-        vp.ratio[i]   = getParam (apvts, "op" + n + "ratio");
-        vp.level[i]   = getParam (apvts, "op" + n + "level");
-        vp.attack[i]  = getParam (apvts, "op" + n + "attack");
-        vp.decay[i]   = getParam (apvts, "op" + n + "decay");
-        vp.sustain[i] = getParam (apvts, "op" + n + "sustain");
-        vp.release[i] = getParam (apvts, "op" + n + "release");
+        vp.ratio[i]     = getParam (apvts, "op" + n + "ratio");
+        vp.level[i]     = getParam (apvts, "op" + n + "level");
+        vp.feedback[i]  = getParam (apvts, "op" + n + "feedback");
+        vp.attack[i]    = getParam (apvts, "op" + n + "attack");
+        vp.decay[i]     = getParam (apvts, "op" + n + "decay");
+        vp.sustain[i]   = getParam (apvts, "op" + n + "sustain");
+        vp.release[i]   = getParam (apvts, "op" + n + "release");
     }
 
     vp.index    = getParam (apvts, "fmIndex");
-    vp.feedback = getParam (apvts, "fmFeedback"); // stubbed in voice until M1b-ii
     vp.master   = getParam (apvts, "masterGain");
 
     voice.renderBlock (buffer, midi, vp);

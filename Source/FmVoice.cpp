@@ -42,6 +42,8 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel)
         op.env = 0.0f;
         op.stage = 1;
         op.releaseFrom = 0.0f;
+        op.lastOut = 0.0f;
+        op.fbSmooth = 0.0f;
     }
 }
 
@@ -103,21 +105,29 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 
     for (int n = 0; n < numSamples; ++n)
     {
-        // Op1 doubles as the FM modulator source.
+        // Op1 doubles as the FM modulator source (with its own self-feedback).
         updateEnvelope (ops[0], p.attack[0], p.decay[0], p.sustain[0], p.release[0], sampleRate);
-        const float modOut = std::sin (static_cast<float> (twoPi * ops[0].phase)) * ops[0].env;
+        ops[0].fbSmooth += (p.feedback[0] - ops[0].fbSmooth) * 0.001f;
+        const double modPhase = twoPi * ops[0].phase + ops[0].fbSmooth * ops[0].lastOut;
+        const float modOut = std::sin (static_cast<float> (modPhase)) * ops[0].env;
+        ops[0].lastOut = modOut;
 
         float sum = 0.0f;
 
         for (int i = 0; i < numOps; ++i)
         {
-            updateEnvelope (ops[i], p.attack[i], p.decay[i], p.sustain[i], p.release[i], sampleRate);
+            if (i != 0)
+                updateEnvelope (ops[i], p.attack[i], p.decay[i], p.sustain[i], p.release[i], sampleRate);
 
-            double phase = ops[i].phase;
+            ops[i].fbSmooth += (p.feedback[i] - ops[i].fbSmooth) * 0.001f;
+
+            double phase = ops[i].phase + ops[i].fbSmooth * ops[i].lastOut;
             if (i == 1) // carrier: phase-modulated by Op1
                 phase += (static_cast<double> (p.index) * modOut) / twoPi;
 
-            sum += std::sin (static_cast<float> (twoPi * phase)) * ops[i].env * p.level[i];
+            const float s = std::sin (static_cast<float> (twoPi * phase)) * ops[i].env;
+            ops[i].lastOut = s;
+            sum += s * p.level[i];
 
             ops[i].phase += frequency * p.ratio[i] / sampleRate;
             if (ops[i].phase >= 1.0)
