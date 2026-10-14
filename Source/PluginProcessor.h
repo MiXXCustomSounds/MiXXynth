@@ -2,8 +2,11 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-// M1a: empty synth shell. Proves IS_SYNTH + MIDI + APVTS + state.
-// Full FM/VA/filter/mod/FX/randomize land in M1b-M4 per SPEC-MiXXynth v1.0.
+#include "FmVoice.h"
+
+// M1b: mono 6-op FM voice. Op1 -> Op2 phase-mod pair + Ops3-6 spare carriers.
+// All 6 ops mixed to output so every per-op param is provably live.
+// Polyphony, unison, algorithm matrix, feedback, VA, filter, mod, FX land in M2-M4.
 class MiXXynthProcessor : public juce::AudioProcessor
 {
 public:
@@ -36,6 +39,8 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+
+    MiXXFmVoice voice;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

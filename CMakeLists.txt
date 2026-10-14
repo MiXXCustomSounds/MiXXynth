@@ -33,6 +33,8 @@ target_sources(MiXXynth PRIVATE
     Source/PluginProcessor.h
     Source/PluginEditor.cpp
     Source/PluginEditor.h
+    Source/FmVoice.cpp
+    Source/FmVoice.h
 )
 
 target_compile_features(MiXXynth PRIVATE cxx_std_20)
@@ -58,3 +60,11 @@ add_custom_command(TARGET MiXXynth_VST3 POST_BUILD
     COMMENT "Staging the installable bundle at VST3/MiXXynth.vst3"
     VERBATIM
 )
+
+# M1b: offline DSP smoke test (no host needed). TDD gate before pluginval.
+add_executable(MiXXynthSmoke
+    tests/Smoke.cpp
+    Source/FmVoice.cpp
+)
+target_link_libraries(MiXXynthSmoke PRIVATE juce::juce_audio_basics)
+target_compile_features(MiXXynthSmoke PRIVATE cxx_std_20)
