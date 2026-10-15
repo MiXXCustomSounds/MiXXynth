@@ -11,6 +11,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+# UI widgets (MIT, Surge XT's component library). Fetched rather than vendored
+# so fresh clones and CI stay reproducible. Requires juce_gui_basics to exist,
+# which the JUCE fetch above guarantees.
+FetchContent_Declare(
+    sst-jucegui
+    GIT_REPOSITORY https://github.com/surge-synthesizer/sst-jucegui.git
+    GIT_TAG main
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(sst-jucegui)
+
 # M1a: empty synth shell. IS_SYNTH TRUE, MIDI in. No FM/DSP yet.
 juce_add_plugin(MiXXynth
     COMPANY_NAME "MiXXCustomSounds"
@@ -50,6 +61,7 @@ target_compile_definitions(MiXXynth PUBLIC
 target_link_libraries(MiXXynth PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
+    sst-jucegui
     PUBLIC juce::juce_recommended_config_flags
            juce::juce_recommended_lto_flags
            juce::juce_recommended_warning_flags
