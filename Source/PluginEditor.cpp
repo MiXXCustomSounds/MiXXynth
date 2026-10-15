@@ -1004,6 +1004,17 @@ public:
         auto b = getLocalBounds().reduced (8);
         b.removeFromTop (46);
         viewport.setBounds (b);
+
+        // The rows were created and added but never given bounds, so the entire
+        // tab rendered empty. Lay them out inside the scrolled content, sizing
+        // the content to the viewport so the rows use the full width.
+        content.setSize (juce::jmax (320, viewport.getMaximumVisibleWidth()),
+                         mixxynth::kNumModSlots * rowHeight);
+
+        auto contentArea = content.getLocalBounds();
+
+        for (auto* row : rows)
+            row->setBounds (contentArea.removeFromTop (rowHeight));
     }
 
 private:

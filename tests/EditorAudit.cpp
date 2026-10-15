@@ -556,6 +556,10 @@ int main()
     // ---- 10. Layout: no visible control is left with zero bounds ----
     // This is the regression guard for the bug where setSize() ran before the
     // child arrays were populated, leaving controls at 0x0 and invisible.
+    //
+    // EVERY tab page is walked, not just the active one. The earlier version only
+    // walked visible components, which is how the Mod tab's 32 slot rows sat at
+    // 0x0 unnoticed: that tab was never active while the audit ran.
     juce::StringArray zeroSized;
     int visited = 0;
 
@@ -577,6 +581,10 @@ int main()
     };
 
     walk (*miXXEditor);
+
+    for (int i = 0; i < miXXEditor->getNumTabs(); ++i)
+        if (auto* page = miXXEditor->getTabContentComponent (i))
+            walk (*page);
 
     check (zeroSized.isEmpty(), "no visible control has zero bounds",
            zeroSized.joinIntoString (", "));
