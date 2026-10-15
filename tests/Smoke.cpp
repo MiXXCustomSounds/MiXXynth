@@ -594,6 +594,80 @@ int main()
                     "bend keeps unison voices alive", vm.getActiveVoiceCount()) && ok;
     }
 
+    // --- 20. MPE: per-note pitch bend only affects the note on that channel ---
+    {
+        auto p = paramsForAlgo (4);
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto renderNoteOnChannel = [&] (int channel, int bendChannel, float semis,
+                                        juce::AudioBuffer<float>& buf)
+        {
+            MiXXVoiceManager vm;
+            vm.prepare (sr);
+
+            juce::MidiBuffer mm;
+            mm.addEvent (juce::MidiMessage::noteOn (channel, 60, 1.0f), 0);
+            vm.renderBlock (buf, mm, p, mod, poly);
+
+            // Next block: expression arrives with no new note events, so the
+            // note is not retriggered (retriggering correctly resets expression).
+            vm.setNotePitchBend (bendChannel, 60, semis);
+            juce::MidiBuffer none;
+            vm.renderBlock (buf, none, p, mod, poly);
+        };
+
+        auto crossings = [] (const juce::AudioBuffer<float>& b)
+        {
+            int n = 0;
+            const auto* d = b.getReadPointer (0);
+
+            for (int i = 1; i < b.getNumSamples(); ++i)
+                if ((d[i - 1] < 0.0f) != (d[i] < 0.0f))
+                    ++n;
+
+            return n;
+        };
+
+        juce::AudioBuffer<float> bentOnTwo (2, blockLen), bentOnThree (2, blockLen);
+        renderNoteOnChannel (2, 2, 12.0f, bentOnTwo);
+        renderNoteOnChannel (2, 3, 12.0f, bentOnThree);
+
+        const double ratioOnTwo = static_cast<double> (crossings (bentOnTwo))
+                                  / juce::jmax (1, crossings (bentOnThree));
+
+        // Bending channel 2 (where the note lives) must raise its pitch; bending
+        // channel 3 must leave it alone.
+        ok = check (ratioOnTwo > 1.6 && ratioOnTwo < 2.4,
+                    "MPE bend affects only its own channel", ratioOnTwo) && ok;
+    }
+
+    // --- 21. MPE: per-note pressure and timbre reach the voice ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        juce::MidiBuffer mm;
+        mm.addEvent (juce::MidiMessage::noteOn (4, 60, 1.0f), 0);
+        juce::AudioBuffer<float> buf (2, blockLen);
+        vm.renderBlock (buf, mm, paramsForAlgo (4), mod, poly);
+
+        // These must not disturb voice count or produce non-finite output.
+        vm.setNotePressure (4, 60, 0.8f);
+        vm.setNoteTimbre (4, 60, 0.9f);
+        vm.setNotePressure (9, 60, 0.5f); // no note on channel 9: must be ignored
+
+        double rms = 0.0;
+        float peak = 0.0f;
+        ok = check (renderAndCheck (paramsForAlgo (4), rms, peak) && vm.getActiveVoiceCount() == 1,
+                    "MPE pressure/timbre are safe", vm.getActiveVoiceCount()) && ok;
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }

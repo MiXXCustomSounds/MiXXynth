@@ -13,8 +13,13 @@ void MiXXVoiceManager::prepare (double sr)
         s.voice.reset();
         s.modState.reset();
         s.note = -1;
+        s.channel = 1;
         s.order = 0;
         s.held = false;
+        s.unisonCents = 0.0f;
+        s.noteBendSemis = 0.0f;
+        s.pressure = 0.0f;
+        s.timbre = 0.0f;
     }
 }
 
@@ -25,8 +30,13 @@ void MiXXVoiceManager::reset()
         s.voice.reset();
         s.modState.reset();
         s.note = -1;
+        s.channel = 1;
         s.order = 0;
         s.held = false;
+        s.unisonCents = 0.0f;
+        s.noteBendSemis = 0.0f;
+        s.pressure = 0.0f;
+        s.timbre = 0.0f;
     }
 }
 
@@ -41,11 +51,11 @@ int MiXXVoiceManager::countHeldNotes() const
     return static_cast<int> (std::count (seen.begin(), seen.end(), true));
 }
 
-void MiXXVoiceManager::releaseNote (int note, const mixxynth::ModParams& mod)
+void MiXXVoiceManager::releaseNote (int channel, int note, const mixxynth::ModParams& mod)
 {
     for (auto& s : slots)
     {
-        if (s.held && s.note == note)
+        if (s.held && s.note == note && s.channel == channel)
         {
             s.held = false;
             s.voice.noteOff (note);
@@ -54,7 +64,8 @@ void MiXXVoiceManager::releaseNote (int note, const mixxynth::ModParams& mod)
     }
 }
 
-void MiXXVoiceManager::startNote (int note, float velocity, const mixxynth::ModParams& mod, const PolyParams& poly)
+void MiXXVoiceManager::startNote (int channel, int note, float velocity,
+                                  const mixxynth::ModParams& mod, const PolyParams& poly)
 {
     const int uni = juce::jlimit (1, 16, poly.unison);
 
@@ -79,7 +90,8 @@ void MiXXVoiceManager::startNote (int note, float velocity, const mixxynth::ModP
         if (oldestIdx < 0)
             break;
 
-        releaseNote (slots[static_cast<size_t> (oldestIdx)].note, mod);
+        releaseNote (slots[static_cast<size_t> (oldestIdx)].channel,
+                     slots[static_cast<size_t> (oldestIdx)].note, mod);
     }
 
     // Pick slots: fully idle voices first, then the oldest sounding voices.
@@ -112,15 +124,62 @@ void MiXXVoiceManager::startNote (int note, float velocity, const mixxynth::ModP
 
         s.voice.reset();
         s.unisonCents = pos * poly.unisonDetune * 0.5f;
-        s.voice.setDetune (s.unisonCents + pitchBendSemitones * 100.0f);
+        s.noteBendSemis = 0.0f;
+        s.pressure = 0.0f;
+        s.timbre = 0.0f;
+        applyDetune (s);
         s.voice.setPan (pos * poly.unisonSpread);
         s.voice.noteOn (note, velocity);
         s.modState.reset();
         s.modState.noteOn (mod);
         s.note = note;
+        s.channel = channel;
         s.order = counter++;
         s.held = true;
     }
+}
+
+void MiXXVoiceManager::applyDetune (Slot& s)
+{
+    s.voice.setDetune (s.unisonCents + (pitchBendSemitones + s.noteBendSemis) * 100.0f);
+}
+
+void MiXXVoiceManager::startNoteOnChannel (int channel, int note, float velocity,
+                                           const mixxynth::ModParams& mod,
+                                           const PolyParams& poly)
+{
+    startNote (channel, note, velocity, mod, poly);
+}
+
+void MiXXVoiceManager::releaseNoteOnChannel (int channel, int note, const mixxynth::ModParams& mod)
+{
+    releaseNote (channel, note, mod);
+}
+
+void MiXXVoiceManager::setNotePitchBend (int channel, int note, float semitones)
+{
+    for (auto& s : slots)
+    {
+        if (s.voice.isActive() && s.note == note && s.channel == channel)
+        {
+            s.noteBendSemis = semitones;
+            applyDetune (s);
+        }
+    }
+}
+
+void MiXXVoiceManager::setNotePressure (int channel, int note, float value)
+{
+    for (auto& s : slots)
+        if (s.voice.isActive() && s.note == note && s.channel == channel)
+            s.pressure = juce::jlimit (0.0f, 1.0f, value);
+}
+
+void MiXXVoiceManager::setNoteTimbre (int channel, int note, float value)
+{
+    for (auto& s : slots)
+        if (s.voice.isActive() && s.note == note && s.channel == channel)
+            s.timbre = juce::jlimit (0.0f, 1.0f, value);
 }
 
 void MiXXVoiceManager::renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples,
@@ -139,8 +198,13 @@ void MiXXVoiceManager::renderRange (juce::AudioBuffer<float>& buffer, int startS
             if (! s.voice.isActive())
                 continue;
 
+            // Per-note MPE expression, falling back to the global aftertouch so
+            // channel pressure still works when MPE is off.
             mixxynth::computeSources (s.modState, mod, s.voice.getVelocity(),
-                                      s.voice.getCurrentNote(), chunk, sources);
+                                      s.voice.getCurrentNote(),
+                                      juce::jmax (s.pressure, mod.aftertouch),
+                                      s.timbre,
+                                      chunk, sources);
 
             auto vp = params; // base patch plus this voice's modulation
             mixxynth::applyModulation (sources, mod, vp);
@@ -175,9 +239,9 @@ void MiXXVoiceManager::renderBlock (juce::AudioBuffer<float>& buffer,
         const auto msg = metadata.getMessage();
 
         if (msg.isNoteOn())
-            startNote (msg.getNoteNumber(), msg.getFloatVelocity(), mod, poly);
+            startNote (msg.getChannel(), msg.getNoteNumber(), msg.getFloatVelocity(), mod, poly);
         else if (msg.isNoteOff())
-            releaseNote (msg.getNoteNumber(), mod);
+            releaseNote (msg.getChannel(), msg.getNoteNumber(), mod);
     }
 
     if (pos < numSamples)
@@ -218,7 +282,7 @@ void MiXXVoiceManager::setPitchBendSemitones (float semitones)
     // bend does not accumulate.
     for (auto& s : slots)
         if (s.voice.isActive())
-            s.voice.setDetune (s.unisonCents + pitchBendSemitones * 100.0f);
+            applyDetune (s);
 }
 
 int MiXXVoiceManager::getActiveVoiceCount() const

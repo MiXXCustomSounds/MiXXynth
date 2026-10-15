@@ -18,7 +18,7 @@
 // Slot depths are smoothed per block, and everything is allocation-free.
 namespace mixxynth
 {
-    constexpr int kNumModSources = 17;
+    constexpr int kNumModSources = 18;
     constexpr int kNumModDests   = 50;
     constexpr int kNumModSlots   = 32;
     constexpr int kNumLfos       = 4;
@@ -33,7 +33,8 @@ namespace mixxynth
         srcEnv1, srcEnv2, srcEnv3,
         srcMseg,
         srcMacro1, srcMacro2, srcMacro3, srcMacro4,
-        srcVelocity, srcModWheel, srcAftertouch, srcKeyTrack
+        srcVelocity, srcModWheel, srcAftertouch, srcKeyTrack,
+        srcTimbre // MPE per-note slide (timbre/Y); 0 when MPE is not in use
     };
 
     enum ModDest
@@ -117,11 +118,15 @@ namespace mixxynth
     int numSyncDivisions();
     float syncDivisionCyclesPerBeat (int index);
 
-    // Computes all source values for one block.
+    // Computes all source values for one block. notePressure/noteTimbre carry
+    // the per-note expression of the voice being rendered (MPE); when MPE is off
+    // the caller passes the global aftertouch value and zero timbre.
     void computeSources (ModState& state,
                          const ModParams& params,
                          float velocity,
                          int noteNumber,
+                         float notePressure,
+                         float noteTimbre,
                          int numSamples,
                          std::array<float, kNumModSources>& out);
 

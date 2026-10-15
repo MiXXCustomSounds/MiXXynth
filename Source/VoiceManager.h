@@ -40,6 +40,14 @@ public:
                       const mixxynth::ModParams& mod,
                       const PolyParams& poly);
 
+    // MPE entry points. `channel` identifies the note's MPE member channel.
+    void startNoteOnChannel (int channel, int note, float velocity,
+                             const mixxynth::ModParams& mod, const PolyParams& poly);
+    void releaseNoteOnChannel (int channel, int note, const mixxynth::ModParams& mod);
+    void setNotePitchBend (int channel, int note, float semitones);
+    void setNotePressure (int channel, int note, float value);
+    void setNoteTimbre (int channel, int note, float value);
+
     int getActiveNoteCount() const;
     int getActiveVoiceCount() const;
 
@@ -53,13 +61,19 @@ private:
         MiXXFmVoice voice;
         mixxynth::ModState modState;
         int note = -1;
+        int channel = 1;           // MPE gives each note its own channel
         juce::uint64 order = 0;
         bool held = false;
-        float unisonCents = 0.0f; // this voice's position in the unison stack
+        float unisonCents = 0.0f;  // this voice's position in the unison stack
+        float noteBendSemis = 0.0f; // per-note MPE pitch bend
+        float pressure = 0.0f;      // per-note MPE pressure (Z)
+        float timbre = 0.0f;        // per-note MPE slide (Y)
     };
 
-    void startNote (int note, float velocity, const mixxynth::ModParams& mod, const PolyParams& poly);
-    void releaseNote (int note, const mixxynth::ModParams& mod);
+    void startNote (int channel, int note, float velocity,
+                    const mixxynth::ModParams& mod, const PolyParams& poly);
+    void releaseNote (int channel, int note, const mixxynth::ModParams& mod);
+    void applyDetune (Slot& s);
     void renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples,
                       const MiXXFmVoice::VoiceParams& params, const mixxynth::ModParams& mod);
     int countHeldNotes() const;

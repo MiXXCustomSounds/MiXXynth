@@ -69,7 +69,8 @@ namespace
     // Parameters driven by controls other than ModKnob (combos, toggles, sliders).
     std::set<juce::String> nonKnobUiParams()
     {
-        std::set<juce::String> s { "algorithm", "vaWave", "vaOctave", "filterType", "filterOn", "msegLoop" };
+        std::set<juce::String> s { "algorithm", "vaWave", "vaOctave", "filterType", "filterOn", "msegLoop",
+                                   "mpeEnabled", "mpeMemberChannels" };
 
         for (int i = 0; i < mixxynth::kNumMsegSteps; ++i)
             s.insert ("mseg" + juce::String (i + 1));
@@ -145,6 +146,32 @@ int main()
     else
     {
         check (false, "mod1dst is a choice parameter", "");
+    }
+
+    // ---- 1b. Source name list agrees with the ModSource enum ----
+    if (auto* srcParam = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("mod1src")))
+    {
+        const auto& names = srcParam->choices;
+
+        check (names.size() == mixxynth::kNumModSources, "source count == kNumModSources",
+               juce::String (names.size()) + " vs " + juce::String (mixxynth::kNumModSources));
+
+        auto nameAt = [&names] (int i)
+        {
+            return juce::String (names[juce::jlimit (0, names.size() - 1, i)]);
+        };
+
+        check (nameAt (mixxynth::srcOff) == "Off", "src[Off]", nameAt (mixxynth::srcOff));
+        check (nameAt (mixxynth::srcLfo1) == "LFO 1", "src[Lfo1]", nameAt (mixxynth::srcLfo1));
+        check (nameAt (mixxynth::srcEnv1) == "Env 1", "src[Env1]", nameAt (mixxynth::srcEnv1));
+        check (nameAt (mixxynth::srcMseg) == "MSEG", "src[Mseg]", nameAt (mixxynth::srcMseg));
+        check (nameAt (mixxynth::srcMacro1) == "Macro 1", "src[Macro1]", nameAt (mixxynth::srcMacro1));
+        check (nameAt (mixxynth::srcKeyTrack) == "Key Track", "src[KeyTrack]", nameAt (mixxynth::srcKeyTrack));
+        check (nameAt (mixxynth::srcTimbre) == "Timbre", "src[Timbre]", nameAt (mixxynth::srcTimbre));
+    }
+    else
+    {
+        check (false, "mod1src is a choice parameter", "");
     }
 
     // ---- 2. Every knob's parameter and destination ----

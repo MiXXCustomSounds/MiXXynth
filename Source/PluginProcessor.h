@@ -24,6 +24,11 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
+    // Declares MPE capability to the host. This must be a constant (JUCE calls it
+    // on the audio thread and expects the same answer every time), so it always
+    // reports true; the "MPE Enabled" parameter decides how we interpret MIDI.
+    bool supportsMPE() const override { return true; }
+
     const juce::String getName() const override { return "MiXXynth"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
@@ -53,7 +58,34 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
+    // Routes per-note MPE expression into the voice manager.
+    class MpeHandler : public juce::MPEInstrument::Listener
+    {
+    public:
+        explicit MpeHandler (MiXXynthProcessor& p) : proc (p) {}
+
+        void noteAdded (juce::MPENote note) override;
+        void noteReleased (juce::MPENote note) override;
+        void notePressureChanged (juce::MPENote note) override;
+        void notePitchbendChanged (juce::MPENote note) override;
+        void noteTimbreChanged (juce::MPENote note) override;
+        void noteKeyStateChanged (juce::MPENote) override {}
+
+    private:
+        MiXXynthProcessor& proc;
+    };
+
     MiXXVoiceManager voiceManager;
+    juce::MPEInstrument mpeInstrument;
+    MpeHandler mpeHandler { *this };
+    int appliedMemberChannels = -1; // last zone layout pushed to the instrument
+
+    // Snapshot of the current block's parameters, so the MPE callbacks can reach
+    // the modulation and polyphony settings.
+    mixxynth::ModParams currentMod;
+    MiXXVoiceManager::PolyParams currentPoly;
+    bool mpeActive = false;
+
     float currentSampleRate = 44100.0f;
     float modWheel = 0.0f;
     float aftertouch = 0.0f;

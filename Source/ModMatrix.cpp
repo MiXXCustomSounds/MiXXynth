@@ -129,6 +129,8 @@ void computeSources (ModState& state,
                      const ModParams& p,
                      float velocity,
                      int noteNumber,
+                     float notePressure,
+                     float noteTimbre,
                      int numSamples,
                      std::array<float, kNumModSources>& out)
 {
@@ -196,7 +198,8 @@ void computeSources (ModState& state,
 
     out[static_cast<size_t> (srcVelocity)]   = juce::jlimit (0.0f, 1.0f, velocity);
     out[static_cast<size_t> (srcModWheel)]   = juce::jlimit (0.0f, 1.0f, p.modWheel);
-    out[static_cast<size_t> (srcAftertouch)] = juce::jlimit (0.0f, 1.0f, p.aftertouch);
+    out[static_cast<size_t> (srcAftertouch)] = juce::jlimit (0.0f, 1.0f, notePressure);
+    out[static_cast<size_t> (srcTimbre)]     = juce::jlimit (0.0f, 1.0f, noteTimbre);
     out[static_cast<size_t> (srcKeyTrack)]   =
         juce::jlimit (-1.0f, 1.0f, static_cast<float> (noteNumber - 60) / 48.0f);
 }

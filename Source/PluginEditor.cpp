@@ -11,7 +11,8 @@ namespace
     const char* const sourceNames[] = { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
                                         "Env 1", "Env 2", "Env 3", "MSEG",
                                         "Macro 1", "Macro 2", "Macro 3", "Macro 4",
-                                        "Velocity", "Mod Wheel", "Aftertouch", "Key Track" };
+                                        "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
+                                        "Timbre" };
 
     // Mirrors mixxynth::ModDest ordering for the 30 off-diagonal matrix cells.
     int matrixDestFor (int src, int dst)
@@ -803,6 +804,28 @@ public:
         addKnob (ranged (p, "unisonDetune"), "Unison Detune");
         addKnob (ranged (p, "unisonSpread"), "Unison Spread");
         addKnob (ranged (p, "pitchBendRange"), "Bend Range");
+
+        mpeToggle = makeBoolToggle (p, "mpeEnabled", "MPE");
+        addAndMakeVisible (mpeToggle);
+
+        mpeChannels = new juce::Slider (juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft);
+        mpeChannels->setRange (1.0, 15.0, 1.0);
+        addAndMakeVisible (mpeChannels);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterInt*> (ranged (p, "mpeMemberChannels")))
+        {
+            mpeChannels->setValue (param->get(), juce::dontSendNotification);
+            mpeChannels->onValueChange = [this, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (
+                    param->convertTo0to1 (static_cast<float> (mpeChannels->getValue())));
+                param->endChangeGesture();
+            };
+        }
+
+        channelsLabel.setText ("MPE channels", juce::dontSendNotification);
+        addAndMakeVisible (channelsLabel);
     }
 
     void paint (juce::Graphics& g) override
@@ -824,6 +847,18 @@ public:
 
         for (auto* k : knobs)
             k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 5)).reduced (6));
+
+        b.removeFromTop (8);
+        auto mpeRow = b.removeFromTop (26);
+
+        if (mpeToggle != nullptr)
+            mpeToggle->setBounds (mpeRow.removeFromLeft (90).reduced (2, 0));
+
+        mpeRow.removeFromLeft (12);
+        channelsLabel.setBounds (mpeRow.removeFromLeft (100));
+
+        if (mpeChannels != nullptr)
+            mpeChannels->setBounds (mpeRow.removeFromLeft (120).reduced (2, 0));
     }
 
 private:
@@ -840,6 +875,9 @@ private:
     MiXXynthEditor& ed;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs;
+    juce::ToggleButton* mpeToggle = nullptr;
+    juce::Slider* mpeChannels = nullptr;
+    juce::Label channelsLabel;
 };
 
 // ---------------------------------------------------------------------------

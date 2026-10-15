@@ -90,12 +90,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "pitchBendRange", "Pitch Bend Range",
         juce::NormalisableRange<float> (0.0f, 24.0f, 0.1f), 2.0f));
 
+    // MPE. The plugin always declares MPE support to the host; this switch
+    // decides whether incoming MIDI is interpreted as per-note expression.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "mpeEnabled", "MPE Enabled", false));
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "mpeMemberChannels", "MPE Member Channels", 1, 15, 15));
+
     // M3a: modulation matrix. 32 slots, each source -> destination with a
     // bipolar depth. Destination list mirrors mixxynth::ModDest exactly.
     juce::StringArray modSources { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
                                    "Env 1", "Env 2", "Env 3", "MSEG",
                                    "Macro 1", "Macro 2", "Macro 3", "Macro 4",
-                                   "Velocity", "Mod Wheel", "Aftertouch", "Key Track" };
+                                   "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
+                                   "Timbre" };
 
     juce::StringArray modDests { "Off", "FM Index" };
 
@@ -247,6 +255,8 @@ MiXXynthProcessor::MiXXynthProcessor()
                         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "MiXXynthState", createLayout())
 {
+    mpeInstrument.addListener (&mpeHandler);
+    mpeInstrument.enableLegacyMode(); // replaced by a zone layout when MPE is on
 }
 
 MiXXynthProcessor::~MiXXynthProcessor() = default;
@@ -407,10 +417,40 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     for (int i = 0; i < mixxynth::kNumMacros; ++i)
         mod.macros[static_cast<size_t> (i)] = getParam (apvts, "macro" + juce::String (i + 1));
 
-    // Pitch bend is a global offset for now; MPE will move this per voice.
+    // Global pitch offset: the wheel and channel pitch bend. MPE adds a
+    // per-note offset on top of this.
     voiceManager.setPitchBendSemitones (pitchBend * getParam (apvts, "pitchBendRange"));
 
-    voiceManager.renderBlock (buffer, midi, vp, mod, poly);
+    // MPE: when enabled, incoming MIDI is read as per-note expression and the
+    // MPEInstrument drives voice allocation, so the block is then rendered
+    // without replaying the note events. (Events are applied at block start
+    // rather than sample-accurately; fine for expression, which is continuous.)
+    currentMod = mod;
+    currentPoly = poly;
+    mpeActive = getParam (apvts, "mpeEnabled") > 0.5f;
+
+    if (mpeActive)
+    {
+        const int members = static_cast<int> (getParam (apvts, "mpeMemberChannels"));
+
+        if (members != appliedMemberChannels)
+        {
+            juce::MPEZoneLayout layout;
+            layout.setLowerZone (members);
+            mpeInstrument.setZoneLayout (layout);
+            appliedMemberChannels = members;
+        }
+
+        for (const auto metadata : midi)
+            mpeInstrument.processNextMidiEvent (metadata.getMessage());
+
+        juce::MidiBuffer none;
+        voiceManager.renderBlock (buffer, none, vp, mod, poly);
+    }
+    else
+    {
+        voiceManager.renderBlock (buffer, midi, vp, mod, poly);
+    }
 }
 
 juce::AudioProcessorEditor* MiXXynthProcessor::createEditor()
@@ -429,6 +469,56 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+}
+
+// ---------------------------------------------------------------------------
+// MPE per-note expression routing
+// ---------------------------------------------------------------------------
+void MiXXynthProcessor::MpeHandler::noteAdded (juce::MPENote note)
+{
+    if (! proc.mpeActive)
+        return;
+
+    proc.voiceManager.startNoteOnChannel (note.midiChannel, note.initialNote,
+                                          note.noteOnVelocity.asUnsignedFloat(),
+                                          proc.currentMod, proc.currentPoly);
+}
+
+void MiXXynthProcessor::MpeHandler::noteReleased (juce::MPENote note)
+{
+    if (! proc.mpeActive)
+        return;
+
+    proc.voiceManager.releaseNoteOnChannel (note.midiChannel, note.initialNote,
+                                            proc.currentMod);
+}
+
+void MiXXynthProcessor::MpeHandler::notePitchbendChanged (juce::MPENote note)
+{
+    if (! proc.mpeActive)
+        return;
+
+    // totalPitchbendInSemitones already folds in the zone's per-note bend range.
+    proc.voiceManager.setNotePitchBend (note.midiChannel, note.initialNote,
+                                        static_cast<float> (note.totalPitchbendInSemitones));
+}
+
+void MiXXynthProcessor::MpeHandler::notePressureChanged (juce::MPENote note)
+{
+    if (! proc.mpeActive)
+        return;
+
+    proc.voiceManager.setNotePressure (note.midiChannel, note.initialNote,
+                                       note.pressure.asUnsignedFloat());
+}
+
+void MiXXynthProcessor::MpeHandler::noteTimbreChanged (juce::MPENote note)
+{
+    if (! proc.mpeActive)
+        return;
+
+    proc.voiceManager.setNoteTimbre (note.midiChannel, note.initialNote,
+                                     note.timbre.asUnsignedFloat());
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
