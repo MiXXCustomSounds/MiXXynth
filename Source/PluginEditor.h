@@ -120,6 +120,10 @@ public:
     // Card and control counts plus a zero-bounds tally, for the audit.
     juce::String fxDebug() const;
 
+    // What a Mod tab row is currently displaying, for the audit. A drag-and-drop
+    // desync is invisible in the parameters, so it has to be checked here.
+    juce::String modDebug (int slot) const;
+
     // Geometry dump for the editor audit (performance bar layout).
     juce::String perfBarDebug() const
     {

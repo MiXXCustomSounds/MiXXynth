@@ -287,6 +287,25 @@ int main()
     check (std::abs (slotDepth (0)) > 0.0001f, "drop gives a non-zero depth",
            juce::String (slotDepth (0)));
 
+    // ---- The Mod tab must follow a drag-and-drop ----
+    // Everything above was already true while the bug was live: the parameters were
+    // always correct. The tab went on showing Off because its rows bound their
+    // combos once in the constructor and never looked at the parameters again, so
+    // the check has to be on what the ROW displays, not on the parameters.
+    miXXEditor->runTabPolls();
+
+    {
+        const auto row = miXXEditor->modDebug (0);
+
+        check (row.contains ("srcId=" + juce::String (mixxynth::srcLfo1 + 1)),
+               "the Mod tab follows a drag-and-drop", row);
+        check (row.contains ("dstId=" + juce::String (mixxynth::dstFmIndex + 1)),
+               "the Mod tab shows the dropped destination", row);
+        check (row.contains ("srcText="
+                              + juce::String (mixxynth::modSourceNames()[mixxynth::srcLfo1])),
+               "the Mod tab names the source", row);
+    }
+
     miXXEditor->assignModSlot (mixxynth::srcLfo1, mixxynth::dstFmIndex);
     check (slotDst (1) == mixxynth::dstOff, "same pair reuses its slot", juce::String (slotDst (1)));
 
@@ -365,6 +384,41 @@ int main()
 
     miXXEditor->clearModDest (mixxynth::dstVaPulseWidth);
     miXXEditor->refreshModRings();
+
+    // ---- A knob with two sources must have BOTH arcs draggable ----
+    // The old code always grabbed assignments.front(), so a second source on the
+    // same knob could only be changed through the right-click menu. That is the
+    // "hidden in the menu" half of the complaint, and it is a geometry claim, so it
+    // is checked as geometry rather than by screenshot.
+    {
+        for (int n = 0; n < mixxynth::kNumModSlots; ++n)
+            miXXEditor->clearModDest (slotDst (n));
+
+        miXXEditor->assignModSlot (mixxynth::srcLfo1, mixxynth::dstFmIndex);
+        miXXEditor->assignModSlot (mixxynth::srcMacro1, mixxynth::dstFmIndex);
+        miXXEditor->refreshModRings();
+
+        mixxynth::ui::ModKnob* knob = nullptr;
+
+        for (auto* k : miXXEditor->modKnobs)
+            if (k->getParamID() == "fmIndex" && k->getNumAssignments() == 2)
+                knob = k;
+
+        check (knob != nullptr, "the FM Index knob collected both sources", "");
+
+        if (knob != nullptr)
+        {
+            check (knob->ringIndexAtForTest (knob->arcPointForTest (0)) == 0,
+                   "the first modulation arc is grabbable", "");
+            check (knob->ringIndexAtForTest (knob->arcPointForTest (1)) == 1,
+                   "the second modulation arc is grabbable too", "");
+        }
+
+        for (int n = 0; n < mixxynth::kNumModSlots; ++n)
+            miXXEditor->clearModDest (slotDst (n));
+
+        miXXEditor->refreshModRings();
+    }
 
     // Pulse Width is now a modulation destination, which the page's own text
     // claims and the DSP honours.

@@ -80,6 +80,20 @@ namespace mixxynth::ui
         // overwriting the in-progress value.
         bool isAdjustingRing() const noexcept { return draggingRing; }
 
+        // For the editor audit. "A second source is draggable" is a geometry claim
+        // that a screenshot cannot verify, so expose both halves of it: a point
+        // sitting on an arc, and which arc a point would grab.
+        juce::Point<int> arcPointForTest (int index) const
+        {
+            const auto sq = dialArea();
+            const float r = arcRadiusFor (index);
+
+            return juce::Point<int> (juce::roundToInt (sq.getCentreX()),
+                                     juce::roundToInt (sq.getCentreY() - r));
+        }
+
+        int ringIndexAtForTest (juce::Point<int> pos) const { return ringIndexAt (pos); }
+
         std::function<void (int srcIndex, int destIndex)> onSourceDropped;
         std::function<void (int destIndex)> onClearRequested;
         std::function<void (int srcIndex, int destIndex, float depth)> onModDepthChanged;
@@ -100,13 +114,32 @@ namespace mixxynth::ui
         void showMenu();
         void handleMenuResult (int result);
         juce::Rectangle<float> dialArea() const;
-        bool isOverRing (juce::Point<int> pos) const;
+
+        // Index into `assignments` of the arc under this point, or -1.
+        //
+        // Arcs step outwards from the dial edge, so several can be live at once and
+        // the nearest one wins. The old code assumed there was only ever one
+        // draggable arc, which is why a knob with two sources could only have its
+        // first one adjusted by dragging.
+        int ringIndexAt (juce::Point<int> pos) const;
+
+        // Where an arc sits, in dial-local coordinates.
+        float arcRadiusFor (int index) const;
+
+        // The knob's own normalised value, which the arcs are anchored to.
+        float value01() const;
+
 
         // The ring has to stay grabbable without eating the dial on small knobs,
         // so it scales with the cell rather than being a fixed width.
+        //
+        // Wider than it looks like it needs to be, because up to three arcs stack
+        // outwards from the dial edge at 3.5 px apart. At the old 5-13 px the
+        // outermost arc had nowhere to live and the band was too thin to hit
+        // reliably.
         static int ringWidthFor (int shortSide)
         {
-            return juce::jlimit (5, 13, shortSide / 7);
+            return juce::jlimit (10, 22, shortSide / 5);
         }
 
         sst::jucegui::components::Knob knob;
@@ -120,9 +153,13 @@ namespace mixxynth::ui
         bool dragOver = false;
         bool rejectFlash = false;
         bool labelVisible = true;
-        bool overRing = false;
+
+        // Which arc the pointer is over, or -1. Replaces a bool, because more than
+        // one arc can be live and the hover highlight has to follow the right one.
+        int overRingIndex = -1;
 
         bool draggingRing = false;
+        int ringDragIndex = 0;   // index into `assignments`, not a source index
         int ringDragSrc = 0;
         float ringDragStartDepth = 0.0f;
         float ringDragStartY = 0.0f;

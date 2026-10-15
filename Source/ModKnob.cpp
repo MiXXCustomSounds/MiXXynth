@@ -86,13 +86,52 @@ juce::Rectangle<float> ModKnob::dialArea() const
     return b.withSizeKeepingCentre (size, size).toFloat();
 }
 
-bool ModKnob::isOverRing (juce::Point<int> pos) const
+float ModKnob::value01() const
 {
-    const auto sq = dialArea();
-    const float radius = sq.getWidth() * 0.5f;
-    const float d = pos.toFloat().getDistanceFrom (sq.getCentre());
+    return source.p != nullptr ? juce::jlimit (0.0f, 1.0f, source.p->getValue()) : 0.0f;
+}
 
-    return d > radius - 3.0f && d <= radius + static_cast<float> (ringWidthFor (getWidth()));
+// Arcs stack outwards from the dial edge so several sources on one knob stay
+// individually readable and individually grabbable.
+float ModKnob::arcRadiusFor (int index) const
+{
+    const float baseRadius = dialArea().getWidth() * 0.5f;
+
+    return baseRadius + 3.5f + static_cast<float> (juce::jmax (0, index)) * 3.5f;
+}
+
+int ModKnob::ringIndexAt (juce::Point<int> pos) const
+{
+    if (assignments.empty())
+        return -1;
+
+    const auto sq = dialArea();
+    const auto centre = sq.getCentre();
+    const float d = pos.toFloat().getDistanceFrom (centre);
+
+    // The band has to be generous: a 2 px target is not a target. Each arc owns a
+    // slot of the ring band and the nearest one wins, so overlapping bands resolve
+    // to the arc the pointer is actually closest to.
+    const int shown = juce::jmin (static_cast<int> (assignments.size()), 3);
+
+    int best = -1;
+    float bestDistance = std::numeric_limits<float>::max();
+
+    for (int i = 0; i < shown; ++i)
+    {
+        const float r = arcRadiusFor (i);
+        const float distance = std::abs (d - r);
+
+        // Half the arc spacing, plus a little, so there are no dead gaps between
+        // adjacent arcs and the innermost one is reachable from the dial edge.
+        if (distance <= 3.5f && distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = i;
+        }
+    }
+
+    return best;
 }
 
 void ModKnob::resized()
@@ -133,32 +172,43 @@ void ModKnob::paint (juce::Graphics& g)
     if (assignments.empty())
         return;
 
-    // One arc per assigned source, stepping outwards so several sources on the
-    // same knob stay individually readable.
+    // One arc per assigned source, each drawn FROM THE KNOB'S CURRENT VALUE outward
+    // to value + depth. That is the Serum and Vital convention, and it is what makes
+    // the ring readable at a glance: you can see where the knob sits and how far the
+    // modulation will push it, rather than having to infer both.
     const auto sq = dialArea();
     const auto centre = sq.getCentre();
-    const float baseRadius = sq.getWidth() * 0.5f;
+    const float v = value01();
     const int shown = juce::jmin (static_cast<int> (assignments.size()), 3);
+
+    // Knob convention: value 0 sits at -135 degrees and 1 at +135, measured
+    // clockwise from twelve o'clock, which is how addCentredArc reads angles.
+    auto angleFor = [] (float x)
+    {
+        return (juce::jlimit (0.0f, 1.0f, x) - 0.5f) * 1.5f * juce::MathConstants<float>::pi;
+    };
 
     for (int i = 0; i < shown; ++i)
     {
         const auto& a = assignments[static_cast<size_t> (i)];
-        const bool isDragged = draggingRing && a.source == ringDragSrc;
+        const bool isDragged = draggingRing && ringDragIndex == i;
         const float depth = isDragged ? ringDragDepth : a.depth;
-        const float radius = baseRadius + 3.0f + static_cast<float> (i) * 3.5f;
-        const float sweep = juce::jlimit (-1.0f, 1.0f, depth) * juce::MathConstants<float>::pi;
+
+        const float from = angleFor (v);
+        const float to = angleFor (v + depth);
+        const float radius = arcRadiusFor (i);
 
         juce::Path p;
-        p.addCentredArc (centre.x, centre.y, radius, radius, 0.0f,
-                         -juce::MathConstants<float>::halfPi,
-                         -juce::MathConstants<float>::halfPi + sweep, true);
+        p.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, from, to, true);
 
-        if (i == 0)
+        if (isDragged || overRingIndex == i)
             g.setColour (depth >= 0.0f ? juce::Colour (0xff4ade80) : juce::Colour (0xfff87171));
         else
-            g.setColour (juce::Colour (0xffa78bfa)); // additional sources
+            g.setColour (i == 0 ? juce::Colour (0xff3f9e63) : juce::Colour (0xff7c6bc4));
 
-        g.strokePath (p, juce::PathStrokeType (isDragged || (overRing && i == 0) ? 3.2f : 2.2f));
+        g.strokePath (p, juce::PathStrokeType (isDragged || overRingIndex == i ? 3.6f : 2.4f,
+                                               juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
     }
 
     // A hint that there are more sources than fit in the ring band.
@@ -220,22 +270,22 @@ void ModKnob::timerCallback()
 
 void ModKnob::mouseMove (const juce::MouseEvent& e)
 {
-    const bool over = ! assignments.empty() && isOverRing (e.getPosition());
+    const int index = ringIndexAt (e.getPosition());
 
-    if (over != overRing)
+    if (index != overRingIndex)
     {
-        overRing = over;
-        setMouseCursor (over ? juce::MouseCursor::UpDownResizeCursor
-                             : juce::MouseCursor::NormalCursor);
+        overRingIndex = index;
+        setMouseCursor (index >= 0 ? juce::MouseCursor::UpDownResizeCursor
+                                   : juce::MouseCursor::NormalCursor);
         repaint();
     }
 }
 
 void ModKnob::mouseExit (const juce::MouseEvent&)
 {
-    if (overRing)
+    if (overRingIndex >= 0)
     {
-        overRing = false;
+        overRingIndex = -1;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         repaint();
     }
@@ -251,11 +301,19 @@ void ModKnob::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (! assignments.empty() && isOverRing (e.getPosition()))
+    const int index = ringIndexAt (e.getPosition());
+
+    if (index >= 0 && index < static_cast<int> (assignments.size()))
     {
+        // Drag whichever arc was grabbed, not always the first one. A knob with two
+        // sources previously had one draggable arc and one that could only be
+        // reached through the right-click menu.
+        const auto& a = assignments[static_cast<size_t> (index)];
+
         draggingRing = true;
-        ringDragSrc = assignments.front().source;
-        ringDragStartDepth = assignments.front().depth;
+        ringDragIndex = index;
+        ringDragSrc = a.source;
+        ringDragStartDepth = a.depth;
         ringDragDepth = ringDragStartDepth;
         ringDragStartY = e.position.y;
         repaint();

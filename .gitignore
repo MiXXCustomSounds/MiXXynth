@@ -37,3 +37,4 @@ screenshot*.png
 crop-*.png
 # Local build logs
 build*.log
+shot-*.png

@@ -989,14 +989,19 @@ namespace
         {
             const juce::String n = juce::String (index + 1);
 
-            if (auto* srcParam = choice (p, "mod" + n + "src"))
+            srcParam = choice (p, "mod" + n + "src");
+
+            if (srcParam != nullptr)
             {
                 for (int i = 0; i < srcParam->choices.size(); ++i)
                     src.addItem (srcParam->choices[i], i + 1);
 
                 src.setSelectedId (srcParam->getIndex() + 1, juce::dontSendNotification);
-                src.onChange = [this, srcParam]
+                src.onChange = [this]
                 {
+                    if (srcParam == nullptr)
+                        return;
+
                     srcParam->beginChangeGesture();
                     srcParam->setValueNotifyingHost (
                         srcParam->convertTo0to1 (static_cast<float> (src.getSelectedId() - 1)));
@@ -1004,14 +1009,19 @@ namespace
                 };
             }
 
-            if (auto* dstParam = choice (p, "mod" + n + "dst"))
+            dstParam = choice (p, "mod" + n + "dst");
+
+            if (dstParam != nullptr)
             {
                 for (int i = 0; i < dstParam->choices.size(); ++i)
                     dst.addItem (dstParam->choices[i], i + 1);
 
                 dst.setSelectedId (dstParam->getIndex() + 1, juce::dontSendNotification);
-                dst.onChange = [this, dstParam]
+                dst.onChange = [this]
                 {
+                    if (dstParam == nullptr)
+                        return;
+
                     dstParam->beginChangeGesture();
                     dstParam->setValueNotifyingHost (
                         dstParam->convertTo0to1 (static_cast<float> (dst.getSelectedId() - 1)));
@@ -1053,6 +1063,51 @@ namespace
             addAndMakeVisible (clear);
         }
 
+        // Re-reads the three parameters this row drives.
+        //
+        // The combos are bound by hand in the constructor, so without this a slot
+        // assigned by DRAGGING A CHIP ONTO A KNOB - which writes exactly these
+        // parameters - leaves the row still showing Off. That was the whole of the
+        // "drag and drop does not sync with the modulation matrix" bug: the
+        // parameters were always correct, and this tab simply never looked again.
+        //
+        // Guarded so it cannot fight the user: an open combo popup or a knob being
+        // dragged is left alone, and the timer picks it up on the next tick.
+        void poll()
+        {
+            if (srcParam != nullptr && ! src.isPopupActive())
+            {
+                const int id = srcParam->getIndex() + 1;
+
+                if (src.getSelectedId() != id)
+                    src.setSelectedId (id, juce::dontSendNotification);
+            }
+
+            if (dstParam != nullptr && ! dst.isPopupActive())
+            {
+                const int id = dstParam->getIndex() + 1;
+
+                if (dst.getSelectedId() != id)
+                    dst.setSelectedId (id, juce::dontSendNotification);
+            }
+
+            if (depth != nullptr && ! depth->isAdjustingRing())
+                depth->refreshFromParam();
+        }
+
+        // For the audit: what this row is actually SHOWING. The bug this exists to
+        // catch was invisible in the parameters and visible only here.
+        juce::String debugDump() const
+        {
+            juce::String s;
+            s << "srcId=" << src.getSelectedId()
+              << " srcText=" << src.getText()
+              << " dstId=" << dst.getSelectedId()
+              << " dstText=" << dst.getText();
+
+            return s;
+        }
+
         void resized() override
         {
             auto b = getLocalBounds().reduced (2);
@@ -1070,6 +1125,8 @@ namespace
     private:
         juce::Label label;
         juce::ComboBox src, dst;
+        juce::AudioParameterChoice* srcParam = nullptr;
+        juce::AudioParameterChoice* dstParam = nullptr;
         ModKnob* depth = nullptr;
         juce::TextButton clear;
     };
@@ -1100,6 +1157,25 @@ public:
         viewport.setScrollBarsShown (true, false);
         addAndMakeVisible (viewport);
 
+    }
+
+    // The rows are bound by hand, so they need an explicit refresh. Without this a
+    // slot assigned by dragging a chip onto a knob leaves this tab still showing
+    // Off, which is exactly what it used to do - the parameters were always
+    // correct, the tab just never looked again.
+    void poll()
+    {
+        for (auto* row : rows)
+            row->poll();
+    }
+
+    // For the audit.
+    juce::String debugDump (int slot) const
+    {
+        if (slot < 0 || slot >= rows.size())
+            return "out of range";
+
+        return rows[slot]->debugDump();
     }
 
     void paint (juce::Graphics& g) override
@@ -2345,6 +2421,11 @@ juce::String MiXXynthEditor::fxDebug() const
     return fxPage != nullptr ? fxPage->debugDump() : juce::String ("no page");
 }
 
+juce::String MiXXynthEditor::modDebug (int slot) const
+{
+    return modPage != nullptr ? modPage->debugDump (slot) : juce::String ("no page");
+}
+
 void MiXXynthEditor::runTabPolls()
 {
     // The matrix page watches for routing edits that need to switch the patch
@@ -2364,6 +2445,11 @@ void MiXXynthEditor::runTabPolls()
     // The FX page watches the slot types so a preset load repopulates the rack.
     if (fxPage != nullptr)
         fxPage->poll();
+
+    // The Mod tab's rows are hand-bound, so they need polling too - otherwise a
+    // modulation slot created by dragging a chip onto a knob never shows up here.
+    if (modPage != nullptr)
+        modPage->poll();
 }
 
 void MiXXynthEditor::rollFmDice()
