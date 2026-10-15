@@ -22,6 +22,7 @@ namespace mixxynth::ui
     // is rejected with a visible flash instead of silently doing nothing.
     class ModKnob : public juce::Component,
                     public juce::DragAndDropTarget,
+                    public sst::jucegui::data::Continuous::DataListener,
                     private juce::Timer
     {
     public:
@@ -47,6 +48,13 @@ namespace mixxynth::ui
         void itemDropped (const SourceDetails&) override;
 
         int getDestIndex() const { return dest; }
+
+        // The modulation arcs are drawn by THIS component, outside the bounds of the
+        // sst knob child, so repainting only the child leaves them stale. That is
+        // why the arcs are anchored to the knob's value now: a stale arc used to be
+        // indistinguishable from a fresh one, and it is not any more.
+        void dataChanged() override { repaint(); }
+        void sourceVanished (sst::jucegui::data::Continuous*) override {}
 
         // True when this knob is a valid modulation destination.
         bool isModTarget() const { return dest != 0; }
@@ -93,6 +101,13 @@ namespace mixxynth::ui
         }
 
         int ringIndexAtForTest (juce::Point<int> pos) const { return ringIndexAt (pos); }
+
+        // The angular span arc `index` currently covers, in radians clockwise from
+        // twelve o'clock. It depends on the knob's VALUE, which is precisely why the
+        // parent has to repaint when the value moves - the bug this replaced was a
+        // stale arc, and it was invisible while the arc was anchored to a fixed
+        // angle instead.
+        std::pair<float, float> arcAnglesForTest (int index) const;
 
         std::function<void (int srcIndex, int destIndex)> onSourceDropped;
         std::function<void (int destIndex)> onClearRequested;

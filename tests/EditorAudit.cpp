@@ -412,6 +412,35 @@ int main()
                    "the first modulation arc is grabbable", "");
             check (knob->ringIndexAtForTest (knob->arcPointForTest (1)) == 1,
                    "the second modulation arc is grabbable too", "");
+
+            // The arc is anchored to the knob's value, so it has to MOVE when the
+            // value moves. It is drawn by the ModKnob, outside the sst knob child's
+            // bounds, so a parent that does not repaint leaves it frozen - which is
+            // exactly the bug this replaced, and it was invisible while the arc
+            // swept from a fixed angle instead.
+            const auto before = knob->arcAnglesForTest (0);
+
+            if (auto* p = proc.apvts.getParameter ("fmIndex"))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (0.9f);
+                p->endChangeGesture();
+            }
+
+            const auto after = knob->arcAnglesForTest (0);
+
+            check (! juce::approximatelyEqual (before.first, after.first)
+                     && after.first > before.first,
+                   "the modulation arc follows the knob's value",
+                   juce::String (before.first, 3) + " -> " + juce::String (after.first, 3));
+
+            // Put it back, so the rest of the audit sees a predictable patch.
+            if (auto* p = proc.apvts.getParameter ("fmIndex"))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (0.0f);
+                p->endChangeGesture();
+            }
         }
 
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)

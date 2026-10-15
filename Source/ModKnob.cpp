@@ -15,6 +15,14 @@ namespace
     {
         return (d >= 0.0f ? "+" : "") + juce::String (d, 2);
     }
+
+    // Knob convention: value 0 sits at -135 degrees and 1 at +135, measured
+    // clockwise from twelve o'clock, which is how addCentredArc reads angles and
+    // what the sst dial uses for its own indicator.
+    float angleForValue (float x)
+    {
+        return (juce::jlimit (0.0f, 1.0f, x) - 0.5f) * 1.5f * juce::MathConstants<float>::pi;
+    }
 }
 
 ModKnob::ModKnob (const juce::String& labelText,
@@ -33,13 +41,26 @@ ModKnob::ModKnob (const juce::String& labelText,
     // instead of forwarding them, so the menu has to be hooked here rather than
     // in our own mouseDown override.
     knob.onPopupMenu = [this] (const juce::ModifierKeys&) { showMenu(); };
+
+    // Listen to the parameter as well as the knob widget. The widget repaints
+    // itself, which covers the dial, but the modulation arcs live outside it and
+    // are drawn here - so without this the arcs sit at whatever value the knob had
+    // when they were last painted.
+    source.addGUIDataListener (this);
 }
 
-ModKnob::~ModKnob() = default;
+ModKnob::~ModKnob()
+{
+    // Must happen before `source` is destroyed: its destructor walks the listener
+    // list calling sourceVanished, and by then this object is gone.
+    source.removeGUIDataListener (this);
+}
 
 void ModKnob::refreshFromParam()
 {
+    // The dial is a child; the arcs are ours. Repaint both.
     knob.repaint();
+    repaint();
 }
 
 void ModKnob::setModDepth (float d)
@@ -89,6 +110,17 @@ juce::Rectangle<float> ModKnob::dialArea() const
 float ModKnob::value01() const
 {
     return source.p != nullptr ? juce::jlimit (0.0f, 1.0f, source.p->getValue()) : 0.0f;
+}
+
+std::pair<float, float> ModKnob::arcAnglesForTest (int index) const
+{
+    if (index < 0 || index >= static_cast<int> (assignments.size()))
+        return { 0.0f, 0.0f };
+
+    const float v = value01();
+    const float depth = assignments[static_cast<size_t> (index)].depth;
+
+    return { angleForValue (v), angleForValue (v + depth) };
 }
 
 // Arcs stack outwards from the dial edge so several sources on one knob stay
@@ -181,21 +213,14 @@ void ModKnob::paint (juce::Graphics& g)
     const float v = value01();
     const int shown = juce::jmin (static_cast<int> (assignments.size()), 3);
 
-    // Knob convention: value 0 sits at -135 degrees and 1 at +135, measured
-    // clockwise from twelve o'clock, which is how addCentredArc reads angles.
-    auto angleFor = [] (float x)
-    {
-        return (juce::jlimit (0.0f, 1.0f, x) - 0.5f) * 1.5f * juce::MathConstants<float>::pi;
-    };
-
     for (int i = 0; i < shown; ++i)
     {
         const auto& a = assignments[static_cast<size_t> (i)];
         const bool isDragged = draggingRing && ringDragIndex == i;
         const float depth = isDragged ? ringDragDepth : a.depth;
 
-        const float from = angleFor (v);
-        const float to = angleFor (v + depth);
+        const float from = angleForValue (v);
+        const float to = angleForValue (v + depth);
         const float radius = arcRadiusFor (i);
 
         juce::Path p;
