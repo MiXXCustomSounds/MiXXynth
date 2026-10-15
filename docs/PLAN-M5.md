@@ -1,6 +1,7 @@
 # M5 plan — modulation UX, module expansion, presets, visual world
 
-Status: **planning**. No code has been changed for M5 yet.
+Status: **in progress**. Workstream 1 (modulation UX) is done and pushed as
+`be5266c`. Workstreams 2-10 are planned but not started.
 
 Restore point created before any M5 work, and pushed:
 
