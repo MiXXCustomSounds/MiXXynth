@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 
+#include "Algorithms.h"
 #include "EditorTheme.h"
 #include "ModMatrix.h"
 #include "PluginProcessor.h"
@@ -427,8 +428,7 @@ private:
     void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
     {
         auto* k = new ModKnob (label, param, dest, true);
-        k->onSourceDropped = [this] (int s, int d) { ed.assignModSlot (s, d); };
-        k->onClearRequested = [this] (int d) { ed.clearModDest (d); };
+        ed.wireModKnob (*k);
         addAndMakeVisible (k);
         ed.modKnobs.push_back (k);
         owned.add (k);
@@ -459,22 +459,24 @@ public:
                 if (s == d)
                     continue;
 
-                const juce::String label = "Op" + juce::String (s + 1) + ">" + juce::String (d + 1);
+                const juce::String label = "Op" + juce::String (s + 1) + " > " + juce::String (d + 1);
                 const juce::String id = "mtx" + juce::String (s + 1) + juce::String (d + 1);
 
                 auto* k = new ModKnob (label, ranged (p, id), matrixDestFor (s, d), true);
-                k->onSourceDropped = [this] (int src, int dst) { ed.assignModSlot (src, dst); };
-                k->onClearRequested = [this] (int dst) { ed.clearModDest (dst); };
+                ed.wireModKnob (*k);
                 addAndMakeVisible (k);
                 ed.modKnobs.push_back (k);
                 owned.add (k);
                 knobs.add (k);
+                mtxIds.add (id);
             }
         }
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
             const juce::String n = juce::String (i + 1);
+            carrierIds.add ("carrier" + n);
+
             auto* t = new juce::ToggleButton ("Op" + n + " carrier");
             carrierToggles.add (t);
             addAndMakeVisible (t);
@@ -490,21 +492,123 @@ public:
                 };
             }
         }
+
+        copyButton.setButtonText ("Copy algorithm to matrix");
+        copyButton.onClick = [this]
+        {
+            copyAlgorithmToMatrix (algorithmIndex());
+            setAlgorithmFree();
+            refreshSnapshots();
+            refreshMode();
+            ed.setModStatus ("Algorithm copied into the matrix; routing is now Free");
+        };
+        addAndMakeVisible (copyButton);
+
+        freeButton.setButtonText ("Free mode");
+        freeButton.onClick = [this] { setAlgorithmFree(); refreshMode(); };
+        addAndMakeVisible (freeButton);
+
+        modeLabel.setJustificationType (juce::Justification::centredLeft);
+        modeLabel.setFont (juce::FontOptions (11.5f));
+        addAndMakeVisible (modeLabel);
+
+        refreshSnapshots();
+        refreshMode();
     }
 
-    void paint (juce::Graphics& g) override
+    // Driven from the editor's timer. The routing knobs used to be dead whenever
+    // an algorithm preset was selected, because the processor overwrites the
+    // matrix from the algorithm table. Now editing a routing knob (or a carrier
+    // switch) while an algorithm is in charge seeds the matrix from that
+    // algorithm, re-applies the edit on top, and switches to Free mode.
+    void poll()
     {
-        g.setColour (juce::Colour (0xff8b98a5));
-        g.setFont (11.5f);
-        g.drawFittedText ("Routing depths (modulator > carrier). In Free algorithm mode these define the patch; "
-                          "an algorithm preset overrides them. Carrier switches choose what reaches the output.",
-                          getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
+        const int algo = algorithmIndex();
+
+        // A preset or project load replaces every parameter at once. Resync the
+        // snapshots instead of reading that as a routing edit and switching the
+        // patch into Free mode behind the user's back.
+        if (ed.processor().getStateLoadCount() != lastStateLoad)
+        {
+            lastStateLoad = ed.processor().getStateLoadCount();
+            refreshSnapshots();
+            refreshMode();
+            return;
+        }
+
+        if (algo != lastAlgo)
+        {
+            // Leaving an algorithm for Free mode would otherwise drop to silence,
+            // so seed the matrix from the algorithm we are leaving.
+            if (algo >= mixxynth::kNumAlgorithms && lastAlgo < mixxynth::kNumAlgorithms
+                  && matrixIsSilent())
+                copyAlgorithmToMatrix (lastAlgo);
+
+            lastAlgo = algo;
+            refreshSnapshots();
+            refreshMode();
+            return;
+        }
+
+        if (algo >= mixxynth::kNumAlgorithms)
+            return; // already Free: edits are live, nothing to migrate
+
+        int changedMtx = -1;
+        float changedMtxValue = 0.0f;
+        int changedCarrier = -1;
+        bool changedCarrierValue = false;
+
+        for (int i = 0; i < mtxIds.size(); ++i)
+        {
+            const float v = readParam (mtxIds[i]);
+
+            if (! juce::approximatelyEqual (v, lastMtx[static_cast<size_t> (i)]))
+            {
+                changedMtx = i;
+                changedMtxValue = v;
+            }
+        }
+
+        for (int i = 0; i < carrierIds.size(); ++i)
+        {
+            const float v = readParam (carrierIds[i]);
+
+            if (! juce::approximatelyEqual (v, lastCarrier[static_cast<size_t> (i)]))
+            {
+                changedCarrier = i;
+                changedCarrierValue = v > 0.5f;
+            }
+        }
+
+        if (changedMtx < 0 && changedCarrier < 0)
+            return;
+
+        copyAlgorithmToMatrix (algo);
+        setAlgorithmFree();
+
+        // Re-apply the edit that triggered the switch, on top of the copy.
+        if (changedMtx >= 0)
+            writeParam (mtxIds[changedMtx], changedMtxValue);
+
+        if (changedCarrier >= 0)
+            writeParam (carrierIds[changedCarrier], changedCarrierValue ? 1.0f : 0.0f);
+
+        refreshSnapshots();
+        refreshMode();
+
+        ed.setModStatus ("Routing edit switched the algorithm to Free mode");
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (8);
-        b.removeFromTop (18);
+
+        auto banner = b.removeFromTop (26);
+        copyButton.setBounds (banner.removeFromRight (176).reduced (2, 0));
+        freeButton.setBounds (banner.removeFromRight (86).reduced (2, 0));
+        modeLabel.setBounds (banner.reduced (2, 0));
+
+        b.removeFromTop (4);
 
         auto carriers = b.removeFromBottom (26);
 
@@ -533,12 +637,111 @@ public:
     }
 
 private:
+    static constexpr int numMtx = MiXXFmVoice::numOps * (MiXXFmVoice::numOps - 1);
+
+    int algorithmIndex()
+    {
+        if (auto* a = choice (ed.processor(), "algorithm"))
+            return a->getIndex();
+
+        return 0;
+    }
+
+    float readParam (const juce::String& id)
+    {
+        if (auto* p = ranged (ed.processor(), id))
+            return p->convertFrom0to1 (p->getValue());
+
+        return 0.0f;
+    }
+
+    void writeParam (const juce::String& id, float realValue)
+    {
+        if (auto* p = ranged (ed.processor(), id))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->convertTo0to1 (realValue));
+            p->endChangeGesture();
+        }
+    }
+
+    void setAlgorithmFree()
+    {
+        if (auto* a = choice (ed.processor(), "algorithm"))
+        {
+            a->beginChangeGesture();
+            a->setValueNotifyingHost (a->convertTo0to1 (static_cast<float> (mixxynth::kNumAlgorithms)));
+            a->endChangeGesture();
+        }
+    }
+
+    void copyAlgorithmToMatrix (int algoIndex)
+    {
+        if (algoIndex < 0 || algoIndex >= mixxynth::kNumAlgorithms)
+            return;
+
+        const auto& algo = mixxynth::algorithmTable()[static_cast<size_t> (algoIndex)];
+
+        for (int s = 0; s < MiXXFmVoice::numOps; ++s)
+            for (int d = 0; d < MiXXFmVoice::numOps; ++d)
+                if (s != d)
+                    writeParam ("mtx" + juce::String (s + 1) + juce::String (d + 1),
+                                algo.mod[static_cast<size_t> (s)][static_cast<size_t> (d)]);
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            writeParam ("carrier" + juce::String (i + 1),
+                        algo.carrier[static_cast<size_t> (i)] ? 1.0f : 0.0f);
+    }
+
+    bool matrixIsSilent()
+    {
+        for (const auto& id : mtxIds)
+            if (readParam (id) > 0.0001f)
+                return false;
+
+        return true;
+    }
+
+    void refreshSnapshots()
+    {
+        for (int i = 0; i < mtxIds.size(); ++i)
+            lastMtx[static_cast<size_t> (i)] = readParam (mtxIds[i]);
+
+        for (int i = 0; i < carrierIds.size(); ++i)
+            lastCarrier[static_cast<size_t> (i)] = readParam (carrierIds[i]);
+
+        lastAlgo = algorithmIndex();
+    }
+
+    void refreshMode()
+    {
+        const int algo = algorithmIndex();
+        const bool free = algo >= mixxynth::kNumAlgorithms;
+
+        modeLabel.setText (free
+                             ? "Free (matrix) routing: these depths and switches define the patch."
+                             : "Algorithm " + juce::String (algo + 1)
+                                 + " defines the routing. Move a knob or switch to copy it here and go Free.",
+                           juce::dontSendNotification);
+
+        modeLabel.setColour (juce::Label::textColourId,
+                             free ? juce::Colour (0xff4ade80) : juce::Colour (0xffffa63d));
+
+        copyButton.setEnabled (! free);
+    }
+
     MiXXynthEditor& ed;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs;
     juce::OwnedArray<juce::ToggleButton> carrierToggles;
+    juce::StringArray mtxIds, carrierIds;
+    juce::Label modeLabel;
+    juce::TextButton copyButton, freeButton;
+    std::array<float, numMtx> lastMtx {};
+    std::array<float, MiXXFmVoice::numOps> lastCarrier {};
+    int lastAlgo = 0;
+    int lastStateLoad = 0;
 };
-
 // ---------------------------------------------------------------------------
 // One modulation slot: source, destination, bipolar depth, clear
 // ---------------------------------------------------------------------------
@@ -703,13 +906,13 @@ public:
 
         addKnob (ranged (p, "vaLevel"), mixxynth::dstVaLevel, "VA Level");
         addKnob (ranged (p, "vaDetune"), mixxynth::dstVaDetune, "VA Detune");
-        addKnob (ranged (p, "vaPulseWidth"), mixxynth::dstOff, "Pulse Width");
+        addKnob (ranged (p, "vaPulseWidth"), mixxynth::dstVaPulseWidth, "Pulse Width");
         addKnob (ranged (p, "filterCutoff"), mixxynth::dstFilterCutoff, "Cutoff");
         addKnob (ranged (p, "filterReso"), mixxynth::dstFilterReso, "Resonance");
         addKnob (ranged (p, "filterDrive"), mixxynth::dstFilterDrive, "Drive");
 
-        addChoice (p, "vaWave", "Wave", wave);
-        addChoice (p, "filterType", "Filter", filterType);
+        addChoice (p, "vaWave", wave);
+        addChoice (p, "filterType", filterType);
 
         filterOn = addToggle (p, "filterOn", "Filter On");
 
@@ -731,21 +934,55 @@ public:
 
         octaveLabel.setText ("Octave", juce::dontSendNotification);
         addAndMakeVisible (octaveLabel);
+
+        hint.setJustificationType (juce::Justification::centredLeft);
+        hint.setFont (juce::FontOptions (11.0f));
+        hint.setColour (juce::Label::textColourId, juce::Colour (0xff4ade80));
+        addAndMakeVisible (hint);
+        refreshHint();
+    }
+
+    // Driven from the editor's timer: spells out what the VA layer and filter are
+    // actually doing, so a page full of knobs is never silently inert.
+    void refreshHint()
+    {
+        const float va = juce::jlimit (0.0f, 1.0f, readParam ("vaLevel"));
+        const bool filterActive = readParam ("filterOn") > 0.5f;
+        const float cut = readParam ("filterCutoff");
+        const float reso = readParam ("filterReso");
+        const int type = static_cast<int> (readParam ("filterType"));
+
+        static const char* const typeNames[] = { "Low Pass", "High Pass", "Band Pass" };
+
+        const int vaPercent = juce::roundToInt (va * 100.0f);
+
+        juce::String s;
+        s << (vaPercent <= 0 ? juce::String ("FM only (VA Level is 0)")
+                             : "VA " + juce::String (vaPercent) + "% / FM " + juce::String (100 - vaPercent) + "%")
+          << "   |   Filter: ";
+
+        if (filterActive)
+            s << typeNames[juce::jlimit (0, 2, type)] << " " << juce::String (cut, 0) << " Hz, Q "
+              << juce::String (reso, 2);
+        else
+            s << "bypassed (turn Filter On)";
+
+        hint.setText (s, juce::dontSendNotification);
     }
 
     void paint (juce::Graphics& g) override
     {
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("VA oscillator blends with the FM stack; the filter is per voice. "
-                          "All of these are modulation destinations.",
-                          getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
+        g.drawFittedText ("VA Level crossfades the VA oscillator against the FM stack (0 = FM only). "
+                          "The filter is per voice and all six knobs are modulation destinations.",
+                          getLocalBounds().removeFromTop (32), juce::Justification::centredLeft, 2);
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (10);
-        b.removeFromTop (18);
+        b.removeFromTop (34);
 
         auto row = b.removeFromTop (96);
 
@@ -769,14 +1006,24 @@ public:
 
         if (filterOn != nullptr)
             filterOn->setBounds (controls.removeFromLeft (100).reduced (2, 0));
+
+        b.removeFromTop (8);
+        hint.setBounds (b.removeFromTop (20));
     }
 
 private:
+    float readParam (const juce::String& id)
+    {
+        if (auto* p = ranged (ed.processor(), id))
+            return p->convertFrom0to1 (p->getValue());
+
+        return 0.0f;
+    }
+
     void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
     {
         auto* k = new ModKnob (label, param, dest, true);
-        k->onSourceDropped = [this] (int s, int d) { ed.assignModSlot (s, d); };
-        k->onClearRequested = [this] (int d) { ed.clearModDest (d); };
+        ed.wireModKnob (*k);
         addAndMakeVisible (k);
         ed.modKnobs.push_back (k);
         owned.add (k);
@@ -787,8 +1034,7 @@ private:
             knobs2.add (k);
     }
 
-    void addChoice (MiXXynthProcessor& p, const juce::String& id, const juce::String&,
-                    juce::ComboBox& box)
+    void addChoice (MiXXynthProcessor& p, const juce::String& id, juce::ComboBox& box)
     {
         addAndMakeVisible (box);
 
@@ -835,6 +1081,7 @@ private:
     juce::ToggleButton* filterOn = nullptr;
     juce::Slider* octave = nullptr;
     juce::Label octaveLabel;
+    juce::Label hint;
     juce::OwnedArray<juce::ToggleButton> toggles;
 };
 
@@ -1025,8 +1272,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     }
 
     auto* master = new ModKnob ("Master", ranged (proc, "masterGain"), mixxynth::dstMaster, true);
-    master->onSourceDropped = [this] (int s, int d) { assignModSlot (s, d); };
-    master->onClearRequested = [this] (int d) { clearModDest (d); };
+    wireModKnob (*master);
     bar.addAndMakeVisible (master);
     modKnobs.push_back (master);
     macroKnobs.add (master); // owned alongside the macros
@@ -1170,6 +1416,8 @@ void MiXXynthEditor::timerCallback()
     for (int i = 0; i < shapeStrips.size(); ++i)
         shapeStrips[i]->poll (shapePhaseFor (i));
 
+    runTabPolls();
+
     // The wheels follow incoming MIDI; the keyboard repaints itself from its
     // MidiKeyboardState listener. A faster timer keeps the wheels looking live.
     if (pitchWheel != nullptr)
@@ -1182,6 +1430,17 @@ void MiXXynthEditor::timerCallback()
 void MiXXynthEditor::shapeEdited (int index, const mixxynth::ModShape& shape)
 {
     proc.setShape (index, shape);
+}
+
+void MiXXynthEditor::runTabPolls()
+{
+    // The matrix page watches for routing edits that need to switch the patch
+    // into Free mode, and the VA page keeps its state readout current.
+    if (matrixPage != nullptr)
+        matrixPage->poll();
+
+    if (vaPage != nullptr)
+        vaPage->refreshHint();
 }
 
 void MiXXynthEditor::setModStatus (const juce::String& text)
@@ -1321,8 +1580,19 @@ void MiXXynthEditor::clearModDest (int destIndex)
 
 void MiXXynthEditor::refreshModRings()
 {
-    std::array<float, mixxynth::kNumModDests> totals {};
-    totals.fill (0.0f);
+    // Collect every slot's (source, depth) per destination, so each knob can
+    // draw one arc per source and let the ring be dragged to change the amount.
+    std::array<std::vector<mixxynth::ui::ModKnob::Assignment>, mixxynth::kNumModDests> byDest;
+
+    // Cheap signature so the 30 Hz timer does not rebuild 121 assignment vectors
+    // when nothing has moved.
+    juce::uint64 sig = 1469598103934665603ull;
+
+    auto mix = [&sig] (int v)
+    {
+        sig ^= static_cast<juce::uint64> (static_cast<juce::uint32> (v));
+        sig *= 1099511628211ull;
+    };
 
     for (int n = 0; n < mixxynth::kNumModSlots; ++n)
     {
@@ -1333,21 +1603,139 @@ void MiXXynthEditor::refreshModRings()
         if (s == nullptr || d == nullptr)
             continue;
 
-        if (s->getIndex() == mixxynth::srcOff || d->getIndex() == mixxynth::dstOff)
-            continue;
-
+        const int src = s->getIndex();
         const int dest = d->getIndex();
 
-        if (dest >= 0 && dest < mixxynth::kNumModDests)
-            if (auto* dep = ranged (proc, "mod" + id + "depth"))
-                totals[static_cast<size_t> (dest)] += dep->convertFrom0to1 (dep->getValue());
+        float depth = 0.0f;
+
+        if (auto* dep = ranged (proc, "mod" + id + "depth"))
+            depth = dep->convertFrom0to1 (dep->getValue());
+
+        mix (src);
+        mix (dest);
+        mix (juce::roundToInt (depth * 100000.0f));
+
+        if (src == mixxynth::srcOff || dest == mixxynth::dstOff)
+            continue;
+
+        if (dest < 0 || dest >= mixxynth::kNumModDests)
+            continue;
+
+        byDest[static_cast<size_t> (dest)].push_back ({ src, depth });
     }
 
+    bool anyAdjusting = false;
+
+    for (auto* k : modKnobs)
+    {
+        if (k->isAdjustingRing())
+        {
+            anyAdjusting = true;
+            break;
+        }
+    }
+
+    if (! anyAdjusting && modSignatureValid && sig == modSignature)
+        return;
+
+    modSignature = sig;
+    modSignatureValid = true;
+
+    // While a ring is being dragged the knob owns its own value, so leave it be
+    // rather than fighting the user for the parameter.
     for (auto* k : modKnobs)
     {
         const int dest = k->getDestIndex();
 
-        if (dest >= 0 && dest < mixxynth::kNumModDests)
-            k->setModDepth (totals[static_cast<size_t> (dest)]);
+        if (dest < 0 || dest >= mixxynth::kNumModDests || k->isAdjustingRing())
+            continue;
+
+        k->setModAssignments (byDest[static_cast<size_t> (dest)]);
     }
+}
+
+void MiXXynthEditor::wireModKnob (mixxynth::ui::ModKnob& k)
+{
+    k.onSourceDropped = [this] (int s, int d) { assignModSlot (s, d); };
+    k.onClearRequested = [this] (int d) { clearModDest (d); };
+    k.onModDepthChanged = [this] (int s, int d, float depth) { setModDepthFor (s, d, depth); };
+    k.onModRemoveRequested = [this] (int s, int d) { removeModSlot (s, d); };
+    k.onStatus = [this] (const juce::String& t) { setModStatus (t); };
+}
+
+// Finds the slot linking (src,dest), creating one if the pair is not assigned yet.
+int MiXXynthEditor::findModSlot (int srcIndex, int destIndex) const
+{
+    for (int n = 0; n < mixxynth::kNumModSlots; ++n)
+    {
+        const juce::String id = juce::String (n + 1);
+        auto* s = choice (proc, "mod" + id + "src");
+        auto* d = choice (proc, "mod" + id + "dst");
+
+        if (s != nullptr && d != nullptr
+              && s->getIndex() == srcIndex && d->getIndex() == destIndex)
+            return n;
+    }
+
+    return -1;
+}
+
+void MiXXynthEditor::setModDepthFor (int srcIndex, int destIndex, float depth)
+{
+    if (srcIndex <= mixxynth::srcOff || destIndex == mixxynth::dstOff)
+        return;
+
+    int slot = findModSlot (srcIndex, destIndex);
+
+    if (slot < 0)
+    {
+        // Not assigned yet: create the pair (which also picks a free slot).
+        assignModSlot (srcIndex, destIndex);
+        slot = findModSlot (srcIndex, destIndex);
+    }
+
+    if (slot < 0)
+        return;
+
+    if (auto* dep = ranged (proc, "mod" + juce::String (slot + 1) + "depth"))
+    {
+        dep->beginChangeGesture();
+        dep->setValueNotifyingHost (dep->convertTo0to1 (juce::jlimit (-1.0f, 1.0f, depth)));
+        dep->endChangeGesture();
+    }
+
+    refreshModRings();
+}
+
+void MiXXynthEditor::removeModSlot (int srcIndex, int destIndex)
+{
+    const int slot = findModSlot (srcIndex, destIndex);
+
+    if (slot < 0)
+        return;
+
+    const juce::String id = juce::String (slot + 1);
+
+    if (auto* dep = ranged (proc, "mod" + id + "depth"))
+    {
+        dep->beginChangeGesture();
+        dep->setValueNotifyingHost (dep->convertTo0to1 (0.0f));
+        dep->endChangeGesture();
+    }
+
+    for (const char* suffix : { "src", "dst" })
+    {
+        if (auto* p = choice (proc, "mod" + id + suffix))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (0.0f);
+            p->endChangeGesture();
+        }
+    }
+
+    setModStatus ("Removed "
+                  + juce::String (mixxynth::modSourceNames()[juce::jlimit (0, mixxynth::kNumModSources - 1, srcIndex)])
+                  + " modulation");
+
+    refreshModRings();
 }

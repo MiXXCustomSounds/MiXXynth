@@ -26,6 +26,11 @@ The interactive half — dragging every knob in the standalone — is at the bot
 | 17 | Every strip is visible and at least 100px tall | The editors must be usable, not collapsed |
 | 18 | Every strip is sized (non-zero width) | Same zero-bounds guard as #14, for the sidebar |
 | 19 | The sidebar content is taller than its viewport, so it scrolls | Catches a layout that would clip the last shape |
+| 20 | `setModDepthFor` creates the pair, sets the amount, can go negative, and never duplicates a slot | Backs the draggable depth ring |
+| 21 | `removeModSlot` clears only its own pair | Per-source removal from the knob menu |
+| 22 | `VA Pulse Width` is a modulation destination | The page claims all six knobs are destinations |
+| 23 | A routing edit switches the algorithm to Free, the triggering edit survives, and the algorithm was copied into the matrix | The Matrix tab used to be inert (see `docs/MATRIX-AND-VA.md`) |
+| 24 | Loading a state does **not** force Free mode | A preset load must not look like 30 knob edits |
 
 ## Bugs found and fixed
 
@@ -84,14 +89,14 @@ Matrix destinations read `Op1>2`; now `Op1 > Op2`.
 
 ```
 params=198 knobs=121
-modulatable knobs=49  non-modulatable knobs=72
+modulatable knobs=50  non-modulatable knobs=71
 visible child components=268
 strips=7 chips=9 rail=0 34 312 866 viewport=6 24 300 804 content=0 0 300 1303
 minStripH=161 allVisible=1 allSized=1 scrolls=1
 EDITOR AUDIT OK
 ```
 
-Every one of the 198 parameters is reachable from the UI, and all 49 modulation
+Every one of the 198 parameters is reachable from the UI, and all 50 modulation
 destinations are wired to the knob they should be. The knob count fell from 142 to
 121 because the 21 LFO/envelope/MSEG controls moved out of the parameter list and
 onto the shapes in the sidebar.
@@ -119,6 +124,15 @@ Run the standalone and confirm by ear/eye:
 - [ ] Drag a shape's chip onto a green-outlined knob -> a depth ring appears and the
       sound modulates
 - [ ] Drag a chip onto a red-outlined knob -> it flashes red and does nothing
-- [ ] Right-click a modulated knob -> its ring clears
+- [ ] **Drag the ring around a modulated knob** -> the amount changes, the label shows
+      the value, and the modulation depth audibly follows
+- [ ] **Right-click a modulated knob** -> menu lists the source and its amount;
+      "Clear all modulation" removes it
+- [ ] Matrix tab: the banner says which mode is in charge. Move a routing knob while
+      an algorithm is selected -> it switches to Free, keeps your edit, and audibly
+      reroutes. "Copy algorithm to matrix" seeds the grid.
+- [ ] VA/Filt tab: the readout under the controls reports the VA/FM balance and the
+      filter state. Moving Cutoff is audible straight away (the filter is on and
+      open by default).
 - [ ] No dial is clipped or reads an obviously wrong position
 - [ ] Save the project, reopen it, and confirm the shapes you drew came back

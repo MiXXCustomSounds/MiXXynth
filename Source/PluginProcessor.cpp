@@ -99,11 +99,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
 
     // M3a: modulation matrix. 32 slots, each source -> destination with a
     // bipolar depth. Destination list mirrors mixxynth::ModDest exactly.
-    juce::StringArray modSources { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
-                                   "Env 1", "Env 2", "Env 3",
-                                   "Macro 1", "Macro 2", "Macro 3", "Macro 4",
-                                   "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
-                                   "Timbre" };
+    juce::StringArray modSources;
+
+    for (int i = 0; i < mixxynth::kNumModSources; ++i)
+        modSources.add (mixxynth::modSourceNames()[i]);
 
     juce::StringArray modDests { "Off", "FM Index" };
 
@@ -116,6 +115,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     modDests.add ("Master");
     modDests.add ("VA Level");
     modDests.add ("VA Detune");
+    modDests.add ("VA Pulse Width");
     modDests.add ("Filter Cutoff");
     modDests.add ("Filter Reso");
     modDests.add ("Filter Drive");
@@ -163,15 +163,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         juce::NormalisableRange<float> (0.05f, 0.95f, 0.001f), 0.5f));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "filterOn", "Filter On", false));
+        "filterOn", "Filter On", true));
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "filterType", "Filter Type",
         juce::StringArray { "Low Pass", "High Pass", "Band Pass" }, 0));
 
+    // Wide open by default, so the filter is transparent until you move Cutoff
+    // but is immediately audible the moment you do.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "filterCutoff", "Filter Cutoff",
-        juce::NormalisableRange<float> (20.0f, 20000.0f, 0.1f, 0.25f), 12000.0f));
+        juce::NormalisableRange<float> (20.0f, 20000.0f, 0.1f, 0.25f), 20000.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "filterReso", "Filter Resonance",
@@ -465,6 +467,10 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
 
     apvts.replaceState (tree);
+
+    // Tell the editor this was a load, not a user edit, so pages that watch
+    // parameters for changes can resync instead of reacting.
+    ++stateLoadCount;
 }
 
 // ---------------------------------------------------------------------------

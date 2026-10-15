@@ -9,8 +9,8 @@
 //
 // Sources (17): Off, LFO 1-4, Env 1-3, Macro 1-4, Velocity, ModWheel,
 // Aftertouch, KeyTrack, Timbre.
-// Destinations (50): Off, FM Index, Op1-6 Ratio, Op1-6 Level, Master, VA
-// Level/Detune, Filter Cutoff/Reso/Drive, then the 30 matrix depths.
+// Destinations (51): Off, FM Index, Op1-6 Ratio, Op1-6 Level, Master, VA
+// Level/Detune/PulseWidth, Filter Cutoff/Reso/Drive, then the 30 matrix depths.
 // Slots (32): each is source + destination + bipolar depth (-1..+1).
 //
 // The four LFOs and three envelopes are breakpoint shapes (see ModShape.h) whose
@@ -22,7 +22,7 @@
 namespace mixxynth
 {
     constexpr int kNumModSources = 17;
-    constexpr int kNumModDests   = 50;
+    constexpr int kNumModDests   = 51;
     constexpr int kNumModSlots   = 32;
     constexpr int kNumMacros     = 4;
 
@@ -44,7 +44,7 @@ namespace mixxynth
         dstOp1Level, dstOp2Level, dstOp3Level, dstOp4Level, dstOp5Level, dstOp6Level,
         dstMaster,
         // M3b: VA layer and filter.
-        dstVaLevel, dstVaDetune, dstFilterCutoff, dstFilterReso, dstFilterDrive,
+        dstVaLevel, dstVaDetune, dstVaPulseWidth, dstFilterCutoff, dstFilterReso, dstFilterDrive,
         dstMtxFirst // 30 matrix depths follow
     };
 
@@ -94,6 +94,11 @@ namespace mixxynth
     const char* const* syncDivisionNames();
     int numSyncDivisions();
     float syncDivisionCyclesPerBeat (int index);
+
+    // Canonical modulation source names, indexed by ModSource. Single source of
+    // truth shared by the processor's choice parameter, the editor's chips and
+    // the knob's right-click menu.
+    const char* const* modSourceNames();
 
     // Computes all source values for one block. notePressure/noteTimbre carry
     // the per-note expression of the voice being rendered (MPE); when MPE is off

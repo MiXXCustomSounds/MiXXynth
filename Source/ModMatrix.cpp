@@ -11,7 +11,16 @@ namespace
     const char* const syncNames[] = { "1/1", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32",
                                       "2 bar", "4 bar" };
     const float syncCycles[] = { 0.25f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 0.125f, 0.0625f };
+
+    // Must match ModSource exactly; the editor audit asserts the count.
+    const char* const sourceNames[] = { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
+                                        "Env 1", "Env 2", "Env 3",
+                                        "Macro 1", "Macro 2", "Macro 3", "Macro 4",
+                                        "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
+                                        "Timbre" };
 }
+
+const char* const* modSourceNames() { return sourceNames; }
 
 
 const char* const* syncDivisionNames() { return syncNames; }
@@ -233,6 +242,10 @@ void applyModulation (const std::array<float, kNumModSources>& sources,
         else if (slot.dest == dstVaDetune)
         {
             vp.vaDetune = juce::jlimit (-100.0f, 100.0f, vp.vaDetune + amt * 50.0f);
+        }
+        else if (slot.dest == dstVaPulseWidth)
+        {
+            vp.vaPulseWidth = juce::jlimit (0.05f, 0.95f, vp.vaPulseWidth + amt * 0.45f);
         }
         else if (slot.dest == dstFilterCutoff)
         {

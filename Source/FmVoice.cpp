@@ -79,6 +79,8 @@ void MiXXFmVoice::reset()
     noiseState = 0x2545f491u;
     svfIc1 = 0.0f;
     svfIc2 = 0.0f;
+    svfLastCutoff = -1.0f;
+    svfLastReso = -1.0f;
 
     for (auto& op : ops)
     {
@@ -275,28 +277,36 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 
         if (p.filterOn)
         {
+            // Recompute the TPT coefficients only when cutoff or resonance move.
+            if (std::abs (p.cutoff - svfLastCutoff) > 0.01f
+                  || std::abs (p.resonance - svfLastReso) > 0.0005f)
+            {
+                const float sr = static_cast<float> (sampleRate);
+                const float fc = juce::jlimit (20.0f, sr * 0.45f, p.cutoff);
+                const float g = std::tan (juce::MathConstants<float>::pi * fc / sr);
+
+                svfK = 2.0f - 2.0f * juce::jlimit (0.0f, 0.98f, p.resonance);
+                svfA1 = 1.0f / (1.0f + g * (g + svfK));
+                svfA2 = g * svfA1;
+                svfA3 = g * svfA2;
+                svfLastCutoff = p.cutoff;
+                svfLastReso = p.resonance;
+            }
+
             float in = mixed;
 
             if (p.drive > 0.0f)
                 in = std::tanh (in * (1.0f + p.drive * 8.0f));
 
-            const float sr = static_cast<float> (sampleRate);
-            const float fc = juce::jlimit (20.0f, sr * 0.45f, p.cutoff);
-            const float g = std::tan (juce::MathConstants<float>::pi * fc / sr);
-            const float k = 2.0f - 2.0f * juce::jlimit (0.0f, 0.98f, p.resonance);
-            const float a1 = 1.0f / (1.0f + g * (g + k));
-            const float a2 = g * a1;
-            const float a3 = g * a2;
-
             const float v3 = in - svfIc2;
-            const float v1 = a1 * svfIc1 + a2 * v3;
-            const float v2 = svfIc2 + a2 * svfIc1 + a3 * v3;
+            const float v1 = svfA1 * svfIc1 + svfA2 * v3;
+            const float v2 = svfIc2 + svfA2 * svfIc1 + svfA3 * v3;
             svfIc1 = 2.0f * v1 - svfIc1;
             svfIc2 = 2.0f * v2 - svfIc2;
 
-            if (p.filterType == 1)       filtered = in - k * v1 - v2; // high pass
-            else if (p.filterType == 2)  filtered = v1;               // band pass
-            else                         filtered = v2;               // low pass
+            if (p.filterType == 1)       filtered = in - svfK * v1 - v2; // high pass
+            else if (p.filterType == 2)  filtered = v1;                  // band pass
+            else                         filtered = v2;                  // low pass
         }
 
         const float out = juce::jlimit (-1.0f, 1.0f, filtered * velocity * p.master);

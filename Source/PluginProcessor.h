@@ -68,6 +68,10 @@ public:
     // Published once per block for the editor's playheads (negative = idle).
     float getShapePhase (int index) const;
 
+    // Bumped whenever the host loads a state, so the editor can resync its
+    // snapshots instead of mistaking a preset load for a user edit.
+    int getStateLoadCount() const { return stateLoadCount.load (std::memory_order_relaxed); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -107,6 +111,7 @@ private:
     std::array<mixxynth::ModShape, mixxynth::kNumShapes> shapeBuffers[2];
     std::atomic<int> activeShapeBuffer { 0 };
     std::array<std::atomic<float>, mixxynth::kNumShapes> shapePhases {};
+    std::atomic<int> stateLoadCount { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

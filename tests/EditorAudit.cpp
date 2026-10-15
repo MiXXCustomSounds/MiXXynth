@@ -13,6 +13,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "../Source/Algorithms.h"
 #include "../Source/ModKnob.h"
 #include "../Source/ModMatrix.h"
 #include "../Source/PluginEditor.h"
@@ -39,6 +40,7 @@ namespace
         if (id == "masterGain")  return mixxynth::dstMaster;
         if (id == "vaLevel")     return mixxynth::dstVaLevel;
         if (id == "vaDetune")    return mixxynth::dstVaDetune;
+        if (id == "vaPulseWidth") return mixxynth::dstVaPulseWidth;
         if (id == "filterCutoff") return mixxynth::dstFilterCutoff;
         if (id == "filterReso")  return mixxynth::dstFilterReso;
         if (id == "filterDrive") return mixxynth::dstFilterDrive;
@@ -313,7 +315,156 @@ int main()
     check (std::abs (masterRing()) < 0.0001f, "depth ring clears with its slot",
            juce::String (masterRing()));
 
-    // ---- 7. Layout: no visible control is left with zero bounds ----
+    // ---- 7. Modulation amount: the draggable depth ring's backend ----
+    // Backs the Serum/Vital gesture of dragging the ring around a knob to set how
+    // much a source modulates it.
+    for (int n = 0; n < mixxynth::kNumModSlots; ++n)
+        miXXEditor->clearModDest (slotDst (n));
+
+    miXXEditor->setModDepthFor (mixxynth::srcLfo1, mixxynth::dstFmIndex, 0.75f);
+    check (slotSrc (0) == mixxynth::srcLfo1 && slotDst (0) == mixxynth::dstFmIndex,
+           "setModDepthFor creates the pair", juce::String (slotSrc (0)) + "/" + juce::String (slotDst (0)));
+    check (std::abs (slotDepth (0) - 0.75f) < 0.001f, "setModDepthFor sets the amount",
+           juce::String (slotDepth (0)));
+
+    miXXEditor->setModDepthFor (mixxynth::srcLfo1, mixxynth::dstFmIndex, -0.4f);
+    check (std::abs (slotDepth (0) + 0.4f) < 0.001f, "setModDepthFor can go negative",
+           juce::String (slotDepth (0)));
+    check (slotDst (1) == mixxynth::dstOff, "setModDepthFor does not add a second slot",
+           juce::String (slotDst (1)));
+
+    // Dragging the ring of a knob that has no source yet must create one.
+    miXXEditor->setModDepthFor (mixxynth::srcEnv2, mixxynth::dstVaPulseWidth, 0.5f);
+    check (std::abs (slotDepth (0) - 0.5f) > 0.001f && slotDst (1) == mixxynth::dstVaPulseWidth,
+           "setModDepthFor can target pulse width", juce::String (slotDst (1)));
+
+    // Removing one pair must leave the other alone.
+    miXXEditor->removeModSlot (mixxynth::srcLfo1, mixxynth::dstFmIndex);
+    check (slotDst (0) == mixxynth::dstOff, "removeModSlot clears its own slot",
+           juce::String (slotDst (0)));
+    check (slotDst (1) == mixxynth::dstVaPulseWidth, "removeModSlot leaves other slots alone",
+           juce::String (slotDst (1)));
+
+    miXXEditor->clearModDest (mixxynth::dstVaPulseWidth);
+    miXXEditor->refreshModRings();
+
+    // Pulse Width is now a modulation destination, which the page's own text
+    // claims and the DSP honours.
+    {
+        auto nameAt = [&proc] (int i)
+        {
+            if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (
+                    proc.apvts.getParameter ("mod1dst")))
+                return juce::String (c->choices[juce::jlimit (0, c->choices.size() - 1, i)]);
+
+            return juce::String {};
+        };
+
+        check (nameAt (mixxynth::dstVaPulseWidth) == "VA Pulse Width",
+               "VA Pulse Width is a modulation destination", nameAt (mixxynth::dstVaPulseWidth));
+    }
+
+    // ---- 8. Matrix page: routing edits must actually take effect ----
+    // The routing knobs used to be inert whenever an algorithm preset was in
+    // charge, because the processor overwrites the matrix from the algorithm
+    // table. Editing one now seeds the matrix and switches to Free mode.
+    {
+        auto* algoParam = dynamic_cast<juce::AudioParameterChoice*> (
+            proc.apvts.getParameter ("algorithm"));
+
+        auto setChoice = [] (juce::AudioParameterChoice* p, int index)
+        {
+            if (p != nullptr)
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 (static_cast<float> (index)));
+                p->endChangeGesture();
+            }
+        };
+
+        auto readReal = [&proc] (const juce::String& id)
+        {
+            if (auto* r = proc.apvts.getRawParameterValue (id))
+                return r->load();
+
+            return 0.0f;
+        };
+
+        // Start on DX7 algorithm 1 with an empty matrix.
+        setChoice (algoParam, 0);
+
+        for (int s = 1; s <= 6; ++s)
+        {
+            for (int d = 1; d <= 6; ++d)
+            {
+                if (s == d)
+                    continue;
+
+                if (auto* mtx = dynamic_cast<juce::AudioParameterFloat*> (
+                        proc.apvts.getParameter ("mtx" + juce::String (s) + juce::String (d))))
+                {
+                    mtx->beginChangeGesture();
+                    mtx->setValueNotifyingHost (0.0f);
+                    mtx->endChangeGesture();
+                }
+            }
+        }
+
+        // Let the page settle its snapshot before the edit we want it to notice.
+        miXXEditor->runTabPolls();
+        miXXEditor->runTabPolls();
+
+        {
+            auto* mtx = dynamic_cast<juce::AudioParameterFloat*> (
+                proc.apvts.getParameter ("mtx12"));
+
+            if (mtx != nullptr)
+            {
+                mtx->beginChangeGesture();
+                mtx->setValueNotifyingHost (mtx->convertTo0to1 (0.5f));
+                mtx->endChangeGesture();
+            }
+        }
+
+        miXXEditor->runTabPolls();
+
+        check (algoParam != nullptr && algoParam->getIndex() == mixxynth::kNumAlgorithms,
+               "routing edit switches the algorithm to Free mode",
+               juce::String (algoParam != nullptr ? algoParam->getIndex() : -1));
+        check (std::abs (readReal ("mtx12") - 0.5f) < 0.001f,
+               "the edit that triggered the switch survives", juce::String (readReal ("mtx12")));
+
+        // Algorithm 1 routes Op2 into Op1, so the matrix must have been seeded.
+        check (readReal ("mtx21") > 0.5f, "the algorithm was copied into the matrix",
+               juce::String (readReal ("mtx21")));
+
+        // A state load must not be mistaken for a routing edit. Without the
+        // state-load guard this switched the patch to Free mode behind the
+        // user's back every time a preset was loaded.
+        setChoice (algoParam, 0);
+        miXXEditor->runTabPolls();
+        miXXEditor->runTabPolls();
+
+        juce::MemoryBlock saved;
+        proc.getStateInformation (saved);
+
+        if (auto* mtx = dynamic_cast<juce::AudioParameterFloat*> (
+                proc.apvts.getParameter ("mtx34")))
+        {
+            mtx->beginChangeGesture();
+            mtx->setValueNotifyingHost (0.9f);
+            mtx->endChangeGesture();
+        }
+
+        proc.setStateInformation (saved.getData(), static_cast<int> (saved.getSize()));
+        miXXEditor->runTabPolls();
+
+        check (algoParam != nullptr && algoParam->getIndex() < mixxynth::kNumAlgorithms,
+               "loading a state does not force Free mode",
+               juce::String (algoParam != nullptr ? algoParam->getIndex() : -1));
+    }
+
+    // ---- 9. Layout: no visible control is left with zero bounds ----
     // This is the regression guard for the bug where setSize() ran before the
     // child arrays were populated, leaving controls at 0x0 and invisible.
     juce::StringArray zeroSized;

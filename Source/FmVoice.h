@@ -103,6 +103,11 @@ private:
     float svfIc1 = 0.0f;
     float svfIc2 = 0.0f;
 
+    // Cached TPT coefficients. The filter is on by default, so recomputing
+    // tan() per sample per voice was the hot path; it now runs once per change.
+    float svfA1 = 0.0f, svfA2 = 0.0f, svfA3 = 0.0f, svfK = 2.0f;
+    float svfLastCutoff = -1.0f, svfLastReso = -1.0f;
+
     double sampleRate = 44100.0;
     double frequency = 440.0;
     float velocity = 0.0f;

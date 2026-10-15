@@ -43,7 +43,31 @@ itself:
 last points are pinned to x = 0 and x = 1 and only move vertically, which is what
 both Serum and Vital do.
 
-## Modes
+## Setting the amount: the depth ring
+
+Dropping a source on a knob assigns it with a default depth of 0.35. To set the
+amount, **drag the ring around the knob** — the gesture Serum and Vital use.
+
+| Gesture | Result |
+|---|---|
+| Drag the ring up / down | Sets that source's amount, 110 px for the full −1..+1 travel |
+| Right-click a knob | Menu: every assigned source with its amount, an **Amount** submenu of exact values (+1.00 … −1.00), and **Clear all modulation** |
+| Click an assigned source in the menu | Removes just that one pair |
+
+Details that matter:
+
+- The dial is inset by 13 px on every side so the ring sits **outside** the dial,
+  where it is both visible and hit-testable. Before this the ring was drawn 1 px
+  outside the dial edge and could not be grabbed at all.
+- The label strip becomes a live readout while dragging (`+0.42`), green for
+  positive and red for negative, and snaps to exactly 0 within ±0.02.
+- Up to **three** sources are drawn as separate arcs stepping outwards; beyond that
+  a `+n` marker appears. Multiple sources are why the ring shows a list rather than
+  a single value.
+- While a ring is being dragged the knob owns its own value and the 30 Hz refresh
+  leaves it alone, so the parameter and the drawing cannot fight each other.
+- `refreshModRings` hashes the slot configuration and skips rebuilding the 121
+  assignment lists when nothing changed, so the timer is not allocating every tick.
 
 | Mode | Behaviour |
 |---|---|

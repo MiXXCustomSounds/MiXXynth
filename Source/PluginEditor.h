@@ -44,6 +44,28 @@ public:
     void shapeEdited (int index, const mixxynth::ModShape& shape);
     void setModStatus (const juce::String& text);
 
+    // Wires the shared drag-drop and modulation-ring callbacks onto a knob.
+    void wireModKnob (mixxynth::ui::ModKnob& k);
+
+    // Sets the amount of the modulation linking (source, destination), creating
+    // the slot if the pair is not assigned yet. Backs the draggable depth ring.
+    void setModDepthFor (int srcIndex, int destIndex, float depth);
+
+    // Removes just the one slot linking (source, destination).
+    void removeModSlot (int srcIndex, int destIndex);
+
+    // Index of the slot linking (source, destination), or -1.
+    int findModSlot (int srcIndex, int destIndex) const;
+
+    // Runs the per-tab polling that the editor timer normally does. Exposed so
+    // the editor audit can drive the Matrix page's mode-switch logic directly.
+    void runTabPolls();
+
+    // Signature of the last slot configuration, so refreshModRings() can skip
+    // rebuilding every knob's assignment list when nothing has changed.
+    juce::uint64 modSignature = 0;
+    bool modSignatureValid = false;
+
     // Published per-voice shape phase for the playhead, or negative when idle.
     float shapePhaseFor (int index) const;
 
