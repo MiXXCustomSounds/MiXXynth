@@ -350,7 +350,7 @@ int main()
         poly.unison = 1;
 
         auto m = mod;
-        m.shapes[0].rateHz = 5.0f;
+        m.shapes.shapes[0].rateHz = 5.0f;
         m.slots[0] = { mixxynth::srcLfo1, mixxynth::dstFmIndex, 1.0f };
 
         juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
@@ -382,7 +382,7 @@ int main()
         auto m = mod;
         // A slow one-shot ramp: flat for the first half, then rising to 1, so the
         // master is only pulled down later in the note.
-        auto& env = m.shapes[mixxynth::kNumLfos];
+        auto& env = m.shapes.shapes[mixxynth::kDefaultLfos]; // index 1 is Env 1
         env.numPoints = 3;
         env.points[0] = { 0.0f, 0.0f, 0.0f };
         env.points[1] = { 0.5f, 0.0f, 0.0f };
@@ -556,7 +556,7 @@ int main()
         {
             ModParams mp;
             mp.sampleRate = sr;
-            mp.shapes[mixxynth::kNumLfos] = shape; // shape index 4 is Env 1
+            mp.shapes.shapes[mixxynth::kDefaultLfos] = shape; // index 1 is Env 1
 
             ModState st;
             st.reset();

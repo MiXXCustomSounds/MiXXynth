@@ -30,6 +30,10 @@ namespace
 
         std::printf ("%s %-44s %s\n", cond ? "PASS" : "FAIL", name.toRawUTF8(),
                      detail.toRawUTF8());
+
+        // Unbuffered: a crash would otherwise discard everything printed so far,
+        // which makes a segfault impossible to locate.
+        std::fflush (stdout);
     }
 
     // Expected modulation destination for a given parameter ID.
@@ -790,8 +794,8 @@ int main()
         const auto dbg = miXXEditor->sidebarDebug();
         std::printf ("     %s\n", dbg.toRawUTF8());
 
-        check (dbg.contains ("strips=" + juce::String (mixxynth::kNumShapes)),
-               "sidebar has one strip per shape", dbg.upToFirstOccurrenceOf (" chips=", false, false));
+        check (dbg.contains ("strips=" + juce::String (miXXEditor->getNumShapeModules())),
+               "sidebar has one strip per module", dbg.upToFirstOccurrenceOf (" chips=", false, false));
 
         const int minStripH = dbg.fromFirstOccurrenceOf ("minStripH=", false, false)
                                  .upToFirstOccurrenceOf (" ", false, false).getIntValue();
@@ -803,6 +807,92 @@ int main()
         check (minStripH >= 100, "every shape strip has a usable height", juce::String (minStripH));
         check (allVisible == 1, "every shape strip is visible", juce::String (allVisible));
         check (allSized == 1, "every shape strip is sized", juce::String (allSized));
+    }
+
+    // ---- 15. LFO/ENV modules: add, remove, and slot remapping ----
+    // Deliberately last: adding or removing defers the sidebar rebuild to the
+    // message loop, which this audit does not pump, so the layout checks above
+    // want to run while the default two-module sidebar is still in place.
+    {
+        auto slotSrcAt = [&proc] (int n)
+        {
+            if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (
+                    proc.apvts.getParameter ("mod" + juce::String (n + 1) + "src")))
+                return c->getIndex();
+
+            return -1;
+        };
+
+        auto setSlotSrc = [&proc] (int n, int src)
+        {
+            if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (
+                    proc.apvts.getParameter ("mod" + juce::String (n + 1) + "src")))
+            {
+                c->beginChangeGesture();
+                c->setValueNotifyingHost (c->convertTo0to1 (static_cast<float> (src)));
+                c->endChangeGesture();
+            }
+        };
+
+        // The default patch is one of each.
+        check (proc.getNumShapeModules() == 2 && proc.getNumLfoModules() == 1,
+               "modules: default is one LFO and one ENV",
+               juce::String (proc.getNumLfoModules()) + " LFO / "
+                 + juce::String (proc.getNumShapeModules() - proc.getNumLfoModules()) + " ENV");
+
+        proc.clearShapeModules();
+        check (proc.getNumShapeModules() == 0, "modules: removable down to zero",
+               juce::String (proc.getNumShapeModules()));
+
+        check (proc.addShapeModule (true) == 0, "modules: first LFO lands at index 0", "");
+        check (proc.addShapeModule (false) == 1, "modules: first ENV sits after the LFOs", "");
+        check (proc.addShapeModule (true) == 1,
+               "modules: a second LFO inserts after the first", "");
+        check (proc.getNumLfoModules() == 2, "modules: two LFOs",
+               juce::String (proc.getNumLfoModules()));
+        check (proc.getNumShapeModules() == 3, "modules: three total",
+               juce::String (proc.getNumShapeModules()));
+
+        // Slot 0 -> LFO 2, slot 1 -> LFO 1.
+        setSlotSrc (0, mixxynth::srcLfo2);
+        setSlotSrc (1, mixxynth::srcLfo1);
+
+        // Removing LFO 1 must leave slot 0 following the module it pointed at
+        // (which is now LFO 1), and clear slot 1 because its module is gone.
+        miXXEditor->removeShapeModule (0);
+
+        check (proc.getNumLfoModules() == 1, "modules: LFO count drops",
+               juce::String (proc.getNumLfoModules()));
+        check (slotSrcAt (0) == mixxynth::srcLfo1,
+               "modules: a link follows its module across a removal",
+               juce::String (slotSrcAt (0)));
+        check (slotSrcAt (1) == mixxynth::srcOff,
+               "modules: links to the removed module clear", juce::String (slotSrcAt (1)));
+
+        // Removing an ENV must not disturb LFO links.
+        setSlotSrc (2, mixxynth::srcLfo1);
+        miXXEditor->removeShapeModule (1); // the only ENV
+        check (slotSrcAt (2) == mixxynth::srcLfo1,
+               "modules: removing an ENV leaves LFO links alone",
+               juce::String (slotSrcAt (2)));
+
+        // Capacity.
+        proc.clearShapeModules();
+
+        for (int i = 0; i < mixxynth::kMaxLfos; ++i)
+            proc.addShapeModule (true);
+
+        check (proc.getNumLfoModules() == mixxynth::kMaxLfos, "modules: eight LFOs fit",
+               juce::String (proc.getNumLfoModules()));
+        check (proc.addShapeModule (true) < 0, "modules: a ninth LFO is refused", "");
+        check (! proc.canAddShapeModule (true), "modules: canAdd reports a full family", "");
+
+        for (int i = 0; i < mixxynth::kMaxModEnvs; ++i)
+            proc.addShapeModule (false);
+
+        check (proc.getNumShapeModules() == mixxynth::kMaxShapes, "modules: sixteen in total",
+               juce::String (proc.getNumShapeModules()));
+        check (proc.addShapeModule (false) < 0, "modules: a seventeenth is refused", "");
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

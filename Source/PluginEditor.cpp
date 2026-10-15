@@ -9,11 +9,9 @@ using mixxynth::ui::ModKnob;
 
 namespace
 {
-    const char* const sourceNames[] = { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
-                                        "Env 1", "Env 2", "Env 3",
-                                        "Macro 1", "Macro 2", "Macro 3", "Macro 4",
-                                        "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
-                                        "Timbre" };
+    // Source names come from mixxynth::modSourceNames() so there is exactly one
+    // list. A second copy here silently went stale when the module count grew,
+    // and the perf-chip loop then read past its end.
 
     // Mirrors mixxynth::ModDest ordering for the 30 off-diagonal matrix cells.
     int matrixDestFor (int src, int dst)
@@ -118,11 +116,11 @@ public:
     ShapeStrip (MiXXynthEditor& owner, int shapeIndex)
         : ed (owner), index (shapeIndex)
     {
-        const bool isLfo = index < mixxynth::kNumLfos;
-        const int src = isLfo ? (mixxynth::srcLfo1 + index)
-                              : (mixxynth::srcEnv1 + (index - mixxynth::kNumLfos));
+        auto& proc = ed.processor();
+        const bool isLfo = proc.shapeIsLfo (index);
+        const int src = proc.shapeSourceIndex (index);
 
-        chip = std::make_unique<SourceChip> (sourceNames[src], src);
+        chip = std::make_unique<SourceChip> (mixxynth::modSourceNames()[src], src);
         addAndMakeVisible (*chip);
 
         modeBox.addItemList ({ "LFO", "ENV", "One-shot" }, 1);
@@ -136,6 +134,11 @@ public:
             ed.setModStatus (chipName() + " reset to default");
         };
         addAndMakeVisible (resetButton);
+
+        removeButton.setButtonText ("-");
+        removeButton.setTooltip ("Remove this module");
+        removeButton.onClick = [this] { ed.removeShapeModule (index); };
+        addAndMakeVisible (removeButton);
 
         addAndMakeVisible (shapeEditor);
         shapeEditor.setGridDivisions (16);
@@ -201,6 +204,7 @@ public:
         auto top = b.removeFromTop (22);
         chip->setBounds (top.removeFromLeft (86));
         top.removeFromLeft (4);
+        removeButton.setBounds (top.removeFromRight (26).reduced (0, 1));
         resetButton.setBounds (top.removeFromRight (48).reduced (0, 1));
         modeBox.setBounds (top.reduced (0, 1));
 
@@ -271,8 +275,11 @@ private:
 
     juce::String chipName() const
     {
-        return index < mixxynth::kNumLfos ? "LFO " + juce::String (index + 1)
-                                          : "Env " + juce::String (index - mixxynth::kNumLfos + 1);
+        const auto& proc = ed.processor();
+
+        return proc.shapeIsLfo (index)
+                 ? "LFO " + juce::String (index + 1)
+                 : "Env " + juce::String (index - proc.getNumLfoModules() + 1);
     }
 
     // Reads every control back into the shape and publishes it.
@@ -325,7 +332,7 @@ private:
     std::unique_ptr<SourceChip> chip;
     mixxynth::ShapeEditorComponent shapeEditor;
     juce::ComboBox modeBox;
-    juce::TextButton resetButton;
+    juce::TextButton resetButton, removeButton;
     juce::Slider rateBar, smoothBar, phaseBar, delayBar;
     juce::TextButton syncButton, bipolarButton, retrigButton;
     juce::ComboBox divBox;
@@ -1468,17 +1475,21 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     rail.addAndMakeVisible (railTitle);
     addAndMakeVisible (rail);
 
-    // The sidebar is a scrollable stack of editable shapes, one per LFO and ENV.
+    // The sidebar is a scrollable stack of editable modules, one per LFO and ENV,
+    // plus the buttons that add and remove them.
     rail.addAndMakeVisible (modViewport);
     modViewport.setViewedComponent (&modContent, false);
     modViewport.setScrollBarsShown (true, false);
 
-    for (int i = 0; i < mixxynth::kNumShapes; ++i)
-    {
-        auto* strip = new ShapeStrip (*this, i);
-        shapeStrips.add (strip);
-        modContent.addAndMakeVisible (strip);
-    }
+    addLfoButton.setButtonText ("+ LFO");
+    addLfoButton.onClick = [this] { addShapeModule (true); };
+    modContent.addAndMakeVisible (addLfoButton);
+
+    addEnvButton.setButtonText ("+ ENV");
+    addEnvButton.onClick = [this] { addShapeModule (false); };
+    modContent.addAndMakeVisible (addEnvButton);
+
+    rebuildShapeStrips();
 
     // Performance sources keep the chip workflow: macros plus the MIDI inputs.
     perfChipTitle.setText ("PERFORMANCE  (drag onto a knob)", juce::dontSendNotification);
@@ -1489,7 +1500,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
 
     for (int i = mixxynth::srcMacro1; i < mixxynth::kNumModSources; ++i)
     {
-        auto* c = new SourceChip (sourceNames[i], i);
+        auto* c = new SourceChip (mixxynth::modSourceNames()[i], i);
         chips.add (c);
         modContent.addAndMakeVisible (c);
     }
@@ -1593,17 +1604,38 @@ void MiXXynthEditor::resized()
     modStatus.setBounds (railArea.removeFromBottom (32));
     modViewport.setBounds (railArea);
 
-    // Lay the strips out inside the scrolled content.
+    // Lay the modules out inside the scrolled content: LFOs, then the + LFO
+    // button, then the envelopes, then + ENV, then the performance chips.
     const int contentWidth = juce::jmax (200, modViewport.getMaximumVisibleWidth());
     const int stripH = ShapeStrip::preferredHeight();
+    const int buttonH = 22;
+    const int numLfos = proc.getNumLfoModules();
 
     int y = 0;
 
-    for (auto* s : shapeStrips)
+    // No LFOs yet: the button has to come before the envelopes.
+    if (numLfos == 0)
     {
-        s->setBounds (0, y, contentWidth, stripH);
-        y += stripH + 4;
+        addLfoButton.setBounds (4, y, contentWidth - 8, buttonH);
+        y += buttonH + 6;
     }
+
+    for (int i = 0; i < shapeStrips.size(); ++i)
+    {
+        shapeStrips[i]->setBounds (0, y, contentWidth, stripH);
+        y += stripH + 4;
+
+        // Directly under the last LFO.
+        if (i + 1 == numLfos)
+        {
+            addLfoButton.setBounds (4, y, contentWidth - 8, buttonH);
+            y += buttonH + 6;
+        }
+    }
+
+    // Directly under the last module, since the envelopes are last.
+    addEnvButton.setBounds (4, y, contentWidth - 8, buttonH);
+    y += buttonH + 8;
 
     perfChipTitle.setBounds (0, y + 2, contentWidth, 16);
     y += 22;
@@ -1677,6 +1709,117 @@ void MiXXynthEditor::shapeEdited (int index, const mixxynth::ModShape& shape)
     proc.setShape (index, shape);
 }
 
+int MiXXynthEditor::getNumShapeModules() const { return proc.getNumShapeModules(); }
+int MiXXynthEditor::getNumLfoModules() const { return proc.getNumLfoModules(); }
+
+void MiXXynthEditor::rebuildShapeStrips()
+{
+    shapeStrips.clear();
+
+    for (int i = 0; i < proc.getNumShapeModules(); ++i)
+    {
+        auto* strip = new ShapeStrip (*this, i);
+        shapeStrips.add (strip);
+        modContent.addAndMakeVisible (strip);
+    }
+
+    // Re-add the buttons so they sit above the freshly created strips.
+    modContent.addAndMakeVisible (addLfoButton);
+    modContent.addAndMakeVisible (addEnvButton);
+
+    addLfoButton.setEnabled (proc.canAddShapeModule (true));
+    addEnvButton.setEnabled (proc.canAddShapeModule (false));
+
+    resized();
+    refreshModRings();
+}
+
+void MiXXynthEditor::addShapeModule (bool lfo)
+{
+    if (proc.addShapeModule (lfo) < 0)
+    {
+        setModStatus (lfo ? "Already at 8 LFOs" : "Already at 8 envelopes");
+        return;
+    }
+
+    setModStatus (juce::String (lfo ? "Added an LFO" : "Added an envelope")
+                    + "  (" + juce::String (proc.getNumShapeModules()) + " of "
+                    + juce::String (mixxynth::kMaxShapes) + " modules)");
+
+    // Rebuilding deletes the strip whose button we are inside, so defer it.
+    juce::Component::SafePointer<MiXXynthEditor> safe (this);
+
+    juce::MessageManager::callAsync ([safe]
+    {
+        if (safe != nullptr)
+            safe->rebuildShapeStrips();
+    });
+}
+
+void MiXXynthEditor::removeShapeModule (int index)
+{
+    const int count = proc.getNumShapeModules();
+
+    if (index < 0 || index >= count)
+        return;
+
+    const bool wasLfo = proc.shapeIsLfo (index);
+    const int removedSource = proc.shapeSourceIndex (index);
+    const int numLfos = proc.getNumLfoModules();
+    const int numEnvs = count - numLfos;
+
+    // Remap the matrix BEFORE the list changes, so no slot is ever left pointing
+    // at the wrong module.
+    //
+    // Modules are stored contiguously and a module's source index is its position,
+    // so removing one shifts every LATER module of the same family down by one.
+    // The other family is unaffected: an envelope's source is
+    // srcEnv1 + (position - numLfos), and both terms drop by one when an LFO is
+    // removed, so the value is unchanged. Same reasoning the other way round.
+    for (int n = 0; n < mixxynth::kNumModSlots; ++n)
+    {
+        auto* src = choice (proc, "mod" + juce::String (n + 1) + "src");
+
+        if (src == nullptr)
+            continue;
+
+        const int s = src->getIndex();
+
+        if (s <= mixxynth::srcOff)
+            continue;
+
+        int mapped = s;
+
+        if (s == removedSource)
+            mapped = mixxynth::srcOff; // the module it pointed at is gone
+        else if (wasLfo && s > removedSource && s <= mixxynth::srcLfo1 + numLfos - 1)
+            mapped = s - 1;
+        else if (! wasLfo && s > removedSource && s <= mixxynth::srcEnv1 + numEnvs - 1)
+            mapped = s - 1;
+
+        if (mapped != s)
+        {
+            src->beginChangeGesture();
+            src->setValueNotifyingHost (src->convertTo0to1 (static_cast<float> (mapped)));
+            src->endChangeGesture();
+        }
+    }
+
+    proc.removeShapeModule (index);
+
+    setModStatus (juce::String (wasLfo ? "Removed an LFO" : "Removed an envelope")
+                    + "  (" + juce::String (proc.getNumShapeModules()) + " of "
+                    + juce::String (mixxynth::kMaxShapes) + " modules)");
+
+    juce::Component::SafePointer<MiXXynthEditor> safe (this);
+
+    juce::MessageManager::callAsync ([safe]
+    {
+        if (safe != nullptr)
+            safe->rebuildShapeStrips();
+    });
+}
+
 void MiXXynthEditor::runTabPolls()
 {
     // The matrix page watches for routing edits that need to switch the patch
@@ -1714,6 +1857,8 @@ juce::String MiXXynthEditor::sidebarDebug() const
 {
     juce::String s;
     s << "strips=" << shapeStrips.size()
+      << " lfos=" << proc.getNumLfoModules()
+      << " modules=" << proc.getNumShapeModules()
       << " chips=" << chips.size()
       << " rail=" << rail.getBounds().toString()
       << " viewport=" << modViewport.getBounds().toString()

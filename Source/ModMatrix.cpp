@@ -13,8 +13,11 @@ namespace
     const float syncCycles[] = { 0.25f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 0.125f, 0.0625f };
 
     // Must match ModSource exactly; the editor audit asserts the count.
-    const char* const sourceNames[] = { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
-                                        "Env 1", "Env 2", "Env 3",
+    const char* const sourceNames[] = { "Off",
+                                        "LFO 1", "LFO 2", "LFO 3", "LFO 4",
+                                        "LFO 5", "LFO 6", "LFO 7", "LFO 8",
+                                        "Env 1", "Env 2", "Env 3", "Env 4",
+                                        "Env 5", "Env 6", "Env 7", "Env 8",
                                         "Macro 1", "Macro 2", "Macro 3", "Macro 4",
                                         "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
                                         "Timbre" };
@@ -42,9 +45,9 @@ void ModState::reset()
 
 void ModState::noteOn (const ModParams& p)
 {
-    for (int i = 0; i < kNumShapes; ++i)
+    for (int i = 0; i < p.shapes.count(); ++i)
     {
-        const auto& shape = p.shapes[static_cast<size_t> (i)];
+        const auto& shape = p.shapes.shapes[static_cast<size_t> (i)];
         auto& s = shapeStates[static_cast<size_t> (i)];
 
         // LFOs only restart if retrigger is on; envelopes and one-shots always do.
@@ -66,9 +69,9 @@ void ModState::noteOff (const ModParams& p)
 {
     gate = false;
 
-    for (int i = 0; i < kNumShapes; ++i)
+    for (int i = 0; i < p.shapes.count(); ++i)
     {
-        const auto& shape = p.shapes[static_cast<size_t> (i)];
+        const auto& shape = p.shapes.shapes[static_cast<size_t> (i)];
 
         // Only envelope shapes release: LFOs keep running and one-shots hold.
         if (shape.mode != shapeEnv)
@@ -94,11 +97,11 @@ void computeSources (ModState& state,
     const double dt = static_cast<double> (numSamples) / juce::jmax (1.0, p.sampleRate);
     const float dtSec = static_cast<float> (dt);
 
-    // Editable shapes. The first kNumLfos feed the LFO sources, the rest feed
-    // the envelope sources. Everything is per voice, so shapes retrigger per note.
-    for (int i = 0; i < kNumShapes; ++i)
+    // Editable shape modules. The first numLfos positions feed LFO 1-8, the rest
+    // feed Env 1-8. Everything is per voice, so shapes retrigger per note.
+    for (int i = 0; i < p.shapes.count(); ++i)
     {
-        const auto& shape = p.shapes[static_cast<size_t> (i)];
+        const auto& shape = p.shapes.shapes[static_cast<size_t> (i)];
         auto& s = state.shapeStates[static_cast<size_t> (i)];
 
         float v = 0.0f;
@@ -154,10 +157,10 @@ void computeSources (ModState& state,
         s.smoothed += (v - s.smoothed) * coef;
         v = s.smoothed;
 
-        if (i < kNumLfos)
+        if (i < p.shapes.numLfos)
             out[static_cast<size_t> (srcLfo1 + i)] = v;
         else
-            out[static_cast<size_t> (srcEnv1 + (i - kNumLfos))] = v;
+            out[static_cast<size_t> (srcEnv1 + (i - p.shapes.numLfos))] = v;
     }
 
     for (int i = 0; i < kNumMacros; ++i)

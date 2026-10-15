@@ -304,7 +304,7 @@ int MiXXVoiceManager::getActiveVoiceCount() const
     return n;
 }
 
-void MiXXVoiceManager::publishShapePhases (std::array<float, mixxynth::kNumShapes>& out) const
+void MiXXVoiceManager::publishShapePhases (std::array<float, mixxynth::kMaxShapes>& out) const
 {
     out.fill (-1.0f);
 
@@ -322,7 +322,7 @@ void MiXXVoiceManager::publishShapePhases (std::array<float, mixxynth::kNumShape
     if (newest == nullptr)
         return;
 
-    for (int i = 0; i < mixxynth::kNumShapes; ++i)
+    for (int i = 0; i < mixxynth::kMaxShapes; ++i)
         out[static_cast<size_t> (i)] =
             static_cast<float> (newest->modState.shapeStates[static_cast<size_t> (i)].phase);
 }

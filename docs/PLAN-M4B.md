@@ -390,9 +390,55 @@ Every workstream lands with the same gates as the existing code:
 
 - [x] 3 Operators: on/off + wave shape
 - [x] 2 FM tab: zeroed defaults + dice
-- [ ] 1 Dynamic LFO/ENV modules
+- [x] 1 Dynamic LFO/ENV modules
 - [ ] 4 FX rack
 - [ ] 5 blueSky-style reverb
+
+### Workstream 1, as built
+
+Capacity and defaults, as agreed: **8 LFO + 8 ENV = 16 modules**, default **one of
+each**, removable down to **zero**, with `+ LFO` / `+ ENV` buttons sitting directly
+under the last module of their own family.
+
+**Storage is contiguous.** `ShapeSet` holds the modules in one array with
+`numLfos` / `numEnvs` counts: the LFOs occupy positions 0..numLfos-1 and the
+envelopes follow. That means a module's position IS its modulation source index, so
+there is no lookup table between the sidebar and the matrix.
+
+**Removal remaps the matrix rather than using stable IDs.** I said I would use
+stable IDs; contiguity turned out to be strictly better here, and for a reason
+worth recording. Because an envelope's source index is
+`srcEnv1 + (position - numLfos)`, removing an LFO drops *both* terms by one, so
+envelope indices are unchanged and only later LFOs shift down. The same holds the
+other way round. So the remap is two range checks:
+
+```
+slot source == the removed module's source      -> Off   (its module is gone)
+slot source is a later module of the same family -> source - 1
+anything else                                    -> unchanged
+```
+
+This gives contiguous "LFO 1, LFO 2, ..." naming with **no gaps**, and links follow
+their module across a removal. The audit asserts exactly that: with slot 0 on LFO 2
+and slot 1 on LFO 1, removing LFO 1 leaves slot 0 on LFO 1 (same module, renumbered)
+and clears slot 1.
+
+**Sources grew from 17 to 26** (`Off`, `LFO 1-8`, `Env 1-8`, `Macro 1-4`, Velocity,
+Mod Wheel, Aftertouch, Key Track, Timbre). The choice parameter list is fixed at
+construction, which is why capacity is a compile-time constant rather than a
+growing vector.
+
+**Removal is safe from a strip's own button** because rebuilding the sidebar would
+delete the strip whose callback is running, so the rebuild is deferred through
+`MessageManager::callAsync` with a `SafePointer`.
+
+Also fixed a latent bug found while doing this: `PluginEditor.cpp` had its own
+duplicate `sourceNames` array that went stale when the source count grew, and the
+performance-chip loop then read past its end - an access violation in the editor
+constructor. There is now one list, `mixxynth::modSourceNames()`.
+
+The audit gained 16 checks covering the default, removal to zero, insert position,
+link-following, cross-family isolation, and both capacity limits.
 
 ### Workstream 2, as built
 

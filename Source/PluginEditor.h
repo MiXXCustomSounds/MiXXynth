@@ -44,6 +44,17 @@ public:
     void shapeEdited (int index, const mixxynth::ModShape& shape);
     void setModStatus (const juce::String& text);
 
+    // LFO/ENV modules. Adding appends to the module's own family; removing
+    // compacts the list and remaps any matrix slot that referenced a later
+    // module, so links keep pointing at the same module.
+    void addShapeModule (bool lfo);
+    void removeShapeModule (int index);
+    void rebuildShapeStrips();
+
+    // Exposed so the audit can check add/remove without driving buttons.
+    int getNumShapeModules() const;
+    int getNumLfoModules() const;
+
     // Wires the shared drag-drop and modulation-ring callbacks onto a knob.
     void wireModKnob (mixxynth::ui::ModKnob& k);
 
@@ -126,6 +137,7 @@ private:
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
 
     juce::OwnedArray<ShapeStrip> shapeStrips;
+    juce::TextButton addLfoButton, addEnvButton;
     juce::OwnedArray<SourceChip> chips;
     juce::OwnedArray<mixxynth::ui::ModKnob> macroKnobs;
 

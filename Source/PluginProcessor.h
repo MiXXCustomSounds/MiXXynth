@@ -56,14 +56,36 @@ public:
     void setPitchBendFromUI (float v) { pitchBend = juce::jlimit (-1.0f, 1.0f, v); }
     void setModWheelFromUI (float v) { modWheel = juce::jlimit (0.0f, 1.0f, v); }
 
-    // Editable modulation shapes: indices 0..3 are the LFOs, 4..6 the envelopes.
-    // Edited on the message thread and read on the audio thread, so they are
-    // double-buffered with an atomic publish index: the audio thread never sees
-    // a half-written shape.
+    // Editable modulation modules. Shapes 0..numLfos-1 are the LFOs and the rest
+    // are the envelopes. Edited on the message thread and read on the audio
+    // thread, so they are double-buffered with an atomic publish index: the audio
+    // thread never sees a half-written set.
+    //
+    // `addShapeModule` / `removeShapeModule` change the list. Removing compacts
+    // it, so the CALLER must remap any matrix slot that referenced a later module
+    // before calling it - the editor does that in removeShapeModule.
     mixxynth::ModShape getShape (int index) const;
     void setShape (int index, const mixxynth::ModShape& shape);
     void resetShapeToDefault (int index);
-    static mixxynth::ModShape defaultShapeFor (int index);
+    mixxynth::ModShape defaultShapeFor (int index) const;
+
+    int getNumShapeModules() const;
+    int getNumLfoModules() const;
+    bool shapeIsLfo (int index) const;
+    bool canAddShapeModule (bool lfo) const;
+
+    // Modulation source index for a module position, matching ModSource ordering.
+    int shapeSourceIndex (int index) const;
+
+    // Appends a module of the given kind and returns its index, or -1 if full.
+    int addShapeModule (bool lfo);
+
+    // Removes the module at `index`. Callers that own modulation slots must remap
+    // them first (see MiXXynthEditor::removeShapeModule).
+    void removeShapeModule (int index);
+
+    // Clear every module (used by tests).
+    void clearShapeModules();
 
     // Published once per block for the editor's playheads (negative = idle).
     float getShapePhase (int index) const;
@@ -108,9 +130,9 @@ private:
     float aftertouch = 0.0f;
     float pitchBend = 0.0f; // -1..+1, from the host or the on-screen wheel
 
-    std::array<mixxynth::ModShape, mixxynth::kNumShapes> shapeBuffers[2];
+    std::array<mixxynth::ShapeSet, 2> shapeBuffers;
     std::atomic<int> activeShapeBuffer { 0 };
-    std::array<std::atomic<float>, mixxynth::kNumShapes> shapePhases {};
+    std::array<std::atomic<float>, mixxynth::kMaxShapes> shapePhases {};
     std::atomic<int> stateLoadCount { 0 };
 
     // Shared band-limited operator waveform tables (M4b). One copy for the whole

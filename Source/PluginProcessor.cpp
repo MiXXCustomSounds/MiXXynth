@@ -239,36 +239,142 @@ MiXXynthProcessor::MiXXynthProcessor()
     mpeInstrument.addListener (&mpeHandler);
     mpeInstrument.enableLegacyMode(); // replaced by a zone layout when MPE is on
 
-    // Default modulation shapes: four LFOs followed by three envelopes.
-    for (int i = 0; i < mixxynth::kNumShapes; ++i)
-        shapeBuffers[0][static_cast<size_t> (i)] = defaultShapeFor (i);
+    // Default modulation modules: one LFO and one envelope.
+    for (int i = 0; i < mixxynth::kDefaultLfos; ++i)
+        shapeBuffers[0].shapes[static_cast<size_t> (i)] = mixxynth::ModShape::defaultLfo();
 
+    for (int i = 0; i < mixxynth::kDefaultEnvs; ++i)
+        shapeBuffers[0].shapes[static_cast<size_t> (mixxynth::kDefaultLfos + i)] =
+            mixxynth::ModShape::defaultEnv();
+
+    shapeBuffers[0].numLfos = mixxynth::kDefaultLfos;
+    shapeBuffers[0].numEnvs = mixxynth::kDefaultEnvs;
     shapeBuffers[1] = shapeBuffers[0];
 }
 
 MiXXynthProcessor::~MiXXynthProcessor() = default;
 
-mixxynth::ModShape MiXXynthProcessor::defaultShapeFor (int index)
+mixxynth::ModShape MiXXynthProcessor::defaultShapeFor (int index) const
 {
-    return index < mixxynth::kNumLfos ? mixxynth::ModShape::defaultLfo()
-                                      : mixxynth::ModShape::defaultEnv();
+    return shapeIsLfo (index) ? mixxynth::ModShape::defaultLfo()
+                              : mixxynth::ModShape::defaultEnv();
+}
+
+int MiXXynthProcessor::getNumShapeModules() const
+{
+    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].count();
+}
+
+bool MiXXynthProcessor::shapeIsLfo (int index) const
+{
+    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].isLfo (index);
+}
+
+int MiXXynthProcessor::getNumLfoModules() const
+{
+    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].numLfos;
+}
+
+int MiXXynthProcessor::shapeSourceIndex (int index) const
+{
+    const auto& set = shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)];
+
+    if (! set.isLfo (index))
+        return mixxynth::srcEnv1 + (index - set.numLfos);
+
+    return mixxynth::srcLfo1 + index;
+}
+
+bool MiXXynthProcessor::canAddShapeModule (bool lfo) const
+{
+    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].canAdd (lfo);
+}
+
+int MiXXynthProcessor::addShapeModule (bool lfo)
+{
+    const int current = activeShapeBuffer.load (std::memory_order_acquire);
+
+    if (! shapeBuffers[current].canAdd (lfo))
+        return -1;
+
+    const int next = 1 - current;
+    shapeBuffers[next] = shapeBuffers[current];
+
+    auto& set = shapeBuffers[next];
+    const int index = lfo ? set.numLfos : set.numLfos + set.numEnvs;
+
+    // The new module goes at the end of its own family, so the LFOs stay
+    // contiguous at the front and the envelopes follow.
+    for (int i = set.count(); i > index; --i)
+        set.shapes[static_cast<size_t> (i)] = set.shapes[static_cast<size_t> (i - 1)];
+
+    set.shapes[static_cast<size_t> (index)] = lfo ? mixxynth::ModShape::defaultLfo()
+                                                  : mixxynth::ModShape::defaultEnv();
+
+    if (lfo)
+        ++set.numLfos;
+    else
+        ++set.numEnvs;
+
+    activeShapeBuffer.store (next, std::memory_order_release);
+    return index;
+}
+
+void MiXXynthProcessor::removeShapeModule (int index)
+{
+    const int current = activeShapeBuffer.load (std::memory_order_acquire);
+
+    if (index < 0 || index >= shapeBuffers[current].count())
+        return;
+
+    const int next = 1 - current;
+    shapeBuffers[next] = shapeBuffers[current];
+
+    auto& set = shapeBuffers[next];
+    const bool wasLfo = set.isLfo (index);
+
+    // Compact: everything after the removed module slides down one, so the LFOs
+    // stay contiguous at the front.
+    for (int i = index; i < set.count() - 1; ++i)
+        set.shapes[static_cast<size_t> (i)] = set.shapes[static_cast<size_t> (i + 1)];
+
+    set.shapes[static_cast<size_t> (set.count() - 1)] = mixxynth::ModShape {};
+
+    if (wasLfo)
+        --set.numLfos;
+    else
+        --set.numEnvs;
+
+    activeShapeBuffer.store (next, std::memory_order_release);
+}
+
+void MiXXynthProcessor::clearShapeModules()
+{
+    const int current = activeShapeBuffer.load (std::memory_order_acquire);
+    const int next = 1 - current;
+
+    shapeBuffers[next] = shapeBuffers[current];
+    shapeBuffers[next].numLfos = 0;
+    shapeBuffers[next].numEnvs = 0;
+    activeShapeBuffer.store (next, std::memory_order_release);
 }
 
 mixxynth::ModShape MiXXynthProcessor::getShape (int index) const
 {
-    index = juce::jlimit (0, mixxynth::kNumShapes - 1, index);
-    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)][static_cast<size_t> (index)];
+    index = juce::jlimit (0, mixxynth::kMaxShapes - 1, index);
+    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)]
+             .shapes[static_cast<size_t> (index)];
 }
 
 void MiXXynthProcessor::setShape (int index, const mixxynth::ModShape& shape)
 {
-    index = juce::jlimit (0, mixxynth::kNumShapes - 1, index);
+    index = juce::jlimit (0, mixxynth::kMaxShapes - 1, index);
 
     const int current = activeShapeBuffer.load (std::memory_order_acquire);
     const int next = 1 - current;
 
     shapeBuffers[next] = shapeBuffers[current];
-    shapeBuffers[next][static_cast<size_t> (index)] = shape;
+    shapeBuffers[next].shapes[static_cast<size_t> (index)] = shape;
     activeShapeBuffer.store (next, std::memory_order_release);
 }
 
@@ -410,10 +516,14 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
                 if (auto t = pos->getBpm())
                     bpm = *t;
 
-        for (auto& shape : mod.shapes)
+        for (int i = 0; i < mod.shapes.count(); ++i)
+        {
+            auto& shape = mod.shapes.shapes[static_cast<size_t> (i)];
+
             if (shape.sync)
                 shape.rateHz = static_cast<float> (bpm / 60.0
                                  * mixxynth::syncDivisionCyclesPerBeat (shape.syncIndex));
+        }
     }
 
     for (int i = 0; i < mixxynth::kNumMacros; ++i)
@@ -457,10 +567,10 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     // Publish the newest voice's shape phases for the editor's playheads. Single
     // writer (audio thread), single reader (UI), so relaxed atomics are enough.
     {
-        std::array<float, mixxynth::kNumShapes> phases;
+        std::array<float, mixxynth::kMaxShapes> phases;
         voiceManager.publishShapePhases (phases);
 
-        for (int i = 0; i < mixxynth::kNumShapes; ++i)
+        for (int i = 0; i < mixxynth::kMaxShapes; ++i)
             shapePhases[static_cast<size_t> (i)].store (phases[static_cast<size_t> (i)],
                                                         std::memory_order_relaxed);
     }
@@ -468,7 +578,7 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
 float MiXXynthProcessor::getShapePhase (int index) const
 {
-    index = juce::jlimit (0, mixxynth::kNumShapes - 1, index);
+    index = juce::jlimit (0, mixxynth::kMaxShapes - 1, index);
     return shapePhases[static_cast<size_t> (index)].load (std::memory_order_relaxed);
 }
 
@@ -486,7 +596,14 @@ void MiXXynthProcessor::getStateInformation (juce::MemoryBlock& destData)
 
     juce::ValueTree shapesNode ("shapes");
 
-    for (int i = 0; i < mixxynth::kNumShapes; ++i)
+    // The module counts travel with the node, so the patch reloads with the same
+    // modules it was saved with.
+    shapesNode.setProperty ("numLfos", getNumShapeModules() > 0
+                                        ? shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].numLfos
+                                        : 0, nullptr);
+    shapesNode.setProperty ("numEnvs", shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].numEnvs, nullptr);
+
+    for (int i = 0; i < getNumShapeModules(); ++i)
         shapesNode.appendChild (mixxynth::shapeToValueTree (getShape (i), "shape"), nullptr);
 
     state.appendChild (shapesNode, nullptr);
@@ -504,15 +621,42 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     auto tree = juce::ValueTree::fromXml (*xml);
 
-    // Restore the shapes before handing the tree to APVTS so a missing or
-    // partial "shapes" node simply leaves the defaults in place.
+    // Restore the modules before handing the tree to APVTS so a missing or partial
+    // "shapes" node simply leaves the defaults in place.
     if (auto shapesNode = tree.getChildWithName ("shapes"); shapesNode.isValid())
     {
-        for (int i = 0; i < mixxynth::kNumShapes; ++i)
+        const int lfos = juce::jlimit (0, mixxynth::kMaxLfos,
+                                       static_cast<int> (shapesNode.getProperty ("numLfos", -1)));
+        const int envs = juce::jlimit (0, mixxynth::kMaxModEnvs,
+                                       static_cast<int> (shapesNode.getProperty ("numEnvs", -1)));
+
+        // A node from an older build has no counts; fall back to its child list.
+        const int numLfos = lfos >= 0 ? lfos : juce::jmin (mixxynth::kMaxLfos, shapesNode.getNumChildren());
+        const int numEnvs = envs >= 0 ? envs : juce::jlimit (0, mixxynth::kMaxModEnvs,
+                                                             shapesNode.getNumChildren() - numLfos);
+
+        const int total = juce::jmin (mixxynth::kMaxShapes, numLfos + numEnvs);
+
         {
-            mixxynth::ModShape shape;
-            mixxynth::shapeFromValueTree (defaultShapeFor (i), shapesNode.getChild (i), shape);
-            setShape (i, shape);
+            const int current = activeShapeBuffer.load (std::memory_order_acquire);
+            const int next = 1 - current;
+
+            shapeBuffers[next] = shapeBuffers[current];
+            shapeBuffers[next].numLfos = numLfos;
+            shapeBuffers[next].numEnvs = total - numLfos;
+
+            for (int i = 0; i < total; ++i)
+            {
+                const bool isLfo = i < numLfos;
+                const auto fallback = isLfo ? mixxynth::ModShape::defaultLfo()
+                                            : mixxynth::ModShape::defaultEnv();
+
+                mixxynth::ModShape shape;
+                mixxynth::shapeFromValueTree (fallback, shapesNode.getChild (i), shape);
+                shapeBuffers[next].shapes[static_cast<size_t> (i)] = shape;
+            }
+
+            activeShapeBuffer.store (next, std::memory_order_release);
         }
     }
 

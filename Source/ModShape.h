@@ -22,9 +22,16 @@
 namespace mixxynth
 {
     constexpr int kMaxShapePoints = 16;
-    constexpr int kNumLfos        = 4;
-    constexpr int kNumModEnvs     = 3;
-    constexpr int kNumShapes      = kNumLfos + kNumModEnvs; // 4 LFOs + 3 ENVs
+
+    // M4b: the LFOs and envelopes are add/remove modules. Capacity is fixed at
+    // compile time because the mod matrix's source list is a parameter, and a
+    // parameter's items cannot change at runtime. The default patch has one of
+    // each, and you can add up to eight of each (16 modules in total).
+    constexpr int kMaxLfos      = 8;
+    constexpr int kMaxModEnvs   = 8;
+    constexpr int kMaxShapes    = kMaxLfos + kMaxModEnvs; // 16
+    constexpr int kDefaultLfos  = 1;
+    constexpr int kDefaultEnvs  = 1;
 
     enum ShapeMode
     {
@@ -63,6 +70,31 @@ namespace mixxynth
 
         static ModShape defaultLfo();
         static ModShape defaultEnv();
+    };
+
+    // The live module list. Shapes are stored CONTIGUOUSLY: the first numLfos
+    // entries are LFOs and the next numEnvs are envelopes, so a shape's position
+    // maps straight onto its modulation source index with no lookup table.
+    //
+    // Removing a module compacts the list and the editor remaps any matrix slot
+    // that referenced a later module, so links always keep pointing at the same
+    // module rather than at whatever slid into its place.
+    struct ShapeSet
+    {
+        std::array<ModShape, kMaxShapes> shapes {};
+        int numLfos = kDefaultLfos;
+        int numEnvs = kDefaultEnvs;
+
+        int count() const noexcept { return numLfos + numEnvs; }
+        bool isLfo (int index) const noexcept { return index >= 0 && index < numLfos; }
+        bool isEnv (int index) const noexcept { return index >= numLfos && index < count(); }
+
+        // True when there is room for another module of this kind, and a total
+        // cap of kMaxShapes.
+        bool canAdd (bool lfo) const noexcept
+        {
+            return count() < kMaxShapes && (lfo ? numLfos < kMaxLfos : numEnvs < kMaxModEnvs);
+        }
     };
 
     // Shared curve shaping, used by both the DSP and the editor so the drawing
