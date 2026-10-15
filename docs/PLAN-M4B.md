@@ -227,7 +227,7 @@ Per slot:
 
 | Param | Purpose |
 |---|---|
-| `fx{n}type` | choice: `Off`, `Reverb`, ... (grows as modules are written) |
+| `fx{n}type` | choice: `Off`, `WeirdVerb`, ... (grows as modules are written) |
 | `fx{n}bypass` | bool |
 | `fx{n}p1..fx{n}p8` | 8 generic float params, meaning assigned by the module |
 
@@ -241,7 +241,8 @@ be sized for the worst case anyway.
 ### UI
 
 - An empty rack shows just a `+` button and a short line of text.
-- `+` opens a menu of available modules (initially just `Reverb`).
+- `+` opens a menu of available modules (initially just `WeirdVerb`, which was
+  called `Reverb` until M5 renamed it - see `PLAN-M5.md`).
 - Each module renders as a **card**: title, bypass toggle, its own knobs, and two
   arrows plus a `-`.
 - **Rearrange with `^` / `v` buttons** rather than drag-and-drop. Reason: drag

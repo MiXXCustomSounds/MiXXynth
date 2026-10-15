@@ -1,7 +1,7 @@
 # M5 plan — modulation UX, module expansion, presets, visual world
 
-Status: **in progress**. Workstream 1 (modulation UX) is done and pushed as
-`be5266c`. Workstreams 2-10 are planned but not started.
+Status: **in progress**. Workstreams 1 (modulation UX) and 2 (the WeirdVerb rename)
+are done. Workstreams 3-10 are planned but not started.
 
 Restore point created before any M5 work, and pushed:
 
@@ -106,20 +106,24 @@ the second slot and leave the first alone.
 
 ## Workstream 2 — rename Reverb to WeirdVerb
 
-Small, but it touches things that are easy to miss:
+**Done.** A full rename, as chosen: class, files and display name, because more
+reverb modules are coming and `ReverbFx` would have been ambiguous next to a
+convolution reverb.
 
-- `mixxynth::fxTypeName (fxReverb)` and `ReverbFx::descriptor().name`
-- The audit asserts on the name in several places (`type=Reverb`, `comboText=Plate`)
-- `docs/PLAN-M4B.md` references
+| was | is |
+|---|---|
+| `Source/Fx/ReverbFx.{h,cpp}` | `Source/Fx/WeirdVerbFx.{h,cpp}` |
+| `class ReverbFx` | `class WeirdVerbFx` |
+| `mixxynth::fxReverb` | `mixxynth::fxWeirdVerb` |
+| `fxTypeName()` -> `"Reverb"` | -> `"WeirdVerb"` |
 
-**State compatibility is safe**: a slot's type is stored as a *choice index*, so
-renaming the entry does not move it and existing sessions keep loading.
+**State compatibility is safe.** A slot's type is stored as a *choice index*, not
+a name, so the entry moved nowhere and sessions saved before the rename still
+load with the module in the same slot.
 
-Open question: rename only the display name, or also the class and files
-(`ReverbFx` -> `WeirdVerbFx`, `Source/Fx/ReverbFx.{h,cpp}`)? The display name has
-to change; the class rename is cosmetic churn across CMakeLists and two test
-targets. I lean toward doing both while the module count is still small, because
-after six more modules land the rename gets more annoying, not less.
+The audit needed no changes for this: it asserts on the type *index* and on the
+descriptor, not on the name string, so it passed unchanged. The card title and
+the `+` menu both read `WeirdVerb` now, confirmed visually.
 
 ---
 
@@ -343,30 +347,30 @@ not just a repaint:
 
 ---
 
-## Open questions
+## Decisions
 
-Numbered so they can be answered individually, as with the M4b plan.
+Answered by the project owner. These are settled, not open.
 
-1. **Work order.** My recommendation is mod fixes → rename → modules → presets →
-   visual pass last, so every module is styled once. Do you want the faceplate
-   sooner, and if so do you accept that new modules will be built to a frozen
-   design rather than the design fitting them?
-2. **Convolution reverb IRs.** Bundled starter library, user-loaded files only, or
-   both? And is embedding an IR inside a preset acceptable to you, given it can
-   add megabytes to a patch file?
-3. **Juno chorus.** Strict emulation (mode-dependent fixed rate and depth, as the
-   hardware) or Juno-flavoured with free Rate and Depth knobs? I lean strict, with
-   a "Custom" mode for people who want to go past it.
-4. **Presets.** How many factory presets, and do you want to author them or should
-   I? Also: should the host's program list show them?
-5. **Visual assets.** Procedural (my recommendation, zero licensing exposure), or
-   downloaded CC0/CC-BY raster assets with the licensing work that implies?
-6. **Rename depth.** Display name only, or the class and files too
-   (`ReverbFx` → `WeirdVerbFx`)?
-7. **Module scope per turn.** Six new modules plus presets plus a full visual
-   redesign is a lot. Do you want them one at a time, each fully gated and
-   committed, or several per turn with a single gate at the end? I lean one at a
-   time, because each one lands with its own tests and a clean revert point.
+1. **Work order.** Mod fixes → rename → the six modules one at a time → presets →
+   visual pass last, so every module is styled once. *(chosen)*
+2. **Convolution reverb IRs.** A **bundled starter library**, with the ability for
+   the user to add their own. **Embedding the IR in a preset is the preferred
+   behaviour**, so patches are portable. Consequence to design for in WS3: the
+   state has to carry IR audio data, which means a preset can be megabytes rather
+   than kilobytes, and the embedding has to be deliberate (base64 or a binary
+   child node) rather than an accident of serialisation.
+3. **Juno chorus.** **Hardware emulation**, not a flavoured chorus. Mode-dependent
+   rate and depth as the hardware has them, because the specific sound is the
+   point.
+4. **Presets.** About **thirty placeholder factory presets**, authored by MiXX,
+   listed in a dropdown inside the plugin.
+5. **Visual assets.** **Procedural for now.** Specific downloaded images can come
+   later if a texture genuinely needs one. This means no ImageMagick install is
+   needed yet, and no licensing ledger.
+6. **Rename depth.** **Full rename** — class and files as well as the display name,
+   because more reverb modules are coming and `ReverbFx` would be ambiguous.
+7. **Module scope per turn.** **One module at a time**, each fully gated and
+   committed, so every one has its own tests and a clean revert point.
 
 ---
 

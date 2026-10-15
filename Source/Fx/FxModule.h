@@ -32,7 +32,7 @@ namespace mixxynth
     enum FxType
     {
         fxOff = 0,
-        fxReverb,
+        fxWeirdVerb,
         kNumFxTypes
     };
 

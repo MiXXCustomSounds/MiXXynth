@@ -19,7 +19,7 @@
 #include "../Source/PluginEditor.h"
 #include "../Source/PluginProcessor.h"
 #include "../Source/Fx/FxRack.h"
-#include "../Source/Fx/ReverbFx.h"
+#include "../Source/Fx/WeirdVerbFx.h"
 
 namespace
 {
@@ -1032,20 +1032,20 @@ int main()
         check (proc.fxRack().getNumInstances() == 0, "an empty rack builds no modules", "");
 
         // Adding fills the first free slot, so the chain stays dense.
-        miXXEditor->fxAddModule (mixxynth::fxReverb);
+        miXXEditor->fxAddModule (mixxynth::fxWeirdVerb);
         miXXEditor->fxRebuildCards();
 
-        check (slotType (0) == mixxynth::fxReverb, "adding puts the module in slot 1",
+        check (slotType (0) == mixxynth::fxWeirdVerb, "adding puts the module in slot 1",
                juce::String (slotType (0)));
-        check (proc.getFxSlotType (0) == mixxynth::fxReverb,
+        check (proc.getFxSlotType (0) == mixxynth::fxWeirdVerb,
                "the rack is running the module the parameter asks for", "");
-        check (proc.fxRack().hasInstance (0, mixxynth::fxReverb),
+        check (proc.fxRack().hasInstance (0, mixxynth::fxWeirdVerb),
                "the module instance exists", "");
 
         // The card must have a control per declared parameter, and none of them
         // may end up with no size.
         {
-            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxReverb);
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxWeirdVerb);
             const auto dump = miXXEditor->fxDebug();
 
             int expectedCombos = 0, expectedKnobs = 0;
@@ -1076,20 +1076,20 @@ int main()
             // Derived from the descriptor rather than hard-coded: the mode list
             // grew from three entries to five, and a test that assumes the list
             // length stops testing the binding and starts testing my arithmetic.
-            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxReverb);
-            const auto& modes = desc.params[mixxynth::ReverbFx::pMode].choices;
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxWeirdVerb);
+            const auto& modes = desc.params[mixxynth::WeirdVerbFx::pMode].choices;
             const int last = modes.size() - 1;
 
             miXXEditor->fxSetCardChoice (0, 0, last); // Mode -> last entry
 
-            check (std::abs (slotParam (0, mixxynth::ReverbFx::pMode) - 1.0f) < 1.0e-4f,
+            check (std::abs (slotParam (0, mixxynth::WeirdVerbFx::pMode) - 1.0f) < 1.0e-4f,
                    "choosing from the combo writes the generic parameter",
-                   juce::String (slotParam (0, mixxynth::ReverbFx::pMode)));
+                   juce::String (slotParam (0, mixxynth::WeirdVerbFx::pMode)));
 
             // ...and the other way round: a change from elsewhere must show up.
             const int midIndex = last / 2;
 
-            setSlotParam (0, mixxynth::ReverbFx::pMode,
+            setSlotParam (0, mixxynth::WeirdVerbFx::pMode,
                           static_cast<float> (midIndex) / static_cast<float> (last));
             miXXEditor->fxRebuildCards();
 
@@ -1102,7 +1102,7 @@ int main()
         // A module's defaults are applied when its type is chosen, so a fresh
         // module never starts silent at zero.
         {
-            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxReverb);
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxWeirdVerb);
             int defaultsApplied = 0, defaultsDeclared = 0;
 
             for (int p = 0; p < desc.numParams; ++p)
@@ -1124,34 +1124,34 @@ int main()
         }
 
         // A second module goes to the next slot, and the two do not share params.
-        miXXEditor->fxAddModule (mixxynth::fxReverb);
+        miXXEditor->fxAddModule (mixxynth::fxWeirdVerb);
         miXXEditor->fxRebuildCards();
 
-        check (slotType (1) == mixxynth::fxReverb, "the second module takes slot 2",
+        check (slotType (1) == mixxynth::fxWeirdVerb, "the second module takes slot 2",
                juce::String (slotType (1)));
 
-        setSlotParam (0, mixxynth::ReverbFx::pMix, 0.9f);
+        setSlotParam (0, mixxynth::WeirdVerbFx::pMix, 0.9f);
 
-        check (std::abs (slotParam (0, mixxynth::ReverbFx::pMix) - 0.9f) < 1.0e-4f
-                 && std::abs (slotParam (1, mixxynth::ReverbFx::pMix) - 0.35f) < 1.0e-3f,
+        check (std::abs (slotParam (0, mixxynth::WeirdVerbFx::pMix) - 0.9f) < 1.0e-4f
+                 && std::abs (slotParam (1, mixxynth::WeirdVerbFx::pMix) - 0.35f) < 1.0e-3f,
                "slots hold independent settings",
-               juce::String (slotParam (0, mixxynth::ReverbFx::pMix)) + "/"
-                 + juce::String (slotParam (1, mixxynth::ReverbFx::pMix)));
+               juce::String (slotParam (0, mixxynth::WeirdVerbFx::pMix)) + "/"
+                 + juce::String (slotParam (1, mixxynth::WeirdVerbFx::pMix)));
 
         // Reorder: swapping a pair must carry the whole slot, settings included.
         miXXEditor->fxMoveModule (1, -1);
 
-        check (std::abs (slotParam (0, mixxynth::ReverbFx::pMix) - 0.35f) < 1.0e-3f
-                 && std::abs (slotParam (1, mixxynth::ReverbFx::pMix) - 0.9f) < 1.0e-4f,
+        check (std::abs (slotParam (0, mixxynth::WeirdVerbFx::pMix) - 0.35f) < 1.0e-3f
+                 && std::abs (slotParam (1, mixxynth::WeirdVerbFx::pMix) - 0.9f) < 1.0e-4f,
                "a reorder carries the module's settings with it",
-               juce::String (slotParam (0, mixxynth::ReverbFx::pMix)) + "/"
-                 + juce::String (slotParam (1, mixxynth::ReverbFx::pMix)));
+               juce::String (slotParam (0, mixxynth::WeirdVerbFx::pMix)) + "/"
+                 + juce::String (slotParam (1, mixxynth::WeirdVerbFx::pMix)));
 
         // Removing empties the slot and the chain stays dense.
         miXXEditor->fxRemoveModule (0);
         miXXEditor->fxRebuildCards();
 
-        check (slotType (0) == mixxynth::fxReverb, "removing pulls the chain up",
+        check (slotType (0) == mixxynth::fxWeirdVerb, "removing pulls the chain up",
                juce::String (slotType (0)));
         check (slotType (1) == mixxynth::fxOff, "the freed slot is Off",
                juce::String (slotType (1)));
@@ -1178,7 +1178,7 @@ int main()
         // Capacity: eight slots, and a ninth is refused rather than overwriting.
         for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
             if (slotType (s) == mixxynth::fxOff)
-                miXXEditor->fxAddModule (mixxynth::fxReverb);
+                miXXEditor->fxAddModule (mixxynth::fxWeirdVerb);
 
         miXXEditor->fxRebuildCards();
 
@@ -1196,14 +1196,14 @@ int main()
         check (countFilled() == mixxynth::kMaxFxSlots, "all eight slots fill",
                juce::String (countFilled()));
 
-        miXXEditor->fxAddModule (mixxynth::fxReverb);
+        miXXEditor->fxAddModule (mixxynth::fxWeirdVerb);
 
         check (countFilled() == mixxynth::kMaxFxSlots,
                "a ninth module is refused, not written over", juce::String (countFilled()));
 
         // State round-trip: the rack rides in the APVTS, so it must survive.
         {
-            setSlotParam (3, mixxynth::ReverbFx::pDecay, 0.83f);
+            setSlotParam (3, mixxynth::WeirdVerbFx::pDecay, 0.83f);
 
             juce::MemoryBlock saved;
             proc.getStateInformation (saved);
@@ -1215,13 +1215,13 @@ int main()
 
             check (countFilled() == mixxynth::kMaxFxSlots,
                    "the rack survives a state round-trip", juce::String (countFilled()));
-            check (std::abs (slotParam (3, mixxynth::ReverbFx::pDecay) - 0.83f) < 1.0e-4f,
+            check (std::abs (slotParam (3, mixxynth::WeirdVerbFx::pDecay) - 0.83f) < 1.0e-4f,
                    "a slot's settings survive too",
-                   juce::String (slotParam (3, mixxynth::ReverbFx::pDecay)));
+                   juce::String (slotParam (3, mixxynth::WeirdVerbFx::pDecay)));
 
             // The loaded types must reach the audio side, not just the
             // parameters: a module the state asked for has to actually exist.
-            check (proc.getFxSlotType (3) == mixxynth::fxReverb,
+            check (proc.getFxSlotType (3) == mixxynth::fxWeirdVerb,
                    "a loaded state republishes the rack", juce::String (proc.getFxSlotType (3)));
         }
 

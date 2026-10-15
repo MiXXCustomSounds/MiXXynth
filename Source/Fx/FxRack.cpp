@@ -1,6 +1,6 @@
 #include "FxRack.h"
 
-#include "ReverbFx.h"
+#include "WeirdVerbFx.h"
 
 namespace mixxynth
 {
@@ -9,7 +9,7 @@ namespace mixxynth
         switch (type)
         {
             case fxOff:    return "Off";
-            case fxReverb: return "Reverb";
+            case fxWeirdVerb: return "WeirdVerb";
             default:       break;
         }
 
@@ -20,7 +20,7 @@ namespace mixxynth
     {
         switch (type)
         {
-            case fxReverb: return ReverbFx::descriptor();
+            case fxWeirdVerb: return WeirdVerbFx::descriptor();
             default:       break;
         }
 
@@ -54,7 +54,7 @@ namespace mixxynth
         {
             switch (type)
             {
-                case fxReverb: module = std::make_unique<ReverbFx>(); break;
+                case fxWeirdVerb: module = std::make_unique<WeirdVerbFx>(); break;
                 default:       return nullptr;
             }
 

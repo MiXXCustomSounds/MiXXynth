@@ -42,7 +42,7 @@ namespace mixxynth
     //
     // Beyond the classic controls this adds early reflections (Attack), stereo
     // width, ducking, and a shimmer (octave-up) feedback path.
-    class ReverbFx : public FxModule
+    class WeirdVerbFx : public FxModule
     {
     public:
         // Indices into the slot's generic parameter block. Must match descriptor().

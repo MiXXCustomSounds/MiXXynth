@@ -5,7 +5,7 @@
 #include "../Source/FmVoice.h"
 #include "../Source/VoiceManager.h"
 #include "../Source/Fx/FxRack.h"
-#include "../Source/Fx/ReverbFx.h"
+#include "../Source/Fx/WeirdVerbFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1178,14 +1178,14 @@ int main()
 
         // Selecting a type is what creates the module, and it happens on the
         // caller's (message) thread - never on the audio thread.
-        types[0] = mixxynth::fxReverb;
-        rack.setSlotType (0, mixxynth::fxReverb);
+        types[0] = mixxynth::fxWeirdVerb;
+        rack.setSlotType (0, mixxynth::fxWeirdVerb);
 
-        ok = check (rack.hasInstance (0, mixxynth::fxReverb),
+        ok = check (rack.hasInstance (0, mixxynth::fxWeirdVerb),
                     "selecting a type builds its module", 1.0) && ok;
 
         // Fully wet, so if the slot ran at all the output could not match.
-        params[mixxynth::ReverbFx::pMix] = 1.0f;
+        params[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
         juce::AudioBuffer<float> buf (2, 512);
 
@@ -1232,16 +1232,16 @@ int main()
 
         for (int mode = 0; mode < 5; ++mode)
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pMode] = static_cast<float> (mode) / 4.0f;
-            p[mixxynth::ReverbFx::pDecay] = 0.6f;
-            p[mixxynth::ReverbFx::pPreDelay] = 0.1f;
-            p[mixxynth::ReverbFx::pDamping] = 0.7f;
-            p[mixxynth::ReverbFx::pModDepth] = 0.3f;
-            p[mixxynth::ReverbFx::pMix] = 1.0f; // wet only
+            p[mixxynth::WeirdVerbFx::pMode] = static_cast<float> (mode) / 4.0f;
+            p[mixxynth::WeirdVerbFx::pDecay] = 0.6f;
+            p[mixxynth::WeirdVerbFx::pPreDelay] = 0.1f;
+            p[mixxynth::WeirdVerbFx::pDamping] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pModDepth] = 0.3f;
+            p[mixxynth::WeirdVerbFx::pMix] = 1.0f; // wet only
 
             // A short burst then silence, so what is measured is the tail.
             juce::AudioBuffer<float> buf (2, blockLen);
@@ -1272,20 +1272,20 @@ int main()
     {
         auto tailEnergy = [] (float size, float decay, float damp, float bass)
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pSize] = size;
-            p[mixxynth::ReverbFx::pDecay] = decay;
-            p[mixxynth::ReverbFx::pBass] = bass;
-            p[mixxynth::ReverbFx::pDamping] = damp;
-            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
-            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
-            p[mixxynth::ReverbFx::pModDepth] = 0.35f;
-            p[mixxynth::ReverbFx::pModRate] = 0.35f;
-            p[mixxynth::ReverbFx::pWidth] = 0.5f;
-            p[mixxynth::ReverbFx::pMix] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pSize] = size;
+            p[mixxynth::WeirdVerbFx::pDecay] = decay;
+            p[mixxynth::WeirdVerbFx::pBass] = bass;
+            p[mixxynth::WeirdVerbFx::pDamping] = damp;
+            p[mixxynth::WeirdVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pModDepth] = 0.35f;
+            p[mixxynth::WeirdVerbFx::pModRate] = 0.35f;
+            p[mixxynth::WeirdVerbFx::pWidth] = 0.5f;
+            p[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
             juce::AudioBuffer<float> buf (2, blockLen);
             buf.clear();
@@ -1334,16 +1334,16 @@ int main()
     {
         auto duckedLevel = [] (float duck)
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pDecay] = 0.7f;
-            p[mixxynth::ReverbFx::pDuck] = duck;
-            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
-            p[mixxynth::ReverbFx::pWidth] = 0.5f;
-            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
-            p[mixxynth::ReverbFx::pMix] = 1.0f; // wet only, or the dry would mask it
+            p[mixxynth::WeirdVerbFx::pDecay] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pDuck] = duck;
+            p[mixxynth::WeirdVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pWidth] = 0.5f;
+            p[mixxynth::WeirdVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pMix] = 1.0f; // wet only, or the dry would mask it
 
             // Continuous input, so the duck envelope is fully engaged.
             juce::AudioBuffer<float> buf (2, blockLen);
@@ -1373,14 +1373,14 @@ int main()
         // Freeze is the manual version of the same thing: hold what is in the
         // tank and ignore anything new. It has to be tested in two stages, since
         // freezing from the very start would mean nothing ever got in.
-        mixxynth::ReverbFx verb;
+        mixxynth::WeirdVerbFx verb;
         verb.prepare (sr, blockLen, 2);
 
         float p[mixxynth::kMaxFxParams] {};
-        p[mixxynth::ReverbFx::pDecay] = 0.25f; // would normally die away quickly
-        p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
-        p[mixxynth::ReverbFx::pHighCut] = 1.0f;
-        p[mixxynth::ReverbFx::pMix] = 1.0f;
+        p[mixxynth::WeirdVerbFx::pDecay] = 0.25f; // would normally die away quickly
+        p[mixxynth::WeirdVerbFx::pDiffusion] = 0.7f;
+        p[mixxynth::WeirdVerbFx::pHighCut] = 1.0f;
+        p[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
         const int half = static_cast<int> (sr * 0.5);
 
@@ -1401,7 +1401,7 @@ int main()
         juce::AudioBuffer<float> silence (2, half);
         silence.clear();
 
-        p[mixxynth::ReverbFx::pFreeze] = 1.0f;
+        p[mixxynth::WeirdVerbFx::pFreeze] = 1.0f;
         verb.process (silence, p);
         const double afterFreeze = rmsOf (silence, half - 2000, 2000);
 
@@ -1413,16 +1413,16 @@ int main()
     {
         auto correlation = [] (float width)
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pDecay] = 0.7f;
-            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
-            p[mixxynth::ReverbFx::pModDepth] = 0.35f;
-            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
-            p[mixxynth::ReverbFx::pWidth] = width;
-            p[mixxynth::ReverbFx::pMix] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pDecay] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pModDepth] = 0.35f;
+            p[mixxynth::WeirdVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pWidth] = width;
+            p[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
             juce::AudioBuffer<float> buf (2, blockLen);
             buf.clear();
@@ -1468,17 +1468,17 @@ int main()
         // really transposing rather than merely adding noise.
         auto octaveContent = [] (float shimmerAmount)
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pDecay] = 0.8f;
-            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
-            p[mixxynth::ReverbFx::pModDepth] = 0.35f;
-            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
-            p[mixxynth::ReverbFx::pWidth] = 0.5f;
-            p[mixxynth::ReverbFx::pShimmer] = shimmerAmount;
-            p[mixxynth::ReverbFx::pMix] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pDecay] = 0.8f;
+            p[mixxynth::WeirdVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::WeirdVerbFx::pModDepth] = 0.35f;
+            p[mixxynth::WeirdVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::WeirdVerbFx::pWidth] = 0.5f;
+            p[mixxynth::WeirdVerbFx::pShimmer] = shimmerAmount;
+            p[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
             juce::AudioBuffer<float> buf (2, blockLen);
 
@@ -1517,14 +1517,14 @@ int main()
 
     // --- 26. Pre-delay and mix do what they say ---
     {
-        mixxynth::ReverbFx verb;
+        mixxynth::WeirdVerbFx verb;
         verb.prepare (sr, blockLen, 2);
 
         float p[mixxynth::kMaxFxParams] {};
-        p[mixxynth::ReverbFx::pDecay] = 1.0f;    // the infinite tail
-        p[mixxynth::ReverbFx::pDamping] = 0.0f;  // fully open: least loss, hardest case
-        p[mixxynth::ReverbFx::pBass] = 1.0f;     // and the longest low end too
-        p[mixxynth::ReverbFx::pMix] = 1.0f;
+        p[mixxynth::WeirdVerbFx::pDecay] = 1.0f;    // the infinite tail
+        p[mixxynth::WeirdVerbFx::pDamping] = 0.0f;  // fully open: least loss, hardest case
+        p[mixxynth::WeirdVerbFx::pBass] = 1.0f;     // and the longest low end too
+        p[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
         // Sustained input is the case that would grow without bound if the loop
         // were not self-limiting.
@@ -1558,13 +1558,13 @@ int main()
         ok = check (lateRms > 0.0005, "infinite decay still sustains at the end", lateRms) && ok;
 
         // A finite decay must actually die away, or Decay is doing nothing.
-        mixxynth::ReverbFx shortVerb;
+        mixxynth::WeirdVerbFx shortVerb;
         shortVerb.prepare (sr, blockLen, 2);
 
         float q[mixxynth::kMaxFxParams] {};
-        q[mixxynth::ReverbFx::pDecay] = 0.0f;
-        q[mixxynth::ReverbFx::pDamping] = 0.5f;
-        q[mixxynth::ReverbFx::pMix] = 1.0f;
+        q[mixxynth::WeirdVerbFx::pDecay] = 0.0f;
+        q[mixxynth::WeirdVerbFx::pDamping] = 0.5f;
+        q[mixxynth::WeirdVerbFx::pMix] = 1.0f;
 
         juce::AudioBuffer<float> shortBuf (2, blockLen);
         shortBuf.clear();
@@ -1588,11 +1588,11 @@ int main()
     {
         // Mix at zero must leave the signal untouched.
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, 512, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pMix] = 0.0f;
+            p[mixxynth::WeirdVerbFx::pMix] = 0.0f;
 
             juce::AudioBuffer<float> buf (2, 512);
 
@@ -1616,14 +1616,14 @@ int main()
         // Pre-delay must hold the wet signal back, so a wet-only reverb produces
         // almost nothing for the first part of the pre-delay window.
         {
-            mixxynth::ReverbFx verb;
+            mixxynth::WeirdVerbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pPreDelay] = 0.5f; // ~125 ms
-            p[mixxynth::ReverbFx::pDecay] = 0.6f;
-            p[mixxynth::ReverbFx::pDamping] = 0.8f;
-            p[mixxynth::ReverbFx::pMix] = 1.0f;      // wet only
+            p[mixxynth::WeirdVerbFx::pPreDelay] = 0.5f; // ~125 ms
+            p[mixxynth::WeirdVerbFx::pDecay] = 0.6f;
+            p[mixxynth::WeirdVerbFx::pDamping] = 0.8f;
+            p[mixxynth::WeirdVerbFx::pMix] = 1.0f;      // wet only
 
             juce::AudioBuffer<float> buf (2, blockLen);
 

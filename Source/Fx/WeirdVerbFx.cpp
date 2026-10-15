@@ -1,4 +1,4 @@
-#include "ReverbFx.h"
+#include "WeirdVerbFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -149,7 +149,7 @@ namespace mixxynth
         }
     }
 
-    const std::array<float, 8>& ReverbFx::baseLengthsMs (int mode) noexcept
+    const std::array<float, 8>& WeirdVerbFx::baseLengthsMs (int mode) noexcept
     {
         static const std::array<std::array<float, numLines>, kNumModes> table = []
         {
@@ -165,12 +165,12 @@ namespace mixxynth
         return table[static_cast<size_t> (juce::jlimit (0, kNumModes - 1, mode))];
     }
 
-    const FxDescriptor& ReverbFx::descriptor()
+    const FxDescriptor& WeirdVerbFx::descriptor()
     {
         static const FxDescriptor d = []
         {
             FxDescriptor desc;
-            desc.name = "Reverb";
+            desc.name = "WeirdVerb";
             desc.numParams = kNumParams;
 
             desc.params[pMode].name = "Mode";
@@ -229,7 +229,7 @@ namespace mixxynth
         return d;
     }
 
-    void ReverbFx::prepare (double newSampleRate, int, int numChannels)
+    void WeirdVerbFx::prepare (double newSampleRate, int, int numChannels)
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
         channels = juce::jmax (2, juce::jmin (numChannels, 2));
@@ -324,7 +324,7 @@ namespace mixxynth
         reset();
     }
 
-    void ReverbFx::reset()
+    void WeirdVerbFx::reset()
     {
         for (auto& line : lines)
         {
@@ -368,14 +368,14 @@ namespace mixxynth
         duckEnvelope = 0.0f;
     }
 
-    void ReverbFx::PitchShifter::reset()
+    void WeirdVerbFx::PitchShifter::reset()
     {
         std::fill (buffer.begin(), buffer.end(), 0.0f);
         writeIndex = 0;
         phase = 0.0f;
     }
 
-    float ReverbFx::PitchShifter::read (int channel, float delaySamples) const
+    float WeirdVerbFx::PitchShifter::read (int channel, float delaySamples) const
     {
         float pos = static_cast<float> (writeIndex) - delaySamples;
 
@@ -394,7 +394,7 @@ namespace mixxynth
         return b[i0] + frac * (b[i1] - b[i0]);
     }
 
-    float ReverbFx::readLine (const Line& line, int channel, float delaySamples) const noexcept
+    float WeirdVerbFx::readLine (const Line& line, int channel, float delaySamples) const noexcept
     {
         // Wrap on CAPACITY, not on the nominal length.
         //
@@ -424,7 +424,7 @@ namespace mixxynth
         return b[i0] + frac * (b[i1] - b[i0]);
     }
 
-    void ReverbFx::updateTankLengths (int mode, float sizeScale)
+    void WeirdVerbFx::updateTankLengths (int mode, float sizeScale)
     {
         const auto& base = baseLengthsMs (mode);
         const double srScale = sampleRate / 48000.0;
@@ -473,7 +473,7 @@ namespace mixxynth
         lastSize = sizeScale;
     }
 
-    void ReverbFx::process (juce::AudioBuffer<float>& buffer, const float* params)
+    void WeirdVerbFx::process (juce::AudioBuffer<float>& buffer, const float* params)
     {
         if (! prepared || params == nullptr)
             return;
@@ -590,7 +590,7 @@ namespace mixxynth
                      lowCut01, highCut01, width01, duck01, shimmer01, mix01, freeze);
     }
 
-    void ReverbFx::processTail (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+    void WeirdVerbFx::processTail (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
                                 float preDelay01, float attack01, float rate01,
                                 float lowCut01, float highCut01, float width01, float duck01,
                                 float shimmer01, float mix01, bool freeze)
