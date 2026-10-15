@@ -29,10 +29,45 @@ bool MiXXFmVoice::isActive() const
     return false;
 }
 
+void MiXXFmVoice::setDetune (float cents)
+{
+    detuneCents = juce::jlimit (-100.0f, 100.0f, cents);
+
+    if (currentNote >= 0)
+        frequency = midiNoteToFreq (currentNote) * std::pow (2.0, static_cast<double> (detuneCents) / 1200.0);
+}
+
+void MiXXFmVoice::setPan (float pan)
+{
+    // Constant-power-ish stereo placement; centred leaves both channels at 1.
+    const float p = juce::jlimit (-1.0f, 1.0f, pan);
+    panL = (p <= 0.0f) ? 1.0f : 1.0f - p;
+    panR = (p >= 0.0f) ? 1.0f : 1.0f + p;
+}
+
+void MiXXFmVoice::reset()
+{
+    currentNote = -1;
+    gate = false;
+    frequency = 440.0;
+    velocity = 0.0f;
+
+    for (auto& op : ops)
+    {
+        op.phase = 0.0;
+        op.env = 0.0f;
+        op.stage = 0;
+        op.releaseFrom = 0.0f;
+        op.prevOut = 0.0f;
+        op.curOut = 0.0f;
+        op.fbSmooth = 0.0f;
+    }
+}
+
 void MiXXFmVoice::noteOn (int noteNumber, float vel)
 {
     currentNote = noteNumber;
-    frequency = midiNoteToFreq (noteNumber);
+    frequency = midiNoteToFreq (noteNumber) * std::pow (2.0, static_cast<double> (detuneCents) / 1200.0);
     velocity = juce::jlimit (0.0f, 1.0f, vel);
     gate = true;
 
@@ -149,9 +184,22 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 
         const float out = juce::jlimit (-1.0f, 1.0f, sum * velocity * p.master);
 
-        for (int ch = 0; ch < numCh; ++ch)
-            buffer.setSample (ch, startSample + n, out);
+        if (numCh >= 2)
+        {
+            buffer.addSample (0, startSample + n, out * panL);
+            buffer.addSample (1, startSample + n, out * panR);
+        }
+        else
+        {
+            for (int ch = 0; ch < numCh; ++ch)
+                buffer.addSample (ch, startSample + n, out);
+        }
     }
+}
+
+void MiXXFmVoice::renderAdd (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const VoiceParams& params)
+{
+    renderRange (buffer, startSample, numSamples, params);
 }
 
 void MiXXFmVoice::renderBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, const VoiceParams& params)

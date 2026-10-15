@@ -46,8 +46,24 @@ public:
     MiXXFmVoice();
 
     void setSampleRate (double sampleRate);
+
+    // M2b: per-voice pitch offset (cents) and stereo placement, set by the
+    // voice manager for unison stacks.
+    void setDetune (float cents);
+    void setPan (float pan); // -1 left .. +1 right
+
+    void noteOn (int noteNumber, float velocity);
+    void noteOff (int noteNumber);
+    void reset();
+
+    // Renders this voice and ADDS into the buffer range (polyphonic mixing).
+    void renderAdd (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const VoiceParams& params);
+
+    // Mono convenience path: clears, applies MIDI, renders. Used by tests.
     void renderBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, const VoiceParams& params);
+
     bool isActive() const;
+    int getCurrentNote() const { return currentNote; }
 
 private:
     struct Op
@@ -61,8 +77,6 @@ private:
         float fbSmooth = 0.0f; // smoothed feedback amount (zipper-free)
     };
 
-    void noteOn (int noteNumber, float velocity);
-    void noteOff (int noteNumber);
     void renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const VoiceParams& params);
     static float updateEnvelope (Op& op, float a, float d, float s, float r, double sampleRate);
 
@@ -70,6 +84,9 @@ private:
     double sampleRate = 44100.0;
     double frequency = 440.0;
     float velocity = 0.0f;
+    float detuneCents = 0.0f;
+    float panL = 1.0f;
+    float panR = 1.0f;
     int currentNote = -1;
     bool gate = false;
 };

@@ -8,7 +8,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     setResizeLimits (900, 640, 2560, 1440);
     setSize (1440, 900);
 
-    title.setText ("MiXXynth - M2a (32 DX7 algorithms + free 6x6 matrix)", juce::dontSendNotification);
+    title.setText ("MiXXynth - M2b (32-voice poly, unison x16)", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (title);
 }

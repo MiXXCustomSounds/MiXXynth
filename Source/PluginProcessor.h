@@ -3,10 +3,11 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "FmVoice.h"
+#include "VoiceManager.h"
 
-// M1b: mono 6-op FM voice. Op1 -> Op2 phase-mod pair + Ops3-6 spare carriers.
-// All 6 ops mixed to output so every per-op param is provably live.
-// Polyphony, unison, algorithm matrix, feedback, VA, filter, mod, FX land in M2-M4.
+// M2b: polyphonic 6-op FM synth. Up to 32 simultaneous notes with unison
+// stacks up to 16 voices, 64-voice pool with oldest-note stealing.
+// VA/filter, mod matrix, FX, presets land in M3/M4.
 class MiXXynthProcessor : public juce::AudioProcessor
 {
 public:
@@ -40,7 +41,7 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
-    MiXXFmVoice voice;
+    MiXXVoiceManager voiceManager;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

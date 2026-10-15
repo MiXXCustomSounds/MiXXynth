@@ -35,6 +35,8 @@ target_sources(MiXXynth PRIVATE
     Source/PluginEditor.h
     Source/FmVoice.cpp
     Source/FmVoice.h
+    Source/VoiceManager.cpp
+    Source/VoiceManager.h
     Source/Algorithms.h
 )
 
@@ -66,6 +68,7 @@ add_custom_command(TARGET MiXXynth_VST3 POST_BUILD
 add_executable(MiXXynthSmoke
     tests/Smoke.cpp
     Source/FmVoice.cpp
+    Source/VoiceManager.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils

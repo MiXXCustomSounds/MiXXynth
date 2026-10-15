@@ -72,6 +72,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
             "carrier" + juce::String (i + 1),
             "Op " + juce::String (i + 1) + " Carrier", true));
 
+    // M2b: polyphony and unison.
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "polyphony", "Polyphony", 1, 32, 16));
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "unison", "Unison Voices", 1, 16, 1));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "unisonDetune", "Unison Detune",
+        juce::NormalisableRange<float> (0.0f, 50.0f, 0.01f), 10.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "unisonSpread", "Unison Spread",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "masterGain", "Master Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
@@ -90,7 +102,7 @@ MiXXynthProcessor::~MiXXynthProcessor() = default;
 
 void MiXXynthProcessor::prepareToPlay (double sampleRate, int)
 {
-    voice.setSampleRate (sampleRate);
+    voiceManager.prepare (sampleRate);
 }
 
 void MiXXynthProcessor::releaseResources() {}
@@ -148,7 +160,13 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             vp.carrier[i] = getParam (apvts, "carrier" + juce::String (i + 1)) > 0.5f;
     }
 
-    voice.renderBlock (buffer, midi, vp);
+    MiXXVoiceManager::PolyParams poly;
+    poly.polyphony      = static_cast<int> (getParam (apvts, "polyphony"));
+    poly.unison         = static_cast<int> (getParam (apvts, "unison"));
+    poly.unisonDetune   = getParam (apvts, "unisonDetune");
+    poly.unisonSpread   = getParam (apvts, "unisonSpread");
+
+    voiceManager.renderBlock (buffer, midi, vp, poly);
 }
 
 juce::AudioProcessorEditor* MiXXynthProcessor::createEditor()

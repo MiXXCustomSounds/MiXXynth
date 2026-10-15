@@ -3,6 +3,7 @@
 // all 32 DX7 algorithms render sanely, matrix fan-out and backward edges stable.
 #include "../Source/Algorithms.h"
 #include "../Source/FmVoice.h"
+#include "../Source/VoiceManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -178,6 +179,134 @@ int main()
         double rms = 0.0;
         float peak = 0.0f;
         ok = check (renderAndCheck (p, rms, peak), "max feedback finite+bounded", rms) && ok;
+    }
+
+    // --- 5. Polyphony: three held notes allocate three voices ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        midi.addEvent (juce::MidiMessage::noteOn (1, 64, 1.0f), 0);
+        midi.addEvent (juce::MidiMessage::noteOn (1, 67, 1.0f), 0);
+        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+
+        const double rms = rmsOf (buf, static_cast<int> (sr * 0.1), static_cast<int> (sr * 0.5));
+        ok = check (vm.getActiveNoteCount() == 3, "poly: 3 notes held", vm.getActiveNoteCount()) && ok;
+        ok = check (vm.getActiveVoiceCount() == 3, "poly: 3 voices active", vm.getActiveVoiceCount()) && ok;
+        ok = check (rms > 0.001, "poly: chord audible", rms) && ok;
+    }
+
+    // --- 6. Unison: one note allocates N detuned voices, stereo-spread ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 8;
+        poly.unisonDetune = 20.0f;
+        poly.unisonSpread = 1.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+
+        // Channel energy difference proves the stereo spread is applied.
+        double sumL = 0.0, sumR = 0.0;
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float l = buf.getSample (0, i);
+            const float r = buf.getSample (1, i);
+            sumL += l * l;
+            sumR += r * r;
+        }
+
+        const double diff = std::abs (sumL - sumR);
+
+        ok = check (vm.getActiveVoiceCount() == 8, "unison: 8 voices", vm.getActiveVoiceCount()) && ok;
+        ok = check (diff > 1e-6, "unison: stereo spread applied", diff) && ok;
+    }
+
+    // --- 7. Polyphony cap: 4 notes with polyphony 2 keeps only 2 held ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 2;
+        poly.unison = 1;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer midi;
+
+        for (int n = 0; n < 4; ++n)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 60 + n, 1.0f), 0);
+
+        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+
+        ok = check (vm.getActiveNoteCount() == 2, "poly cap: 2 notes held", vm.getActiveNoteCount()) && ok;
+    }
+
+    // --- 8. Voice pool is never exceeded, even at max unison ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 32;
+        poly.unison = 16;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer midi;
+
+        for (int n = 0; n < 12; ++n)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 48 + n * 2, 1.0f), 0);
+
+        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+
+        const int voices = vm.getActiveVoiceCount();
+        ok = check (voices <= MiXXVoiceManager::maxVoices, "pool cap respected", voices) && ok;
+        ok = check (voices > 0, "pool cap: still sounding", voices) && ok;
+    }
+
+    // --- 9. Dense polyphony never exceeds full scale (interim output stage) ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 32;
+        poly.unison = 4;
+        poly.unisonDetune = 30.0f;
+        poly.unisonSpread = 1.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer midi;
+
+        for (int n = 0; n < 10; ++n)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 40 + n * 3, 1.0f), 0);
+
+        auto loud = paramsForAlgo (4);
+        loud.master = 1.0f;
+        loud.index = 10.0f;
+        vm.renderBlock (buf, midi, loud, poly);
+
+        float peak = 0.0f;
+
+        for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+            peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+        ok = check (peak <= 1.0f, "dense poly bounded (<=1.0)", peak) && ok;
+        ok = check (peak > 0.001f, "dense poly audible", peak) && ok;
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
