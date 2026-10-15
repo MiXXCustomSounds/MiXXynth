@@ -350,7 +350,7 @@ int main()
         poly.unison = 1;
 
         auto m = mod;
-        m.lfos[0].rateHz = 5.0f;
+        m.shapes[0].rateHz = 5.0f;
         m.slots[0] = { mixxynth::srcLfo1, mixxynth::dstFmIndex, 1.0f };
 
         juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
@@ -380,8 +380,16 @@ int main()
         poly.unison = 1;
 
         auto m = mod;
-        m.envs[0].attack = 0.25f;
-        m.envs[0].sustain = 1.0f;
+        // A slow one-shot ramp: flat for the first half, then rising to 1, so the
+        // master is only pulled down later in the note.
+        auto& env = m.shapes[mixxynth::kNumLfos];
+        env.numPoints = 3;
+        env.points[0] = { 0.0f, 0.0f, 0.0f };
+        env.points[1] = { 0.5f, 0.0f, 0.0f };
+        env.points[2] = { 1.0f, 1.0f, 0.0f };
+        env.mode = mixxynth::shapeOneShot;
+        env.rateHz = 1.0f;
+        env.bipolar = false;
         m.slots[0] = { mixxynth::srcEnv1, mixxynth::dstMaster, -0.8f };
 
         juce::AudioBuffer<float> buf (2, blockLen);
@@ -398,6 +406,98 @@ int main()
         ok = check (late < early, "mod: env lowers master over time", late - early) && ok;
     }
 
+    // --- Shape engine: tension, interpolation, ordering, state round-trip ---
+    {
+        using namespace mixxynth;
+
+        // Tension is an identity at the endpoints and monotonic in between.
+        ok = check (std::abs (applyTension (0.0f, 0.7f)) < 1.0e-5f
+                      && std::abs (applyTension (1.0f, -0.7f) - 1.0f) < 1.0e-5f,
+                    "shape: tension preserves endpoints",
+                    applyTension (1.0f, -0.7f)) && ok;
+
+        ok = check (applyTension (0.5f, 0.8f) > 0.5f, "shape: positive tension rises fast",
+                    applyTension (0.5f, 0.8f)) && ok;
+        ok = check (applyTension (0.5f, -0.8f) < 0.5f, "shape: negative tension rises slow",
+                    applyTension (0.5f, -0.8f)) && ok;
+
+        ModShape ramp;
+        ramp.numPoints = 2;
+        ramp.points[0] = { 0.0f, 0.0f, 0.0f };
+        ramp.points[1] = { 1.0f, 1.0f, 0.0f };
+
+        ok = check (std::abs (ramp.valueAt (0.25f) - 0.25f) < 1.0e-4f,
+                    "shape: linear ramp at 0.25", ramp.valueAt (0.25f)) && ok;
+        ok = check (std::abs (ramp.valueAt (1.5f) - 1.0f) < 1.0e-5f
+                      && std::abs (ramp.valueAt (-0.5f)) < 1.0e-5f,
+                    "shape: clamps outside the point range",
+                    ramp.valueAt (1.5f)) && ok;
+
+        // sortPoints orders x and pins the endpoints.
+        ModShape unsorted;
+        unsorted.numPoints = 3;
+        unsorted.points[0] = { 0.8f, 0.2f, 0.0f };
+        unsorted.points[1] = { 0.2f, 0.9f, 0.0f };
+        unsorted.points[2] = { 0.5f, 0.5f, 0.0f };
+        unsorted.sortPoints();
+
+        ok = check (unsorted.points[0].x == 0.0f && unsorted.points[2].x == 1.0f
+                      && std::abs (unsorted.points[0].y - 0.9f) < 1.0e-6f,
+                    "shape: sortPoints orders x and pins endpoints",
+                    unsorted.points[0].y) && ok;
+
+        const auto dl = ModShape::defaultLfo();
+        const auto de = ModShape::defaultEnv();
+
+        ok = check (dl.mode == shapeLfo && dl.bipolar && dl.numPoints >= 2,
+                    "shape: default LFO is a bipolar LFO", dl.numPoints) && ok;
+        ok = check (de.mode == shapeEnv && ! de.bipolar,
+                    "shape: default ENV is a unipolar envelope", de.mode) && ok;
+
+        // State round-trip through a ValueTree.
+        auto edited = ModShape::defaultEnv();
+        edited.numPoints = 4;
+        edited.points[0] = { 0.0f, 0.1f, -0.4f };
+        edited.points[1] = { 0.3f, 0.95f, 0.25f };
+        edited.points[2] = { 0.6f, 0.5f, 0.0f };
+        edited.points[3] = { 1.0f, 0.0f, 0.0f };
+        edited.rateHz = 3.5f;
+        edited.smooth = 0.42f;
+        edited.delaySeconds = 0.25f;
+        edited.sync = true;
+        edited.syncIndex = 5;
+        edited.retrig = false;
+        edited.mode = shapeOneShot;
+
+        ModShape restored;
+        shapeFromValueTree (ModShape::defaultLfo(), shapeToValueTree (edited, "shape"), restored);
+
+        bool same = restored.numPoints == edited.numPoints
+                      && restored.mode == edited.mode
+                      && std::abs (restored.rateHz - edited.rateHz) < 1.0e-4f
+                      && std::abs (restored.smooth - edited.smooth) < 1.0e-4f
+                      && std::abs (restored.delaySeconds - edited.delaySeconds) < 1.0e-4f
+                      && restored.sync == edited.sync
+                      && restored.syncIndex == edited.syncIndex
+                      && restored.retrig == edited.retrig;
+
+        for (int i = 0; same && i < edited.numPoints; ++i)
+        {
+            const auto& p = edited.points[static_cast<size_t> (i)];
+            const auto& q = restored.points[static_cast<size_t> (i)];
+            same = std::abs (q.x - p.x) < 1.0e-4f && std::abs (q.y - p.y) < 1.0e-4f
+                     && std::abs (q.tension - p.tension) < 1.0e-4f;
+        }
+
+        ok = check (same, "shape: state round-trip preserves the shape", restored.numPoints) && ok;
+
+        ModShape fallbackTest;
+        shapeFromValueTree (ModShape::defaultLfo(), juce::ValueTree(), fallbackTest);
+        ok = check (fallbackTest.numPoints == ModShape::defaultLfo().numPoints,
+                    "shape: invalid node keeps the fallback", fallbackTest.numPoints) && ok;
+    }
+
+
     // --- 13. Matrix-depth destination: modulating a routing depth works ---
     {
         MiXXFmVoice::VoiceParams base;
@@ -409,6 +509,7 @@ int main()
             base.ratio[i] = 1.0f;
             base.level[i] = 0.5f;
         }
+
 
         MiXXVoiceManager::PolyParams poly;
         poly.polyphony = 16;
@@ -437,6 +538,62 @@ int main()
 
         ok = check (diff > 1.0, "mod: matrix-depth destination works", diff) && ok;
     }
+    // --- Shape modes: ENV holds then releases, one-shot ignores note-off ---
+    {
+        using namespace mixxynth;
+
+        ModShape envShape;
+        envShape.numPoints = 3;
+        envShape.points[0] = { 0.0f, 0.0f, 0.0f };
+        envShape.points[1] = { 0.3f, 1.0f, 0.0f };
+        envShape.points[2] = { 1.0f, 0.8f, 0.0f };
+        envShape.mode = shapeEnv;
+        envShape.rateHz = 4.0f;
+        envShape.bipolar = false;
+        envShape.releaseSeconds = 0.05f;
+
+        auto run = [&] (const ModShape& shape, bool releaseMidway)
+        {
+            ModParams mp;
+            mp.sampleRate = sr;
+            mp.shapes[mixxynth::kNumLfos] = shape; // shape index 4 is Env 1
+
+            ModState st;
+            st.reset();
+            st.noteOn (mp);
+
+            std::array<float, kNumModSources> src {};
+
+            for (int b = 0; b < 200; ++b)
+                computeSources (st, mp, 1.0f, 60, 0.0f, 0.0f, 512, src);
+
+            const float held = src[static_cast<size_t> (srcEnv1)];
+
+            if (releaseMidway)
+                st.noteOff (mp);
+
+            for (int b = 0; b < 40; ++b)
+                computeSources (st, mp, 1.0f, 60, 0.0f, 0.0f, 512, src);
+
+            return std::pair<float, float> { held, src[static_cast<size_t> (srcEnv1)] };
+        };
+
+        const auto envMode = run (envShape, true);
+        ok = check (envMode.first > 0.7f, "shape: ENV holds its last point while held",
+                    envMode.first) && ok;
+        ok = check (envMode.second < 0.05f, "shape: ENV releases to zero on note-off",
+                    envMode.second) && ok;
+
+        auto oneShotShape = envShape;
+        oneShotShape.mode = shapeOneShot;
+        const auto oneShot = run (oneShotShape, true);
+        ok = check (oneShot.first > 0.7f, "shape: one-shot reaches its last point",
+                    oneShot.first) && ok;
+        ok = check (oneShot.second > 0.7f, "shape: one-shot ignores note-off and holds",
+                    oneShot.second) && ok;
+    }
+
+
 
     // --- 14. VA layer: every waveform renders finite, audible and bounded ---
     {

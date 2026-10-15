@@ -8,14 +8,19 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "ModKnob.h"
+#include "ModShape.h"
+#include "ShapeEditorComponent.h"
 #include "WheelComponent.h"
 
 class MiXXynthProcessor;
 
 // M3a editor: split layout.
-//   left rail  - modulation source chips, always visible, drag them onto knobs
-//   bottom bar - 4 macros + master, always visible
-//   centre     - tabbed pages (FM / Matrix / Mod / FX)
+//   left sidebar - the four LFO and three ENV shapes, drawn and edited inline,
+//                  plus a drag chip per source and the performance chips.
+//                  Always visible, whatever tab you are on, and the chips drag
+//                  onto any knob anywhere.
+//   bottom bar   - 4 macros + master, always visible
+//   centre       - tabbed pages (FM / Matrix / VA / Voice / Mod / FX)
 // Look is intentionally plain for now; the black-metal / dark-oak / glow pass
 // comes later.
 class MiXXynthEditor : public juce::AudioProcessorEditor,
@@ -35,18 +40,30 @@ public:
     void clearModDest (int destIndex);
     void refreshModRings();
 
+    // Called by the sidebar strips when a shape is edited, and for status text.
+    void shapeEdited (int index, const mixxynth::ModShape& shape);
+    void setModStatus (const juce::String& text);
+
+    // Published per-voice shape phase for the playhead, or negative when idle.
+    float shapePhaseFor (int index) const;
+
     MiXXynthProcessor& processor() { return proc; }
 
     // Every modulatable knob, so depth rings can be refreshed from the slots.
     std::vector<mixxynth::ui::ModKnob*> modKnobs;
 
     // Read-only tab access for the editor audit.
+    // getTabNames() returns by value because TabbedComponent builds a fresh
+    // StringArray; returning a reference here would dangle.
     int getNumTabs() const { return tabs.getNumTabs(); }
-    const juce::StringArray& getTabNames() const { return tabs.getTabNames(); }
+    juce::StringArray getTabNames() const { return tabs.getTabNames(); }
     juce::Component* getTabContentComponent (int index) const
     {
         return tabs.getTabContentComponent (index);
     }
+
+    // Geometry dump for the editor audit (modulation sidebar).
+    juce::String sidebarDebug() const;
 
     // Geometry dump for the editor audit (performance bar layout).
     juce::String perfBarDebug() const
@@ -61,6 +78,7 @@ public:
 
 private:
     class SourceChip;
+    class ShapeStrip;
     class FmPage;
     class MatrixPage;
     class ModPage;
@@ -73,10 +91,15 @@ private:
     juce::Label title;
     juce::Component rail;
     juce::Label railTitle;
+    juce::Viewport modViewport;
+    juce::Component modContent;
+    juce::Label perfChipTitle;
+    juce::Label modStatus;
     juce::Component bar;
     juce::Label barTitle;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
 
+    juce::OwnedArray<ShapeStrip> shapeStrips;
     juce::OwnedArray<SourceChip> chips;
     juce::OwnedArray<mixxynth::ui::ModKnob> macroKnobs;
 

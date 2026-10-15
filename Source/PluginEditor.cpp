@@ -9,7 +9,7 @@ using mixxynth::ui::ModKnob;
 namespace
 {
     const char* const sourceNames[] = { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
-                                        "Env 1", "Env 2", "Env 3", "MSEG",
+                                        "Env 1", "Env 2", "Env 3",
                                         "Macro 1", "Macro 2", "Macro 3", "Macro 4",
                                         "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
                                         "Timbre" };
@@ -65,29 +65,6 @@ namespace
 
         return t;
     }
-
-    // Choice combo wired straight to an APVTS parameter.
-    juce::ComboBox* makeChoiceCombo (MiXXynthProcessor& p, const juce::String& id)
-    {
-        auto* c = new juce::ComboBox();
-
-        if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (p.apvts.getParameter (id)))
-        {
-            for (int i = 0; i < param->choices.size(); ++i)
-                c->addItem (param->choices[i], i + 1);
-
-            c->setSelectedId (param->getIndex() + 1, juce::dontSendNotification);
-            c->onChange = [c, param]
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (
-                    param->convertTo0to1 (static_cast<float> (c->getSelectedId() - 1)));
-                param->endChangeGesture();
-            };
-        }
-
-        return c;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +105,232 @@ private:
     juce::String name;
     int src = 0;
 };
+// ---------------------------------------------------------------------------
+// Sidebar shape strip: drag chip + breakpoint editor + its controls.
+// Indices 0..3 are the LFOs, 4..6 the envelopes. Everything edits the ModShape
+// directly - shapes are state, not parameters, exactly as in Serum and Vital -
+// so there is nothing to automate here, you just draw and play.
+// ---------------------------------------------------------------------------
+class MiXXynthEditor::ShapeStrip : public juce::Component
+{
+public:
+    ShapeStrip (MiXXynthEditor& owner, int shapeIndex)
+        : ed (owner), index (shapeIndex)
+    {
+        const bool isLfo = index < mixxynth::kNumLfos;
+        const int src = isLfo ? (mixxynth::srcLfo1 + index)
+                              : (mixxynth::srcEnv1 + (index - mixxynth::kNumLfos));
+
+        chip = std::make_unique<SourceChip> (sourceNames[src], src);
+        addAndMakeVisible (*chip);
+
+        modeBox.addItemList ({ "LFO", "ENV", "One-shot" }, 1);
+        addAndMakeVisible (modeBox);
+
+        resetButton.setButtonText ("reset");
+        resetButton.onClick = [this]
+        {
+            ed.processor().resetShapeToDefault (index);
+            load();
+            ed.setModStatus (chipName() + " reset to default");
+        };
+        addAndMakeVisible (resetButton);
+
+        addAndMakeVisible (shapeEditor);
+        shapeEditor.setGridDivisions (16);
+        shapeEditor.setAccentColour (isLfo ? juce::Colour (0xff35e0ff) : juce::Colour (0xffffa63d));
+        shapeEditor.onChange = [this] { ed.shapeEdited (index, shapeEditor.getShape()); };
+        shapeEditor.onStatus = [this] (const juce::String& t) { ed.setModStatus (chipName() + ": " + t); };
+
+        configureBar (rateBar, "Rate (Hz)", 0.01, 40.0);
+        configureBar (smoothBar, "Smooth", 0.0, 1.0);
+        configureBar (phaseBar, "Phase", 0.0, 1.0);
+        configureBar (delayBar, "Delay (s)", 0.0, 5.0);
+
+        syncButton.setButtonText ("sync");
+        divBox.addItemList (syncDivisionList(), 1);
+        bipolarButton.setButtonText ("bip");
+        retrigButton.setButtonText ("rtg");
+
+        for (auto* c : { &rateBar, &smoothBar, &phaseBar, &delayBar })
+            addAndMakeVisible (*c);
+
+        addAndMakeVisible (syncButton);
+        addAndMakeVisible (divBox);
+        addAndMakeVisible (bipolarButton);
+        addAndMakeVisible (retrigButton);
+
+        rateBar.onValueChange = [this] { store(); };
+        smoothBar.onValueChange = [this] { store(); };
+        phaseBar.onValueChange = [this] { store(); };
+        delayBar.onValueChange = [this] { store(); };
+        syncButton.onClick = [this] { store(); updateEnablement(); };
+        divBox.onChange = [this] { store(); };
+        bipolarButton.onClick = [this] { store(); };
+        retrigButton.onClick = [this] { store(); };
+        modeBox.onChange = [this] { store(); updateEnablement(); };
+
+        load();
+    }
+
+    static int preferredHeight() { return 22 + 2 + 88 + 3 + 20 + 20 + 6; }
+
+    // Called from the editor's timer: advances the playhead and picks up any
+    // external change (preset load) without clobbering an in-progress drag.
+    void poll (float phase)
+    {
+        shapeEditor.setPlayhead (phase);
+
+        if (shapeEditor.isEditing())
+            return;
+
+        if (! sameShape (ed.processor().getShape (index), shapeEditor.getShape()))
+            load();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colour (0xff11151a));
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (3);
+        auto top = b.removeFromTop (22);
+        chip->setBounds (top.removeFromLeft (86));
+        top.removeFromLeft (4);
+        resetButton.setBounds (top.removeFromRight (48).reduced (0, 1));
+        modeBox.setBounds (top.reduced (0, 1));
+
+        b.removeFromTop (2);
+        shapeEditor.setBounds (b.removeFromTop (88));
+
+        b.removeFromTop (3);
+
+        auto r3 = b.removeFromTop (20);
+        rateBar.setBounds (r3.removeFromLeft (112).reduced (1, 0));
+        syncButton.setBounds (r3.removeFromLeft (44).reduced (1, 0));
+        divBox.setBounds (r3.removeFromLeft (66).reduced (1, 0));
+        smoothBar.setBounds (r3.reduced (1, 0));
+
+        auto r4 = b.removeFromTop (20);
+        phaseBar.setBounds (r4.removeFromLeft (112).reduced (1, 0));
+        bipolarButton.setBounds (r4.removeFromLeft (44).reduced (1, 0));
+        retrigButton.setBounds (r4.removeFromLeft (44).reduced (1, 0));
+        delayBar.setBounds (r4.reduced (1, 0));
+    }
+
+private:
+    // PART_TWO
+
+    static void configureBar (juce::Slider& s, const juce::String& name, double lo, double hi)
+    {
+        s.setSliderStyle (juce::Slider::LinearHorizontal);
+        s.setRange (lo, hi, 0.001);
+        s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 16);
+        s.setName (name);
+        s.setTooltip (name);
+    }
+
+    static juce::StringArray syncDivisionList()
+    {
+        juce::StringArray a;
+
+        for (int i = 0; i < mixxynth::numSyncDivisions(); ++i)
+            a.add (mixxynth::syncDivisionNames()[i]);
+
+        return a;
+    }
+
+    static bool sameShape (const mixxynth::ModShape& a, const mixxynth::ModShape& b)
+    {
+        if (a.numPoints != b.numPoints || a.mode != b.mode
+              || std::abs (a.rateHz - b.rateHz) > 1.0e-4f
+              || std::abs (a.smooth - b.smooth) > 1.0e-4f
+              || std::abs (a.phase - b.phase) > 1.0e-4f
+              || std::abs (a.delaySeconds - b.delaySeconds) > 1.0e-4f
+              || a.sync != b.sync || a.syncIndex != b.syncIndex
+              || a.bipolar != b.bipolar || a.retrig != b.retrig)
+            return false;
+
+        for (int i = 0; i < a.numPoints; ++i)
+        {
+            const auto& p = a.points[static_cast<size_t> (i)];
+            const auto& q = b.points[static_cast<size_t> (i)];
+
+            if (std::abs (p.x - q.x) > 1.0e-4f
+                  || std::abs (p.y - q.y) > 1.0e-4f
+                  || std::abs (p.tension - q.tension) > 1.0e-4f)
+                return false;
+        }
+
+        return true;
+    }
+
+    juce::String chipName() const
+    {
+        return index < mixxynth::kNumLfos ? "LFO " + juce::String (index + 1)
+                                          : "Env " + juce::String (index - mixxynth::kNumLfos + 1);
+    }
+
+    // Reads every control back into the shape and publishes it.
+    void store()
+    {
+        auto s = shapeEditor.getShape();
+        s.mode = juce::jlimit (0, mixxynth::kNumShapeModes - 1, modeBox.getSelectedId() - 1);
+        s.rateHz = static_cast<float> (rateBar.getValue());
+        s.smooth = static_cast<float> (smoothBar.getValue());
+        s.phase = static_cast<float> (phaseBar.getValue());
+        s.delaySeconds = static_cast<float> (delayBar.getValue());
+        s.sync = syncButton.getToggleState();
+        s.syncIndex = juce::jmax (0, divBox.getSelectedId() - 1);
+        s.bipolar = bipolarButton.getToggleState();
+        s.retrig = retrigButton.getToggleState();
+        shapeEditor.setShape (s);
+        ed.shapeEdited (index, s);
+    }
+
+    // Pushes processor state into the controls (constructor and preset loads).
+    void load()
+    {
+        const auto s = ed.processor().getShape (index);
+        shapeEditor.setShape (s);
+        modeBox.setSelectedId (s.mode + 1, juce::dontSendNotification);
+        rateBar.setValue (s.rateHz, juce::dontSendNotification);
+        smoothBar.setValue (s.smooth, juce::dontSendNotification);
+        phaseBar.setValue (s.phase, juce::dontSendNotification);
+        delayBar.setValue (s.delaySeconds, juce::dontSendNotification);
+        syncButton.setToggleState (s.sync, juce::dontSendNotification);
+        divBox.setSelectedId (juce::jlimit (1, juce::jmax (1, divBox.getNumItems()), s.syncIndex + 1),
+                              juce::dontSendNotification);
+        bipolarButton.setToggleState (s.bipolar, juce::dontSendNotification);
+        retrigButton.setToggleState (s.retrig, juce::dontSendNotification);
+        updateEnablement();
+    }
+
+    void updateEnablement()
+    {
+        const bool isLfo = modeBox.getSelectedId() == 1;
+        syncButton.setEnabled (isLfo);
+        divBox.setEnabled (isLfo && syncButton.getToggleState());
+        retrigButton.setEnabled (isLfo);
+        bipolarButton.setEnabled (isLfo);
+    }
+
+    MiXXynthEditor& ed;
+    int index = 0;
+
+    std::unique_ptr<SourceChip> chip;
+    mixxynth::ShapeEditorComponent shapeEditor;
+    juce::ComboBox modeBox;
+    juce::TextButton resetButton;
+    juce::Slider rateBar, smoothBar, phaseBar, delayBar;
+    juce::TextButton syncButton, bipolarButton, retrigButton;
+    juce::ComboBox divBox;
+};
+
+
 
 // ---------------------------------------------------------------------------
 // FM page: algorithm + FM index + per-op ratio/level/feedback/ADSR
@@ -435,7 +638,8 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// Mod page: 32 slot rows plus the LFO / envelope / MSEG source editors
+// Mod page: the 32 matrix slot rows. The LFO and envelope shapes are edited in
+// the always-visible sidebar, not here.
 // ---------------------------------------------------------------------------
 class MiXXynthEditor::ModPage : public juce::Component
 {
@@ -458,166 +662,24 @@ public:
         viewport.setScrollBarsShown (true, false);
         addAndMakeVisible (viewport);
 
-        // LFO editors.
-        for (int n = 0; n < mixxynth::kNumLfos; ++n)
-        {
-            const juce::String id = juce::String (n + 1);
-
-            auto* l = new juce::Label();
-            l->setText ("LFO " + id, juce::dontSendNotification);
-            lfoLabels.add (l);
-            addAndMakeVisible (l);
-
-            auto* c = new juce::ComboBox();
-            lfoShapes.add (c);
-            addAndMakeVisible (c);
-
-            if (auto* shapeParam = choice (p, "lfo" + id + "shape"))
-            {
-                for (int i = 0; i < shapeParam->choices.size(); ++i)
-                    c->addItem (shapeParam->choices[i], i + 1);
-
-                c->setSelectedId (shapeParam->getIndex() + 1, juce::dontSendNotification);
-                c->onChange = [c, shapeParam]
-                {
-                    shapeParam->beginChangeGesture();
-                    shapeParam->setValueNotifyingHost (
-                        shapeParam->convertTo0to1 (static_cast<float> (c->getSelectedId() - 1)));
-                    shapeParam->endChangeGesture();
-                };
-            }
-
-            auto* rate = new ModKnob ("Rate", ranged (p, "lfo" + id + "rate"), mixxynth::dstOff, true);
-            lfoRates.add (rate);
-            addAndMakeVisible (rate);
-            ed.modKnobs.push_back (rate);
-
-            auto* bip = makeBoolToggle (p, "lfo" + id + "bipolar", "bipolar");
-            lfoBipolar.add (bip);
-            addAndMakeVisible (bip);
-
-            auto* sync = makeBoolToggle (p, "lfo" + id + "sync", "sync");
-            lfoSync.add (sync);
-            addAndMakeVisible (sync);
-
-            auto* div = makeChoiceCombo (p, "lfo" + id + "syncDiv");
-            lfoDiv.add (div);
-            addAndMakeVisible (div);
-
-            auto* phase = new ModKnob ("Phase", ranged (p, "lfo" + id + "phase"), mixxynth::dstOff, true);
-            lfoPhase.add (phase);
-            addAndMakeVisible (phase);
-            ed.modKnobs.push_back (phase);
-
-            auto* retrig = makeBoolToggle (p, "lfo" + id + "retrig", "retrig");
-            lfoRetrig.add (retrig);
-            addAndMakeVisible (retrig);
-        }
-
-        // Modulation envelopes.
-        for (int n = 0; n < mixxynth::kNumModEnvs; ++n)
-        {
-            const juce::String id = juce::String (n + 1);
-
-            auto* l = new juce::Label();
-            l->setText ("Env " + id, juce::dontSendNotification);
-            envLabels.add (l);
-            addAndMakeVisible (l);
-
-            const char* const suffix[4] = { "a", "d", "s", "r" };
-            const char* const names[4] = { "A", "D", "S", "R" };
-
-            for (int k = 0; k < 4; ++k)
-            {
-                auto* kn = new ModKnob (names[k], ranged (p, "menv" + id + suffix[k]), mixxynth::dstOff, true);
-                envKnobs.add (kn);
-                addAndMakeVisible (kn);
-                ed.modKnobs.push_back (kn);
-            }
-        }
-
-        // MSEG-lite steps.
-        for (int i = 0; i < mixxynth::kNumMsegSteps; ++i)
-        {
-            auto* s = new juce::Slider (juce::Slider::LinearVertical, juce::Slider::NoTextBox);
-            msegSliders.add (s);
-            addAndMakeVisible (s);
-
-            if (auto* param = dynamic_cast<juce::AudioParameterFloat*> (ranged (p, "mseg" + juce::String (i + 1))))
-            {
-                s->setRange (param->range.start, param->range.end, 0.001);
-                s->setValue (param->get(), juce::dontSendNotification);
-                s->onValueChange = [s, param]
-                {
-                    param->beginChangeGesture();
-                    param->setValueNotifyingHost (param->convertTo0to1 (static_cast<float> (s->getValue())));
-                    param->endChangeGesture();
-                };
-            }
-        }
-
-        msegRate = new ModKnob ("MSEG Rate", ranged (p, "msegRate"), mixxynth::dstOff, true);
-        addAndMakeVisible (msegRate);
-        ed.modKnobs.push_back (msegRate);
-
-        msegLoop = makeBoolToggle (p, "msegLoop", "MSEG loop");
-        addAndMakeVisible (msegLoop);
     }
 
     void paint (juce::Graphics& g) override
     {
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("32 slots. Drag a source chip from the left rail onto any knob, or set source/destination here. "
-                          "Right-click a knob to clear its modulation.",
-                          getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
+        g.drawFittedText ("32 slots. Drag a source onto any knob - use the chip on any shape in the left sidebar, "
+                          "or a performance chip - or set source and destination here. Right-click a knob to clear "
+                          "its modulation. The four LFOs and three envelopes are drawn and edited in the sidebar, "
+                          "and stay visible on every tab.",
+                          getLocalBounds().removeFromTop (46), juce::Justification::centredLeft, 3);
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (8);
-        b.removeFromTop (18);
-
-        auto right = b.removeFromRight (juce::jmax (300, b.getWidth() / 2));
-        viewport.setBounds (b.reduced (0, 2));
-
-        auto contentArea = right.reduced (4);
-        const int rowH = 46;
-
-        for (int n = 0; n < mixxynth::kNumLfos; ++n)
-        {
-            auto row = contentArea.removeFromTop (rowH);
-            lfoLabels[n]->setBounds (row.removeFromLeft (44));
-            lfoShapes[n]->setBounds (row.removeFromLeft (78).reduced (2, 8));
-            lfoRates[n]->setBounds (row.removeFromLeft (58));
-            lfoBipolar[n]->setBounds (row.removeFromLeft (66).reduced (2, 8));
-            lfoSync[n]->setBounds (row.removeFromLeft (52).reduced (2, 8));
-            lfoDiv[n]->setBounds (row.removeFromLeft (70).reduced (2, 8));
-            lfoPhase[n]->setBounds (row.removeFromLeft (56));
-            lfoRetrig[n]->setBounds (row.removeFromLeft (62).reduced (2, 8));
-        }
-
-        contentArea.removeFromTop (4);
-
-        for (int n = 0; n < mixxynth::kNumModEnvs; ++n)
-        {
-            auto row = contentArea.removeFromTop (rowH);
-            envLabels[n]->setBounds (row.removeFromLeft (48));
-
-            for (int k = 0; k < 4; ++k)
-                envKnobs[n * 4 + k]->setBounds (row.removeFromLeft (juce::jmax (44, row.getWidth() / (4 - k))));
-        }
-
-        contentArea.removeFromTop (4);
-
-        auto msegRow = contentArea.removeFromTop (juce::jmax (70, contentArea.getHeight() - 60));
-        msegRate->setBounds (msegRow.removeFromRight (70));
-
-        if (msegLoop != nullptr)
-            msegLoop->setBounds (msegRow.removeFromRight (110).reduced (2, 4));
-
-        for (auto* s : msegSliders)
-            s->setBounds (msegRow.removeFromLeft (juce::jmax (14, msegRow.getWidth() / mixxynth::kNumMsegSteps)).reduced (1));
+        b.removeFromTop (46);
+        viewport.setBounds (b);
     }
 
 private:
@@ -627,19 +689,6 @@ private:
     juce::Viewport viewport;
     juce::Component content;
     juce::OwnedArray<SlotRow> rows;
-    juce::OwnedArray<juce::Label> lfoLabels;
-    juce::OwnedArray<juce::ComboBox> lfoShapes;
-    juce::OwnedArray<ModKnob> lfoRates;
-    juce::OwnedArray<juce::ToggleButton> lfoBipolar;
-    juce::OwnedArray<juce::ToggleButton> lfoSync;
-    juce::OwnedArray<juce::ComboBox> lfoDiv;
-    juce::OwnedArray<ModKnob> lfoPhase;
-    juce::OwnedArray<juce::ToggleButton> lfoRetrig;
-    juce::OwnedArray<juce::Label> envLabels;
-    juce::OwnedArray<ModKnob> envKnobs;
-    juce::OwnedArray<juce::Slider> msegSliders;
-    ModKnob* msegRate = nullptr;
-    juce::ToggleButton* msegLoop = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -921,18 +970,43 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     title.setFont (juce::FontOptions (22.0f));
     addAndMakeVisible (title);
 
-    railTitle.setText ("MOD SOURCES", juce::dontSendNotification);
-    railTitle.setJustificationType (juce::Justification::centred);
+    railTitle.setText ("MODULATION", juce::dontSendNotification);
+    railTitle.setJustificationType (juce::Justification::centredLeft);
     railTitle.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
     rail.addAndMakeVisible (railTitle);
     addAndMakeVisible (rail);
 
-    for (int i = 1; i < mixxynth::kNumModSources; ++i)
+    // The sidebar is a scrollable stack of editable shapes, one per LFO and ENV.
+    rail.addAndMakeVisible (modViewport);
+    modViewport.setViewedComponent (&modContent, false);
+    modViewport.setScrollBarsShown (true, false);
+
+    for (int i = 0; i < mixxynth::kNumShapes; ++i)
+    {
+        auto* strip = new ShapeStrip (*this, i);
+        shapeStrips.add (strip);
+        modContent.addAndMakeVisible (strip);
+    }
+
+    // Performance sources keep the chip workflow: macros plus the MIDI inputs.
+    perfChipTitle.setText ("PERFORMANCE  (drag onto a knob)", juce::dontSendNotification);
+    perfChipTitle.setJustificationType (juce::Justification::centredLeft);
+    perfChipTitle.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+    perfChipTitle.setFont (juce::FontOptions (10.5f));
+    modContent.addAndMakeVisible (perfChipTitle);
+
+    for (int i = mixxynth::srcMacro1; i < mixxynth::kNumModSources; ++i)
     {
         auto* c = new SourceChip (sourceNames[i], i);
         chips.add (c);
-        rail.addAndMakeVisible (c);
+        modContent.addAndMakeVisible (c);
     }
+
+    modStatus.setText ("Drag a shape's chip onto any knob to modulate it.", juce::dontSendNotification);
+    modStatus.setJustificationType (juce::Justification::centredLeft);
+    modStatus.setColour (juce::Label::textColourId, juce::Colour (0xff7c8a99));
+    modStatus.setFont (juce::FontOptions (10.5f));
+    rail.addAndMakeVisible (modStatus);
 
     barTitle.setText ("MACROS", juce::dontSendNotification);
     barTitle.setJustificationType (juce::Justification::centredLeft);
@@ -1015,7 +1089,9 @@ void MiXXynthEditor::resized()
 
     title.setBounds (b.removeFromTop (34).reduced (10, 4));
 
-    rail.setBounds (b.removeFromLeft (140));
+    // The sidebar is wide enough for the shape editors and never scrolls away,
+    // so the LFOs and envelopes are visible on every tab.
+    rail.setBounds (b.removeFromLeft (312));
     bar.setBounds (b.removeFromBottom (86));
     perfBar.setBounds (b.removeFromBottom (96));
 
@@ -1023,9 +1099,42 @@ void MiXXynthEditor::resized()
 
     auto railArea = rail.getLocalBounds().reduced (6);
     railTitle.setBounds (railArea.removeFromTop (18));
+    modStatus.setBounds (railArea.removeFromBottom (32));
+    modViewport.setBounds (railArea);
+
+    // Lay the strips out inside the scrolled content.
+    const int contentWidth = juce::jmax (200, modViewport.getMaximumVisibleWidth());
+    const int stripH = ShapeStrip::preferredHeight();
+
+    int y = 0;
+
+    for (auto* s : shapeStrips)
+    {
+        s->setBounds (0, y, contentWidth, stripH);
+        y += stripH + 4;
+    }
+
+    perfChipTitle.setBounds (0, y + 2, contentWidth, 16);
+    y += 22;
+
+    const int chipH = 22;
+    const int chipW = juce::jmax (90, (contentWidth - 4) / 2);
+    int column = 0;
+    int rowY = y;
 
     for (auto* c : chips)
-        c->setBounds (railArea.removeFromTop (24).reduced (2, 1));
+    {
+        c->setBounds (column * (chipW + 4), rowY, chipW, chipH);
+        ++column;
+
+        if (column == 2)
+        {
+            column = 0;
+            rowY += chipH + 2;
+        }
+    }
+
+    modContent.setSize (contentWidth, rowY + chipH + 8);
 
     auto barArea = bar.getLocalBounds().reduced (8);
     barTitle.setBounds (barArea.removeFromLeft (64));
@@ -1057,6 +1166,10 @@ void MiXXynthEditor::timerCallback()
 {
     refreshModRings();
 
+    // Advance the shape playheads and pick up preset loads.
+    for (int i = 0; i < shapeStrips.size(); ++i)
+        shapeStrips[i]->poll (shapePhaseFor (i));
+
     // The wheels follow incoming MIDI; the keyboard repaints itself from its
     // MidiKeyboardState listener. A faster timer keeps the wheels looking live.
     if (pitchWheel != nullptr)
@@ -1064,6 +1177,52 @@ void MiXXynthEditor::timerCallback()
 
     if (modWheel != nullptr)
         modWheel->setValueFromMidi (proc.getModWheelValue());
+}
+
+void MiXXynthEditor::shapeEdited (int index, const mixxynth::ModShape& shape)
+{
+    proc.setShape (index, shape);
+}
+
+void MiXXynthEditor::setModStatus (const juce::String& text)
+{
+    modStatus.setText (text, juce::dontSendNotification);
+}
+
+float MiXXynthEditor::shapePhaseFor (int index) const
+{
+    return proc.getShapePhase (index);
+}
+
+juce::String MiXXynthEditor::sidebarDebug() const
+{
+    juce::String s;
+    s << "strips=" << shapeStrips.size()
+      << " chips=" << chips.size()
+      << " rail=" << rail.getBounds().toString()
+      << " viewport=" << modViewport.getBounds().toString()
+      << " content=" << modContent.getBounds().toString();
+
+    int minH = 100000;
+    bool allVisible = true;
+    bool allInRail = true;
+
+    for (auto* st : shapeStrips)
+    {
+        minH = juce::jmin (minH, st->getHeight());
+        allVisible = allVisible && st->isVisible();
+
+        // The strip is a child of the scrolled content, so its x is relative to
+        // that; the rail check is really about the content being inside the rail.
+        allInRail = allInRail && st->getWidth() > 0;
+    }
+
+    s << " minStripH=" << (shapeStrips.isEmpty() ? 0 : minH)
+      << " allVisible=" << (allVisible ? 1 : 0)
+      << " allSized=" << (allInRail ? 1 : 0)
+      << " scrolls=" << (modContent.getHeight() > modViewport.getHeight() ? 1 : 0);
+
+    return s;
 }
 
 void MiXXynthEditor::assignModSlot (int srcIndex, int destIndex)

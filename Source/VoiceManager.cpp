@@ -295,3 +295,26 @@ int MiXXVoiceManager::getActiveVoiceCount() const
 
     return n;
 }
+
+void MiXXVoiceManager::publishShapePhases (std::array<float, mixxynth::kNumShapes>& out) const
+{
+    out.fill (-1.0f);
+
+    const Slot* newest = nullptr;
+
+    for (const auto& s : slots)
+    {
+        if (s.note < 0)
+            continue;
+
+        if (newest == nullptr || s.order > newest->order)
+            newest = &s;
+    }
+
+    if (newest == nullptr)
+        return;
+
+    for (int i = 0; i < mixxynth::kNumShapes; ++i)
+        out[static_cast<size_t> (i)] =
+            static_cast<float> (newest->modState.shapeStates[static_cast<size_t> (i)].phase);
+}

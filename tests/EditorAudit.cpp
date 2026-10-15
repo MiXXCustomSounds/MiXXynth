@@ -69,21 +69,8 @@ namespace
     // Parameters driven by controls other than ModKnob (combos, toggles, sliders).
     std::set<juce::String> nonKnobUiParams()
     {
-        std::set<juce::String> s { "algorithm", "vaWave", "vaOctave", "filterType", "filterOn", "msegLoop",
+        std::set<juce::String> s { "algorithm", "vaWave", "vaOctave", "filterType", "filterOn",
                                    "mpeEnabled", "mpeMemberChannels" };
-
-        for (int i = 0; i < mixxynth::kNumMsegSteps; ++i)
-            s.insert ("mseg" + juce::String (i + 1));
-
-        for (int n = 0; n < mixxynth::kNumLfos; ++n)
-        {
-            const juce::String id = juce::String (n + 1);
-            s.insert ("lfo" + id + "shape");
-            s.insert ("lfo" + id + "sync");
-            s.insert ("lfo" + id + "syncDiv");
-            s.insert ("lfo" + id + "retrig");
-            s.insert ("lfo" + id + "bipolar");
-        }
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
             s.insert ("carrier" + juce::String (i + 1));
@@ -164,10 +151,11 @@ int main()
         check (nameAt (mixxynth::srcOff) == "Off", "src[Off]", nameAt (mixxynth::srcOff));
         check (nameAt (mixxynth::srcLfo1) == "LFO 1", "src[Lfo1]", nameAt (mixxynth::srcLfo1));
         check (nameAt (mixxynth::srcEnv1) == "Env 1", "src[Env1]", nameAt (mixxynth::srcEnv1));
-        check (nameAt (mixxynth::srcMseg) == "MSEG", "src[Mseg]", nameAt (mixxynth::srcMseg));
         check (nameAt (mixxynth::srcMacro1) == "Macro 1", "src[Macro1]", nameAt (mixxynth::srcMacro1));
         check (nameAt (mixxynth::srcKeyTrack) == "Key Track", "src[KeyTrack]", nameAt (mixxynth::srcKeyTrack));
         check (nameAt (mixxynth::srcTimbre) == "Timbre", "src[Timbre]", nameAt (mixxynth::srcTimbre));
+        check (names.size() == mixxynth::kNumModSources, "source name count matches kNumModSources",
+               juce::String (names.size()) + " vs " + juce::String (mixxynth::kNumModSources));
     }
     else
     {
@@ -366,6 +354,27 @@ int main()
         check (page != nullptr && ! page->getChildren().isEmpty(),
                "tab " + juce::String (i) + " (" + name + ") has content",
                juce::String (page != nullptr ? page->getChildren().size() : 0));
+    }
+
+    // The modulation sidebar: one editable shape per LFO and ENV, always visible
+    // because it is a sibling of the tabs rather than a tab's child.
+    {
+        const auto dbg = miXXEditor->sidebarDebug();
+        std::printf ("     %s\n", dbg.toRawUTF8());
+
+        check (dbg.contains ("strips=" + juce::String (mixxynth::kNumShapes)),
+               "sidebar has one strip per shape", dbg.upToFirstOccurrenceOf (" chips=", false, false));
+
+        const int minStripH = dbg.fromFirstOccurrenceOf ("minStripH=", false, false)
+                                 .upToFirstOccurrenceOf (" ", false, false).getIntValue();
+        const int allVisible = dbg.fromFirstOccurrenceOf ("allVisible=", false, false)
+                                  .upToFirstOccurrenceOf (" ", false, false).getIntValue();
+        const int allSized = dbg.fromFirstOccurrenceOf ("allSized=", false, false)
+                                .upToFirstOccurrenceOf (" ", false, false).getIntValue();
+
+        check (minStripH >= 100, "every shape strip has a usable height", juce::String (minStripH));
+        check (allVisible == 1, "every shape strip is visible", juce::String (allVisible));
+        check (allSized == 1, "every shape strip is sized", juce::String (allSized));
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

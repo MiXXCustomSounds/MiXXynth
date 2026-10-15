@@ -100,7 +100,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     // M3a: modulation matrix. 32 slots, each source -> destination with a
     // bipolar depth. Destination list mirrors mixxynth::ModDest exactly.
     juce::StringArray modSources { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
-                                   "Env 1", "Env 2", "Env 3", "MSEG",
+                                   "Env 1", "Env 2", "Env 3",
                                    "Macro 1", "Macro 2", "Macro 3", "Macro 4",
                                    "Velocity", "Mod Wheel", "Aftertouch", "Key Track",
                                    "Timbre" };
@@ -135,68 +135,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "mod" + id + "depth", "Mod " + id + " Depth",
             juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
-    }
-
-    // LFOs.
-    juce::StringArray lfoShapes { "Sine", "Triangle", "Saw", "Ramp", "Square", "S&H" };
-    juce::StringArray syncDivs;
-
-    for (int i = 0; i < mixxynth::numSyncDivisions(); ++i)
-        syncDivs.add (mixxynth::syncDivisionNames()[i]);
-
-    for (int n = 0; n < mixxynth::kNumLfos; ++n)
-    {
-        const juce::String id = juce::String (n + 1);
-        params.push_back (std::make_unique<juce::AudioParameterChoice> (
-            "lfo" + id + "shape", "LFO " + id + " Shape", lfoShapes, 0));
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "lfo" + id + "rate", "LFO " + id + " Rate",
-            juce::NormalisableRange<float> (0.01f, 40.0f, 0.001f, 0.35f), 2.0f));
-        params.push_back (std::make_unique<juce::AudioParameterBool> (
-            "lfo" + id + "sync", "LFO " + id + " Sync", false));
-        params.push_back (std::make_unique<juce::AudioParameterChoice> (
-            "lfo" + id + "syncDiv", "LFO " + id + " Division", syncDivs, 3));
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "lfo" + id + "phase", "LFO " + id + " Phase",
-            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-        params.push_back (std::make_unique<juce::AudioParameterBool> (
-            "lfo" + id + "retrig", "LFO " + id + " Retrigger", true));
-        params.push_back (std::make_unique<juce::AudioParameterBool> (
-            "lfo" + id + "bipolar", "LFO " + id + " Bipolar", true));
-    }
-
-    // Modulation envelopes.
-    for (int n = 0; n < mixxynth::kNumModEnvs; ++n)
-    {
-        const juce::String id = juce::String (n + 1);
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "menv" + id + "a", "Env " + id + " Attack",
-            juce::NormalisableRange<float> (0.001f, 10.0f, 0.001f, 0.35f), 0.01f));
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "menv" + id + "d", "Env " + id + " Decay",
-            juce::NormalisableRange<float> (0.005f, 10.0f, 0.001f, 0.35f), 0.30f));
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "menv" + id + "s", "Env " + id + " Sustain",
-            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.50f));
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "menv" + id + "r", "Env " + id + " Release",
-            juce::NormalisableRange<float> (0.005f, 10.0f, 0.001f, 0.35f), 0.40f));
-    }
-
-    // MSEG-lite: 8 interpolated steps.
-    {
-        const float defaults[mixxynth::kNumMsegSteps] = { 0.0f, 0.35f, 1.0f, 0.75f, 0.2f, 0.6f, 0.3f, 0.1f };
-
-        for (int i = 0; i < mixxynth::kNumMsegSteps; ++i)
-            params.push_back (std::make_unique<juce::AudioParameterFloat> (
-                "mseg" + juce::String (i + 1), "MSEG Step " + juce::String (i + 1),
-                juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), defaults[i]));
-
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            "msegRate", "MSEG Rate",
-            juce::NormalisableRange<float> (0.01f, 20.0f, 0.001f, 0.35f), 1.0f));
-        params.push_back (std::make_unique<juce::AudioParameterBool> (
-            "msegLoop", "MSEG Loop", true));
     }
 
     for (int i = 0; i < mixxynth::kNumMacros; ++i)
@@ -257,9 +195,44 @@ MiXXynthProcessor::MiXXynthProcessor()
 {
     mpeInstrument.addListener (&mpeHandler);
     mpeInstrument.enableLegacyMode(); // replaced by a zone layout when MPE is on
+
+    // Default modulation shapes: four LFOs followed by three envelopes.
+    for (int i = 0; i < mixxynth::kNumShapes; ++i)
+        shapeBuffers[0][static_cast<size_t> (i)] = defaultShapeFor (i);
+
+    shapeBuffers[1] = shapeBuffers[0];
 }
 
 MiXXynthProcessor::~MiXXynthProcessor() = default;
+
+mixxynth::ModShape MiXXynthProcessor::defaultShapeFor (int index)
+{
+    return index < mixxynth::kNumLfos ? mixxynth::ModShape::defaultLfo()
+                                      : mixxynth::ModShape::defaultEnv();
+}
+
+mixxynth::ModShape MiXXynthProcessor::getShape (int index) const
+{
+    index = juce::jlimit (0, mixxynth::kNumShapes - 1, index);
+    return shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)][static_cast<size_t> (index)];
+}
+
+void MiXXynthProcessor::setShape (int index, const mixxynth::ModShape& shape)
+{
+    index = juce::jlimit (0, mixxynth::kNumShapes - 1, index);
+
+    const int current = activeShapeBuffer.load (std::memory_order_acquire);
+    const int next = 1 - current;
+
+    shapeBuffers[next] = shapeBuffers[current];
+    shapeBuffers[next][static_cast<size_t> (index)] = shape;
+    activeShapeBuffer.store (next, std::memory_order_release);
+}
+
+void MiXXynthProcessor::resetShapeToDefault (int index)
+{
+    setShape (index, defaultShapeFor (index));
+}
 
 void MiXXynthProcessor::prepareToPlay (double sampleRate, int)
 {
@@ -372,47 +345,24 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         slot.depth  = getParam (apvts, "mod" + id + "depth");
     }
 
-    for (int n = 0; n < mixxynth::kNumLfos; ++n)
+    // Shapes come from the double-buffered bank rather than parameters, so the
+    // audio thread always reads a complete, consistent set.
+    mod.shapes = shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)];
+
+    // Synced shapes follow the host tempo; free ones use their own rate.
     {
-        const juce::String id = juce::String (n + 1);
-        auto& lfo = mod.lfos[static_cast<size_t> (n)];
-        lfo.shape     = static_cast<int> (getParam (apvts, "lfo" + id + "shape"));
-        lfo.rateHz    = getParam (apvts, "lfo" + id + "rate");
-        lfo.sync      = getParam (apvts, "lfo" + id + "sync") > 0.5f;
-        lfo.syncIndex = static_cast<int> (getParam (apvts, "lfo" + id + "syncDiv"));
-        lfo.phase     = getParam (apvts, "lfo" + id + "phase");
-        lfo.retrig    = getParam (apvts, "lfo" + id + "retrig") > 0.5f;
-        lfo.bipolar   = getParam (apvts, "lfo" + id + "bipolar") > 0.5f;
+        double bpm = 120.0;
 
-        if (lfo.sync)
-        {
-            // Host BPM drives synced LFOs; falls back to the free rate if unknown.
-            const double bpm = getPlayHead() != nullptr
-                               ? [this] { double b = 120.0;
-                                          if (auto pos = getPlayHead()->getPosition())
-                                              if (auto t = pos->getBpm())
-                                                  b = *t;
-                                          return b; }()
-                               : 120.0;
-            lfo.rateHz = static_cast<float> (bpm / 60.0 * mixxynth::syncDivisionCyclesPerBeat (lfo.syncIndex));
-        }
+        if (getPlayHead() != nullptr)
+            if (auto pos = getPlayHead()->getPosition())
+                if (auto t = pos->getBpm())
+                    bpm = *t;
+
+        for (auto& shape : mod.shapes)
+            if (shape.sync)
+                shape.rateHz = static_cast<float> (bpm / 60.0
+                                 * mixxynth::syncDivisionCyclesPerBeat (shape.syncIndex));
     }
-
-    for (int n = 0; n < mixxynth::kNumModEnvs; ++n)
-    {
-        const juce::String id = juce::String (n + 1);
-        auto& env = mod.envs[static_cast<size_t> (n)];
-        env.attack  = getParam (apvts, "menv" + id + "a");
-        env.decay   = getParam (apvts, "menv" + id + "d");
-        env.sustain = getParam (apvts, "menv" + id + "s");
-        env.release = getParam (apvts, "menv" + id + "r");
-    }
-
-    for (int i = 0; i < mixxynth::kNumMsegSteps; ++i)
-        mod.msegLevels[static_cast<size_t> (i)] = getParam (apvts, "mseg" + juce::String (i + 1));
-
-    mod.msegRateHz = getParam (apvts, "msegRate");
-    mod.msegLoop   = getParam (apvts, "msegLoop") > 0.5f;
 
     for (int i = 0; i < mixxynth::kNumMacros; ++i)
         mod.macros[static_cast<size_t> (i)] = getParam (apvts, "macro" + juce::String (i + 1));
@@ -451,6 +401,23 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     {
         voiceManager.renderBlock (buffer, midi, vp, mod, poly);
     }
+
+    // Publish the newest voice's shape phases for the editor's playheads. Single
+    // writer (audio thread), single reader (UI), so relaxed atomics are enough.
+    {
+        std::array<float, mixxynth::kNumShapes> phases;
+        voiceManager.publishShapePhases (phases);
+
+        for (int i = 0; i < mixxynth::kNumShapes; ++i)
+            shapePhases[static_cast<size_t> (i)].store (phases[static_cast<size_t> (i)],
+                                                        std::memory_order_relaxed);
+    }
+}
+
+float MiXXynthProcessor::getShapePhase (int index) const
+{
+    index = juce::jlimit (0, mixxynth::kNumShapes - 1, index);
+    return shapePhases[static_cast<size_t> (index)].load (std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* MiXXynthProcessor::createEditor()
@@ -460,15 +427,44 @@ juce::AudioProcessorEditor* MiXXynthProcessor::createEditor()
 
 void MiXXynthProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (auto xml = apvts.copyState().createXml())
+    auto state = apvts.copyState();
+
+    // Shapes are not parameters, so they ride along as a child of the state tree.
+    state.removeChild (state.getChildWithName ("shapes"), nullptr);
+
+    juce::ValueTree shapesNode ("shapes");
+
+    for (int i = 0; i < mixxynth::kNumShapes; ++i)
+        shapesNode.appendChild (mixxynth::shapeToValueTree (getShape (i), "shape"), nullptr);
+
+    state.appendChild (shapesNode, nullptr);
+
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
 void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (auto xml = getXmlFromBinary (data, sizeInBytes))
-        if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+    auto xml = getXmlFromBinary (data, sizeInBytes);
+
+    if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
+        return;
+
+    auto tree = juce::ValueTree::fromXml (*xml);
+
+    // Restore the shapes before handing the tree to APVTS so a missing or
+    // partial "shapes" node simply leaves the defaults in place.
+    if (auto shapesNode = tree.getChildWithName ("shapes"); shapesNode.isValid())
+    {
+        for (int i = 0; i < mixxynth::kNumShapes; ++i)
+        {
+            mixxynth::ModShape shape;
+            mixxynth::shapeFromValueTree (defaultShapeFor (i), shapesNode.getChild (i), shape);
+            setShape (i, shape);
+        }
+    }
+
+    apvts.replaceState (tree);
 }
 
 // ---------------------------------------------------------------------------

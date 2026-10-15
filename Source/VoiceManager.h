@@ -51,6 +51,10 @@ public:
     int getActiveNoteCount() const;
     int getActiveVoiceCount() const;
 
+    // Copies the shape phases of the newest active voice so the editor can draw
+    // playheads. Called from the audio thread; -1 means "no voice to show".
+    void publishShapePhases (std::array<float, mixxynth::kNumShapes>& out) const;
+
     // Global pitch offset (semitones) applied on top of each voice's unison
     // detune. MPE will extend this to per-note offsets.
     void setPitchBendSemitones (float semitones);

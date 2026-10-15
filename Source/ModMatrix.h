@@ -3,35 +3,34 @@
 #include <array>
 
 #include "FmVoice.h"
+#include "ModShape.h"
 
-// M3a: drag-and-drop modulation engine.
+// M3a: drag-and-drop modulation engine, with Serum/Vital-style editable shapes.
 //
-// Sources (17): Off, LFO 1-4, Env 1-3, MSEG, Macro 1-4, Velocity, ModWheel,
-// Aftertouch, KeyTrack.
-// Destinations (45): Off, FM Index, Op1-6 Ratio, Op1-6 Level, Master, then the
-// 30 off-diagonal matrix depths.
+// Sources (17): Off, LFO 1-4, Env 1-3, Macro 1-4, Velocity, ModWheel,
+// Aftertouch, KeyTrack, Timbre.
+// Destinations (50): Off, FM Index, Op1-6 Ratio, Op1-6 Level, Master, VA
+// Level/Detune, Filter Cutoff/Reso/Drive, then the 30 matrix depths.
 // Slots (32): each is source + destination + bipolar depth (-1..+1).
 //
-// Modulation is evaluated PER VOICE: LFOs, envelopes and the MSEG keep their own
-// phase/state per voice, so vibrato and mod envelopes retrigger per note rather
-// than running globally. Macros and performance sources are shared inputs.
-// Slot depths are smoothed per block, and everything is allocation-free.
+// The four LFOs and three envelopes are breakpoint shapes (see ModShape.h) whose
+// mode decides whether they loop, run once on note-on, or hold.
+//
+// Modulation is evaluated PER VOICE: shapes keep their own phase and state per
+// voice, so shapes retrigger per note rather than running globally. Slot depths
+// are smoothed per block, and everything is allocation-free.
 namespace mixxynth
 {
-    constexpr int kNumModSources = 18;
+    constexpr int kNumModSources = 17;
     constexpr int kNumModDests   = 50;
     constexpr int kNumModSlots   = 32;
-    constexpr int kNumLfos       = 4;
-    constexpr int kNumModEnvs    = 3;
     constexpr int kNumMacros     = 4;
-    constexpr int kNumMsegSteps  = 8;
 
     enum ModSource
     {
         srcOff = 0,
         srcLfo1, srcLfo2, srcLfo3, srcLfo4,
         srcEnv1, srcEnv2, srcEnv3,
-        srcMseg,
         srcMacro1, srcMacro2, srcMacro3, srcMacro4,
         srcVelocity, srcModWheel, srcAftertouch, srcKeyTrack,
         srcTimbre // MPE per-note slide (timbre/Y); 0 when MPE is not in use
@@ -49,13 +48,6 @@ namespace mixxynth
         dstMtxFirst // 30 matrix depths follow
     };
 
-    enum LfoShape
-    {
-        lfoSine = 0, lfoTriangle, lfoSaw, lfoRamp, lfoSquare, lfoSampleHold
-    };
-
-    constexpr int kNumLfoShapes = 6;
-
     struct ModSlot
     {
         int source = srcOff;
@@ -63,48 +55,33 @@ namespace mixxynth
         float depth = 0.0f;
     };
 
-    struct LfoParams
-    {
-        int shape = lfoSine;
-        float rateHz = 2.0f;
-        bool sync = false;
-        int syncIndex = 8;   // index into the sync division table
-        float phase = 0.0f;  // start phase 0..1
-        bool retrig = true;
-        bool bipolar = true;
-    };
-
-    struct EnvParams
-    {
-        float attack = 0.01f;
-        float decay = 0.30f;
-        float sustain = 0.50f;
-        float release = 0.40f;
-    };
-
     struct ModParams
     {
         std::array<ModSlot, kNumModSlots> slots {};
-        std::array<LfoParams, kNumLfos> lfos {};
-        std::array<EnvParams, kNumModEnvs> envs {};
-        std::array<float, kNumMsegSteps> msegLevels {};
-        float msegRateHz = 1.0f;
-        bool msegLoop = true;
+        // 4 LFO shapes followed by 3 envelope shapes.
+        std::array<ModShape, kNumShapes> shapes {};
         std::array<float, kNumMacros> macros {};
         float modWheel = 0.0f;
         float aftertouch = 0.0f;
         double sampleRate = 44100.0;
+        bool mpeActive = false;
+    };
+
+    // Per-voice runtime state for one shape.
+    struct ShapeState
+    {
+        double phase = 0.0;          // 0..1 position through the shape
+        float delayRemaining = 0.0f; // seconds of note-on delay still to run
+        float smoothed = 0.0f;       // one-pole smoothed output
+        float releaseFrom = 0.0f;    // value the release ramp started from
+        bool active = false;         // note is driving this shape
+        bool releasing = false;
     };
 
     // Per-voice runtime state for the modulating sources.
     struct ModState
     {
-        std::array<double, kNumLfos> lfoPhase {};
-        std::array<float, kNumLfos> lfoHold {};
-        std::array<int, kNumModEnvs> envStage {};   // 0 idle, 1 A, 2 D, 3 S, 4 R
-        std::array<float, kNumModEnvs> envValue {};
-        std::array<float, kNumModEnvs> envReleaseFrom {};
-        double msegPos = 0.0;
+        std::array<ShapeState, kNumShapes> shapeStates {};
         bool gate = false;
 
         void noteOn (const ModParams& p);

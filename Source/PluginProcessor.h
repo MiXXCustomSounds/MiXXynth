@@ -8,8 +8,9 @@
 
 // M2b/M3a: polyphonic 6-op FM synth with per-voice modulation.
 // 32 simultaneous notes, unison stacks up to 16, 64-voice pool, and a 32-slot
-// drag-and-drop modulation matrix (4 LFOs, 3 mod envelopes, MSEG-lite, 4 macros,
-// velocity/mod-wheel/aftertouch/key-track).
+// drag-and-drop modulation matrix. The four LFOs and three modulation envelopes
+// are editable breakpoint shapes (see ModShape.h) edited in the sidebar, plus
+// 4 macros and velocity/mod-wheel/aftertouch/key-track/timbre.
 // VA/filter, FX tail, presets and randomize land in M3b/M4.
 class MiXXynthProcessor : public juce::AudioProcessor
 {
@@ -55,6 +56,18 @@ public:
     void setPitchBendFromUI (float v) { pitchBend = juce::jlimit (-1.0f, 1.0f, v); }
     void setModWheelFromUI (float v) { modWheel = juce::jlimit (0.0f, 1.0f, v); }
 
+    // Editable modulation shapes: indices 0..3 are the LFOs, 4..6 the envelopes.
+    // Edited on the message thread and read on the audio thread, so they are
+    // double-buffered with an atomic publish index: the audio thread never sees
+    // a half-written shape.
+    mixxynth::ModShape getShape (int index) const;
+    void setShape (int index, const mixxynth::ModShape& shape);
+    void resetShapeToDefault (int index);
+    static mixxynth::ModShape defaultShapeFor (int index);
+
+    // Published once per block for the editor's playheads (negative = idle).
+    float getShapePhase (int index) const;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -90,6 +103,10 @@ private:
     float modWheel = 0.0f;
     float aftertouch = 0.0f;
     float pitchBend = 0.0f; // -1..+1, from the host or the on-screen wheel
+
+    std::array<mixxynth::ModShape, mixxynth::kNumShapes> shapeBuffers[2];
+    std::atomic<int> activeShapeBuffer { 0 };
+    std::array<std::atomic<float>, mixxynth::kNumShapes> shapePhases {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

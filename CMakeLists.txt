@@ -56,6 +56,10 @@ target_sources(MiXXynth PRIVATE
     Source/VoiceManager.h
     Source/ModMatrix.cpp
     Source/ModMatrix.h
+    Source/ModShape.cpp
+    Source/ModShape.h
+    Source/ShapeEditorComponent.cpp
+    Source/ShapeEditorComponent.h
     Source/Algorithms.h
 )
 
@@ -90,6 +94,7 @@ add_executable(MiXXynthSmoke
     Source/FmVoice.cpp
     Source/VoiceManager.cpp
     Source/ModMatrix.cpp
+    Source/ModShape.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -117,6 +122,8 @@ add_executable(MiXXynthEditorAudit
     Source/FmVoice.cpp
     Source/VoiceManager.cpp
     Source/ModMatrix.cpp
+    Source/ModShape.cpp
+    Source/ShapeEditorComponent.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils

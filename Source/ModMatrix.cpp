@@ -7,71 +7,12 @@ namespace mixxynth
 {
 namespace
 {
-    constexpr double twoPi = 6.28318530717958647692;
-
     // Musical sync divisions, expressed in cycles per beat.
     const char* const syncNames[] = { "1/1", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32",
                                       "2 bar", "4 bar" };
     const float syncCycles[] = { 0.25f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 0.125f, 0.0625f };
-
-    float shapeValue (int shape, double phase, float& holdState, bool wrapped)
-    {
-        const float p = static_cast<float> (phase - std::floor (phase));
-
-        switch (shape)
-        {
-            case lfoTriangle:   return 1.0f - 4.0f * std::abs (p - 0.5f);
-            case lfoSaw:        return 1.0f - 2.0f * p;
-            case lfoRamp:       return 2.0f * p - 1.0f;
-            case lfoSquare:     return p < 0.5f ? 1.0f : -1.0f;
-            case lfoSampleHold:
-            {
-                if (wrapped)
-                {
-                    // Deterministic LCG: reproducible for tests, no allocation.
-                    static thread_local juce::uint32 lcg = 0x1234567u;
-                    lcg = lcg * 1664525u + 1013904223u;
-                    holdState = static_cast<float> ((lcg >> 8) & 0xffff) / 32768.0f - 1.0f;
-                }
-
-                return holdState;
-            }
-            default:            return std::sin (static_cast<float> (twoPi * p));
-        }
-    }
-
-    float envStep (int stage, float value, float releaseFrom, const EnvParams& e,
-                   double sr, float dtSeconds)
-    {
-        switch (stage)
-        {
-            case 1:
-                value += static_cast<float> (dtSeconds / juce::jmax (0.001f, e.attack));
-                if (value >= 1.0f)
-                    value = 1.0f;
-                break;
-            case 2:
-                value -= static_cast<float> (dtSeconds / juce::jmax (0.001f, e.decay)) * (1.0f - e.sustain);
-                if (value <= e.sustain)
-                    value = e.sustain;
-                break;
-            case 3:
-                value = e.sustain;
-                break;
-            case 4:
-                value -= static_cast<float> (dtSeconds / juce::jmax (0.001f, e.release)) * releaseFrom;
-                if (value <= 0.0f)
-                    value = 0.0f;
-                break;
-            default:
-                value = 0.0f;
-                break;
-        }
-
-        juce::ignoreUnused (sr);
-        return value;
-    }
 }
+
 
 const char* const* syncDivisionNames() { return syncNames; }
 int numSyncDivisions() { return static_cast<int> (sizeof (syncNames) / sizeof (syncNames[0])); }
@@ -84,44 +25,49 @@ float syncDivisionCyclesPerBeat (int index)
 
 void ModState::reset()
 {
-    lfoPhase.fill (0.0);
-    lfoHold.fill (0.0f);
-    envStage.fill (0);
-    envValue.fill (0.0f);
-    envReleaseFrom.fill (0.0f);
-    msegPos = 0.0;
+    for (auto& s : shapeStates)
+        s = ShapeState {};
+
     gate = false;
 }
 
 void ModState::noteOn (const ModParams& p)
 {
-    for (int i = 0; i < kNumLfos; ++i)
-        if (p.lfos[static_cast<size_t> (i)].retrig)
-            lfoPhase[static_cast<size_t> (i)] = p.lfos[static_cast<size_t> (i)].phase;
-
-    for (int i = 0; i < kNumModEnvs; ++i)
+    for (int i = 0; i < kNumShapes; ++i)
     {
-        envStage[static_cast<size_t> (i)] = 1;
-        envValue[static_cast<size_t> (i)] = 0.0f;
-        envReleaseFrom[static_cast<size_t> (i)] = 0.0f;
+        const auto& shape = p.shapes[static_cast<size_t> (i)];
+        auto& s = shapeStates[static_cast<size_t> (i)];
+
+        // LFOs only restart if retrigger is on; envelopes and one-shots always do.
+        if (shape.mode == shapeLfo && ! shape.retrig)
+            continue;
+
+        s.phase = juce::jlimit (0.0, 1.0, static_cast<double> (shape.phase));
+        s.delayRemaining = juce::jmax (0.0f, shape.delaySeconds);
+        s.active = true;
+        s.releasing = false;
+        s.releaseFrom = 0.0f;
+        s.smoothed = shape.valueAt (static_cast<float> (s.phase));
     }
 
-    msegPos = 0.0;
     gate = true;
 }
 
 void ModState::noteOff (const ModParams& p)
 {
-    juce::ignoreUnused (p);
     gate = false;
 
-    for (int i = 0; i < kNumModEnvs; ++i)
+    for (int i = 0; i < kNumShapes; ++i)
     {
-        if (envStage[static_cast<size_t> (i)] != 0 && envStage[static_cast<size_t> (i)] != 4)
-        {
-            envStage[static_cast<size_t> (i)] = 4;
-            envReleaseFrom[static_cast<size_t> (i)] = envValue[static_cast<size_t> (i)];
-        }
+        const auto& shape = p.shapes[static_cast<size_t> (i)];
+
+        // Only envelope shapes release: LFOs keep running and one-shots hold.
+        if (shape.mode != shapeEnv)
+            continue;
+
+        auto& s = shapeStates[static_cast<size_t> (i)];
+        s.releasing = true;
+        s.releaseFrom = s.smoothed;
     }
 }
 
@@ -139,58 +85,70 @@ void computeSources (ModState& state,
     const double dt = static_cast<double> (numSamples) / juce::jmax (1.0, p.sampleRate);
     const float dtSec = static_cast<float> (dt);
 
-    // LFOs (per voice: phase advances with the block, retriggered on note-on).
-    for (int i = 0; i < kNumLfos; ++i)
+    // Editable shapes. The first kNumLfos feed the LFO sources, the rest feed
+    // the envelope sources. Everything is per voice, so shapes retrigger per note.
+    for (int i = 0; i < kNumShapes; ++i)
     {
-        const auto& lp = p.lfos[static_cast<size_t> (i)];
+        const auto& shape = p.shapes[static_cast<size_t> (i)];
+        auto& s = state.shapeStates[static_cast<size_t> (i)];
 
-        const double prev = state.lfoPhase[static_cast<size_t> (i)];
-        const double advanced = prev + static_cast<double> (lp.rateHz) * dt;
-        const bool wrapped = std::floor (advanced) > std::floor (prev);
-        double ph = advanced - std::floor (advanced);
-        state.lfoPhase[static_cast<size_t> (i)] = ph;
+        float v = 0.0f;
 
-        float v = shapeValue (lp.shape, ph, state.lfoHold[static_cast<size_t> (i)], wrapped);
+        if (s.delayRemaining > 0.0f)
+        {
+            // Note-on delay: hold the shape's first point.
+            s.delayRemaining = juce::jmax (0.0f, s.delayRemaining - dtSec);
+            v = shape.valueAt (0.0f);
+        }
+        else if (s.releasing)
+        {
+            // Envelope release ramps to zero.
+            s.releaseFrom -= dtSec / juce::jmax (0.001f, shape.releaseSeconds);
+            v = juce::jmax (0.0f, s.releaseFrom);
 
-        if (! lp.bipolar)
-            v = v * 0.5f + 0.5f;
+            if (s.releaseFrom <= 0.0f)
+            {
+                s.releasing = false;
+                s.active = false;
+            }
+        }
+        else if (s.active)
+        {
+            s.phase += static_cast<double> (juce::jmax (0.0f, shape.rateHz)) * dt;
 
-        out[static_cast<size_t> (srcLfo1 + i)] = v;
-    }
+            if (shape.mode == shapeLfo)
+            {
+                if (s.phase >= 1.0)
+                    s.phase -= std::floor (s.phase);
+            }
+            else
+            {
+                // ENV and One-Shot make a single pass, then hold the last point.
+                s.phase = juce::jmin (1.0, s.phase);
+            }
 
-    // Mod envelopes.
-    for (int i = 0; i < kNumModEnvs; ++i)
-    {
-        const auto& ep = p.envs[static_cast<size_t> (i)];
-        int stage = state.envStage[static_cast<size_t> (i)];
+            v = shape.valueAt (static_cast<float> (s.phase));
+        }
+        else
+        {
+            v = shape.mode == shapeLfo ? shape.valueAt (0.0f) : 0.0f;
+        }
 
-        float v = envStep (stage, state.envValue[static_cast<size_t> (i)],
-                           state.envReleaseFrom[static_cast<size_t> (i)], ep, p.sampleRate, dtSec);
+        // Bipolar shapes span -1..1 around the shape's midpoint.
+        if (shape.bipolar)
+            v = v * 2.0f - 1.0f;
 
-        if (stage == 1 && v >= 1.0f)             stage = 2;
-        else if (stage == 2 && v <= ep.sustain)  stage = 3;
-        else if (stage == 4 && v <= 0.0f)        stage = 0;
+        // One-pole smoothing (the "smooth" control).
+        const float coef = shape.smooth <= 0.0f
+                             ? 1.0f
+                             : juce::jmap (juce::jlimit (0.0f, 1.0f, shape.smooth), 0.6f, 0.02f);
+        s.smoothed += (v - s.smoothed) * coef;
+        v = s.smoothed;
 
-        state.envStage[static_cast<size_t> (i)] = stage;
-        state.envValue[static_cast<size_t> (i)] = v;
-        out[static_cast<size_t> (srcEnv1 + i)] = v;
-    }
-
-    // MSEG-lite: linear interpolation across the step levels, looping.
-    {
-        state.msegPos += static_cast<double> (p.msegRateHz) * dt;
-
-        if (state.msegPos >= 1.0)
-            state.msegPos -= std::floor (state.msegPos);
-
-        const double scaled = state.msegPos * static_cast<double> (kNumMsegSteps);
-        const int i0 = static_cast<int> (scaled) % kNumMsegSteps;
-        const int i1 = (i0 + 1) % kNumMsegSteps;
-        const float frac = static_cast<float> (scaled - std::floor (scaled));
-
-        out[static_cast<size_t> (srcMseg)] =
-            p.msegLevels[static_cast<size_t> (i0)] * (1.0f - frac)
-            + p.msegLevels[static_cast<size_t> (i1)] * frac;
+        if (i < kNumLfos)
+            out[static_cast<size_t> (srcLfo1 + i)] = v;
+        else
+            out[static_cast<size_t> (srcEnv1 + (i - kNumLfos))] = v;
     }
 
     for (int i = 0; i < kNumMacros; ++i)

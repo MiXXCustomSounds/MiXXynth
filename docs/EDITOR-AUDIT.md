@@ -22,6 +22,10 @@ The interactive half — dragging every knob in the standalone — is at the bot
 | 13 | Depth ring reflects and clears with its slot | Visual feedback |
 | 14 | No visible control is left at zero bounds | Regression guard for the `setSize()` ordering bug |
 | 15 | Six tabs exist and each has content | Layout regression guard |
+| 16 | The sidebar holds exactly one shape strip per LFO/ENV (`kNumShapes`) | Catches a strip silently failing to build |
+| 17 | Every strip is visible and at least 100px tall | The editors must be usable, not collapsed |
+| 18 | Every strip is sized (non-zero width) | Same zero-bounds guard as #14, for the sidebar |
+| 19 | The sidebar content is taller than its viewport, so it scrolls | Catches a layout that would clip the last shape |
 
 ## Bugs found and fixed
 
@@ -66,20 +70,31 @@ completely unreachable), `msegLoop`, and per-LFO `sync`, `syncDiv`, `phase`,
 unison spread) and extending each Mod-page LFO row with sync / division / phase /
 retrig, plus a MSEG loop toggle.
 
+> **Superseded by the shape editor.** The per-LFO `shape`/`sync`/`syncDiv`/`phase`/
+> `retrig`/`bipolar`, the per-env `a`/`d`/`s`/`r` and all nine `mseg*` parameters
+> were **removed** when the LFOs and envelopes became editable breakpoint shapes
+> (`docs/MOD-SHAPES.md`). Those controls now live on the shape itself rather than
+> as host parameters, which is what Serum and Vital do. The Voice-tab half of this
+> fix still stands.
+
 ### 5. Minor: ambiguous matrix destination names
 Matrix destinations read `Op1>2`; now `Op1 > Op2`.
 
 ## Current state
 
 ```
-params=245 knobs=141
-modulatable knobs=49  non-modulatable knobs=92
-visible child components=131
+params=198 knobs=121
+modulatable knobs=49  non-modulatable knobs=72
+visible child components=268
+strips=7 chips=9 rail=0 34 312 866 viewport=6 24 300 804 content=0 0 300 1303
+minStripH=161 allVisible=1 allSized=1 scrolls=1
 EDITOR AUDIT OK
 ```
 
-Every one of the 245 parameters is reachable from the UI, and all 49 modulation
-destinations are wired to the knob they should be.
+Every one of the 198 parameters is reachable from the UI, and all 49 modulation
+destinations are wired to the knob they should be. The knob count fell from 142 to
+121 because the 21 LFO/envelope/MSEG controls moved out of the parameter list and
+onto the shapes in the sidebar.
 
 ## Interactive checklist (standalone)
 
@@ -92,10 +107,18 @@ Run the standalone and confirm by ear/eye:
 - [ ] VA/Filt tab: VA Level blends the saw/square/sub/noise in; filter type, cutoff,
       resonance and drive all respond
 - [ ] Voice tab: polyphony limits held notes; unison thickens and spreads
-- [ ] Mod tab: 32 slot rows; LFO shape/rate/sync/division/phase/retrig/bipolar;
-      env ADSR; MSEG steps, rate and loop
-- [ ] Drag a source chip onto a green-outlined knob -> a depth ring appears and the
+- [ ] Mod tab: 32 slot rows, source/destination/depth all editable
+- [ ] Sidebar (any tab): all seven shape editors are visible and keep their position
+      when you switch tabs
+- [ ] Sidebar: click empty space inside a shape to add a point, drag it, double-click
+      it to delete
+- [ ] Sidebar: right-drag a segment to bend its curve; right-click a point for
+      Linear / Ease in / Ease out / Delete / Reset
+- [ ] Sidebar: switch a shape to ENV and one-shot and hear the difference; play a note
+      and watch the playhead sweep
+- [ ] Drag a shape's chip onto a green-outlined knob -> a depth ring appears and the
       sound modulates
 - [ ] Drag a chip onto a red-outlined knob -> it flashes red and does nothing
 - [ ] Right-click a modulated knob -> its ring clears
 - [ ] No dial is clipped or reads an obviously wrong position
+- [ ] Save the project, reopen it, and confirm the shapes you drew came back
