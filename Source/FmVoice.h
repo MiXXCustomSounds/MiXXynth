@@ -75,7 +75,12 @@ public:
     void setDetune (float cents);
     void setPan (float pan); // -1 left .. +1 right
 
-    void noteOn (int noteNumber, float velocity);
+    // `phaseOffset01` shifts every operator's start phase, which is how unison
+    // voices (and repeated notes) are decorrelated from one another. 0 aligns
+    // them all, 1 starts anywhere in the cycle. All operators of a voice get the
+    // SAME offset, so the FM relationships inside a voice are preserved and only
+    // the voices differ from each other.
+    void noteOn (int noteNumber, float velocity, float phaseOffset01 = 0.0f);
     void noteOff (int noteNumber);
     void reset();
 

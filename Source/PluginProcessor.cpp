@@ -102,6 +102,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "unisonSpread", "Unison Spread",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
 
+    // M4b: how far each unison voice's start phase is randomised. 0 keeps the
+    // stack phase-aligned (a punchy attack); 1 starts each voice anywhere in the
+    // cycle (a wide, soft attack). It applies to single-voice notes too, so
+    // repeated notes vary.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "unisonPhaseRand", "Phase Random",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
     // Pitch bend range in semitones, applied to the wheel and to incoming
     // MIDI pitch bend.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -360,6 +368,7 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     poly.unison         = static_cast<int> (getParam (apvts, "unison"));
     poly.unisonDetune   = getParam (apvts, "unisonDetune");
     poly.unisonSpread   = getParam (apvts, "unisonSpread");
+    poly.phaseRand      = getParam (apvts, "unisonPhaseRand");
 
     // Performance sources come from incoming MIDI.
     for (const auto metadata : midi)

@@ -699,7 +699,41 @@ int main()
         }
     }
 
-    // ---- 13. Layout: no visible control is left with zero bounds ----
+    // ---- 13. Knob drag space matches the dial ----
+    // sst-jucegui's continuous editor drags in REAL value space scaled by
+    // getMax() - getMin() (150 px for the whole range), while the dial is drawn
+    // from getValue01(). For a skewed or log range those disagree, which made the
+    // filter cutoff move ~133 Hz per pixel while its dial moved logarithmically.
+    // The adapter reports normalised 0..1 so both share one space.
+    {
+        auto* cutoff = dynamic_cast<juce::RangedAudioParameter*> (
+            proc.apvts.getParameter ("filterCutoff"));
+
+        if (cutoff == nullptr)
+        {
+            check (false, "filterCutoff exists for the drag test", "");
+        }
+        else
+        {
+            mixxynth::ui::ContinuousSource src (cutoff);
+
+            check (std::abs ((src.getMax() - src.getMin()) - 1.0f) < 1.0e-6f,
+                   "knob drag range is normalised",
+                   juce::String (src.getMax() - src.getMin()));
+
+            // Equal normalised travel must give equal octaves, which is the
+            // property that makes the drag feel even across the whole knob.
+            const auto& r = cutoff->getNormalisableRange();
+            const float low = r.convertFrom0to1 (0.20f) / r.convertFrom0to1 (0.10f);
+            const float high = r.convertFrom0to1 (0.70f) / r.convertFrom0to1 (0.60f);
+
+            check (std::abs (low - high) < 0.25f,
+                   "cutoff gives equal octaves per equal travel",
+                   juce::String (low) + " vs " + juce::String (high));
+        }
+    }
+
+    // ---- 14. Layout: no visible control is left with zero bounds ----
     // This is the regression guard for the bug where setSize() ran before the
     // child arrays were populated, leaving controls at 0x0 and invisible.
     //

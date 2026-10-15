@@ -34,36 +34,35 @@ namespace mixxynth::ui
             return p != nullptr ? p->getName (64).toStdString() : std::string {};
         }
 
-        // AudioProcessorParameter::getValue() is the NORMALISED 0..1 value, while
-        // getMin/getMax below are the real range, so it has to be denormalised
-        // here or every dial reads the wrong position.
+        // sst-jucegui's continuous editor drags in REAL value space, scaled by
+        // getMax() - getMin() with 150 px covering the whole range, while the dial
+        // itself is drawn from getValue01(). For a linear parameter those agree.
+        // For a skewed or log range they do not: the drag stays linear in raw
+        // units (the filter cutoff moved ~133 Hz per pixel, so the bottom of the
+        // knob was hypersensitive) while the dial moves logarithmically.
+        //
+        // Reporting the NORMALISED 0..1 range instead puts the drag and the
+        // drawing in the same space. Linear parameters feel exactly as they did,
+        // because normalised space is just a linear rescale of them.
         float getValue() const override
-        {
-            return p != nullptr ? p->convertFrom0to1 (p->getValue()) : 0.0f;
-        }
-
-        float getDefaultValue() const override
-        {
-            return p != nullptr ? p->convertFrom0to1 (p->getDefaultValue()) : 0.0f;
-        }
-
-        // sst-jucegui draws the dial from getValue01(). The parameter's
-        // normalised value already is that fraction, so return it directly:
-        // this is also correct for skewed ranges such as the log filter cutoff.
-        float getValue01() override
         {
             return p != nullptr ? p->getValue() : 0.0f;
         }
 
-        float getMin() const override
+        float getDefaultValue() const override
         {
-            return p != nullptr ? p->getNormalisableRange().start : 0.0f;
+            return p != nullptr ? p->getDefaultValue() : 0.0f;
         }
 
-        float getMax() const override
+        // The dial is drawn from the normalised value, which is the same fraction
+        // the parameter already stores.
+        float getValue01() override
         {
-            return p != nullptr ? p->getNormalisableRange().end : 1.0f;
+            return getValue();
         }
+
+        float getMin() const override { return 0.0f; }
+        float getMax() const override { return 1.0f; }
 
         void setValueFromGUI (const float& f) override
         {
@@ -71,7 +70,7 @@ namespace mixxynth::ui
                 return;
 
             p->beginChangeGesture();
-            p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (getMin(), getMax(), f)));
+            p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, f));
             p->endChangeGesture();
             notifyAll();
         }
@@ -81,13 +80,13 @@ namespace mixxynth::ui
             if (p == nullptr)
                 return;
 
-            p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (getMin(), getMax(), f)));
+            p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, f));
             notifyAll();
         }
 
         std::string getValueAsStringFor (float f) const override
         {
-            return p != nullptr ? p->getText (p->convertTo0to1 (f), 8).toStdString()
+            return p != nullptr ? p->getText (juce::jlimit (0.0f, 1.0f, f), 8).toStdString()
                                 : std::to_string (f);
         }
 

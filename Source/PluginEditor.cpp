@@ -1339,6 +1339,7 @@ public:
         addKnob (ranged (p, "unison"), "Unison");
         addKnob (ranged (p, "unisonDetune"), "Unison Detune");
         addKnob (ranged (p, "unisonSpread"), "Unison Spread");
+        addKnob (ranged (p, "unisonPhaseRand"), "Phase Random");
         addKnob (ranged (p, "pitchBendRange"), "Bend Range");
 
         mpeToggle = makeBoolToggle (p, "mpeEnabled", "MPE");
@@ -1381,8 +1382,12 @@ public:
 
         auto row = b.removeFromTop (110);
 
+        // Divide by the actual knob count, so adding one does not squash the row.
+        const int knobCount = juce::jmax (1, knobs.size());
+        const int cellW = juce::jmax (80, b.getWidth() / knobCount);
+
         for (auto* k : knobs)
-            k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 5)).reduced (6));
+            k->setBounds (row.removeFromLeft (cellW).reduced (6));
 
         b.removeFromTop (8);
         auto mpeRow = b.removeFromTop (26);

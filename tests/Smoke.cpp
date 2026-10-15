@@ -798,6 +798,59 @@ int main()
                     oneOffRms) && ok;
     }
 
+    // --- Unison phase randomisation decorrelates voices ---
+    {
+        auto p = paramsForAlgo (4);
+        p.master = 1.0f;
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 8;
+
+        auto render = [&] (float phaseRand)
+        {
+            auto pp = poly;
+            pp.phaseRand = phaseRand;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            juce::MidiBuffer m;
+            m.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+            MiXXVoiceManager v;
+            v.prepare (sr);
+            v.renderBlock (buf, m, p, mod, pp);
+            return buf;
+        };
+
+        auto diffOf = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+        {
+            double d = 0.0;
+
+            for (int i = 0; i < juce::jmin (a.getNumSamples(), b.getNumSamples()); ++i)
+                d += std::abs (a.getSample (0, i) - b.getSample (0, i));
+
+            return d;
+        };
+
+        // At 0 every voice starts aligned, so repeated notes are identical.
+        const auto alignedA = render (0.0f);
+        const auto alignedB = render (0.0f);
+        const double alignedDiff = diffOf (alignedA, alignedB);
+
+        ok = check (alignedDiff < 1.0e-9, "phase rand 0 is deterministic", alignedDiff) && ok;
+
+        // At 1 each voice starts anywhere, so repeated notes differ.
+        const auto randA = render (1.0f);
+        const auto randB = render (1.0f);
+        const double randDiff = diffOf (randA, randB);
+
+        ok = check (randDiff > 1.0, "phase rand decorrelates repeated notes", randDiff) && ok;
+
+        const double randRms = rmsOf (randA, 0, blockLen);
+        ok = check (randRms > 0.0001 && randRms < 2.0,
+                    "phase rand stays audible and bounded", randRms) && ok;
+    }
+
     // --- 14. VA layer: every waveform renders finite, audible and bounded ---
     {
         for (int w = 0; w < 4; ++w)

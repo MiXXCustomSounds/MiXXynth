@@ -29,6 +29,7 @@ public:
         int unison         = 1;   // voices per note (1..16)
         float unisonDetune = 10.0f; // total detune spread in cents
         float unisonSpread = 0.5f;  // stereo spread of the unison stack (0..1)
+        float phaseRand    = 0.0f;  // 0 = every voice starts in phase, 1 = anywhere
     };
 
     void prepare (double sampleRate);
@@ -87,4 +88,8 @@ private:
     juce::uint64 counter = 0;
     float mixGain = 1.0f; // smoothed voice-count compensation
     float pitchBendSemitones = 0.0f;
+
+    // Note-start phase randomisation. One generator for the whole manager, only
+    // ever touched from the audio thread.
+    juce::Random rng;
 };

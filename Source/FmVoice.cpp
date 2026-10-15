@@ -95,20 +95,23 @@ void MiXXFmVoice::reset()
     }
 }
 
-void MiXXFmVoice::noteOn (int noteNumber, float vel)
+void MiXXFmVoice::noteOn (int noteNumber, float velocity, float phaseOffset01)
 {
     currentNote = noteNumber;
     frequency = midiNoteToFreq (noteNumber) * std::pow (2.0, static_cast<double> (detuneCents) / 1200.0);
-    velocity = juce::jlimit (0.0f, 1.0f, vel);
+    this->velocity = juce::jlimit (0.0f, 1.0f, velocity);
     gate = true;
     vaPhase = 0.0;
     vaSubPhase = 0.0;
     svfIc1 = 0.0f;
     svfIc2 = 0.0f;
 
+    const double startPhase = static_cast<double> (phaseOffset01)
+                                - std::floor (static_cast<double> (phaseOffset01));
+
     for (auto& op : ops)
     {
-        op.phase = 0.0;
+        op.phase = startPhase;
         op.env = 0.0f;
         op.stage = 1;
         op.releaseFrom = 0.0f;

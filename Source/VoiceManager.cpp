@@ -129,7 +129,15 @@ void MiXXVoiceManager::startNote (int channel, int note, float velocity,
         s.timbre = 0.0f;
         applyDetune (s);
         s.voice.setPan (pos * poly.unisonSpread);
-        s.voice.noteOn (note, velocity);
+
+        // Phase randomisation: each unison voice (and each repeated note) starts
+        // at its own point in the cycle, scaled by the control. At 0 every voice
+        // is aligned, which is the punchy, coherent attack.
+        const float phaseOffset = poly.phaseRand > 0.0f
+                                    ? rng.nextFloat() * juce::jlimit (0.0f, 1.0f, poly.phaseRand)
+                                    : 0.0f;
+
+        s.voice.noteOn (note, velocity, phaseOffset);
         s.modState.reset();
         s.modState.noteOn (mod);
         s.note = note;
