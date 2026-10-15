@@ -33,6 +33,12 @@ namespace mixxynth
         void setSlotType (int slot, int type);
         int getSlotType (int slot) const;
 
+        // Hands the slot's module its file, creating the instance first if needed.
+        // Message thread, and safe to call with an empty name for a slot whose
+        // module has no file.
+        void setSlotFile (int slot, int type, const juce::String& name,
+                          const juce::MemoryBlock& data);
+
         // True when an instance for (slot, type) already exists, so callers can
         // tell "created on demand" from "already there".
         bool hasInstance (int slot, int type) const;

@@ -6,6 +6,7 @@
 #include "../Source/VoiceManager.h"
 #include "../Source/Fx/FxRack.h"
 #include "../Source/Fx/WeirdVerbFx.h"
+#include "../Source/Fx/ConvolutionFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -87,6 +88,13 @@ namespace
 
 int main()
 {
+    // JUCE has to be initialised before anything touches its threading or its
+    // message queue, and the convolution reverb does both: it loads its impulse on
+    // a background thread and asks for the rebuild through an AsyncUpdater. The
+    // editor audit has always done this; the smoke test did not need it until a
+    // module arrived that uses JUCE's threading rather than just its DSP.
+    juce::ScopedJuceInitialiser_GUI gui;
+
     bool ok = true;
 
     mixxynth::ModParams mod; // default: all slots Off, so tests see the base patch
@@ -95,6 +103,9 @@ int main()
     auto check = [] (bool cond, const char* name, double v)
     {
         std::printf ("%s %-34s (%.6f)\n", cond ? "PASS" : "FAIL", name, v);
+        // Flushed per line: stdout is block-buffered when redirected, so a crash
+        // discards everything still in the buffer and hides where it happened.
+        std::fflush (stdout);
         return cond;
     };
 
@@ -1641,6 +1652,214 @@ int main()
             const double later = rmsOf (buf, static_cast<int> (sr * 0.2), static_cast<int> (sr * 0.3));
 
             ok = check (early < later * 0.25, "pre-delay holds the wet signal back", early) && ok;
+        }
+    }
+
+    // --- 27. Convolution reverb ---
+    {
+        // The module rebuilds its impulse on a message-thread timer, and a test has
+        // no message loop, so the load is driven directly. juce::dsp::Convolution
+        // loads asynchronously, so prepare() afterwards is what forces it to
+        // complete - the JUCE-documented way to make a load deterministic.
+        auto loadAndRender = [] (int irChoice, float length, float mix, float preDelay,
+                                 juce::AudioBuffer<float>& buf)
+        {
+            static mixxynth::ConvolutionFx verb;
+            static bool initialised = false;
+
+            if (! initialised)
+            {
+                verb.prepare (sr, blockLen, 2);
+                initialised = true;
+            }
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ConvolutionFx::pIr] = static_cast<float> (irChoice)
+                                                / static_cast<float> (mixxynth::ConvolutionFx::getNumBuiltInIrs());
+            p[mixxynth::ConvolutionFx::pLength] = length;
+            p[mixxynth::ConvolutionFx::pPreDelay] = preDelay;
+            p[mixxynth::ConvolutionFx::pLowCut] = 0.0f;
+            p[mixxynth::ConvolutionFx::pHighCut] = 1.0f;
+            p[mixxynth::ConvolutionFx::pWidth] = 0.5f;
+            p[mixxynth::ConvolutionFx::pMix] = mix;
+            p[mixxynth::ConvolutionFx::pNormalise] = 1.0f;
+
+            // One pass records the request, then the load is forced through.
+            juce::AudioBuffer<float> scratch (2, blockLen);
+            scratch.clear();
+            verb.process (scratch, p);
+            verb.refreshImpulse();
+            verb.prepare (sr, blockLen, 2);
+            verb.reset();
+
+            verb.process (buf, p);
+        };
+
+        // Every built-in impulse produces a finite, bounded, audible tail.
+        for (int ir = 0; ir < mixxynth::ConvolutionFx::getNumBuiltInIrs(); ++ir)
+        {
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            loadAndRender (ir, 1.0f, 1.0f, 0.0f, buf);
+
+            const double tail = rmsOf (buf, static_cast<int> (sr * 0.1), static_cast<int> (sr * 0.3));
+            float peak = 0.0f;
+
+            for (int ch = 0; ch < 2; ++ch)
+                peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+            ok = check (std::isfinite (tail) && tail > 0.0002 && peak <= 1.0f,
+                        "convolution built-in IR audible and bounded",
+                        tail) && ok;
+        }
+    }
+
+    // --- 27b. Convolution: mix, Length, pre-delay, and a missing file ---
+    {
+        auto render = [] (int irChoice, float length, float mix, float preDelay,
+                          juce::AudioBuffer<float>& buf)
+        {
+            static mixxynth::ConvolutionFx verb;
+            static bool initialised = false;
+
+            if (! initialised)
+            {
+                verb.prepare (sr, blockLen, 2);
+                initialised = true;
+            }
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ConvolutionFx::pIr] = static_cast<float> (irChoice)
+                                                / static_cast<float> (mixxynth::ConvolutionFx::getNumBuiltInIrs());
+            p[mixxynth::ConvolutionFx::pLength] = length;
+            p[mixxynth::ConvolutionFx::pPreDelay] = preDelay;
+            p[mixxynth::ConvolutionFx::pHighCut] = 1.0f;
+            p[mixxynth::ConvolutionFx::pWidth] = 0.5f;
+            p[mixxynth::ConvolutionFx::pMix] = mix;
+            p[mixxynth::ConvolutionFx::pNormalise] = 1.0f;
+
+            juce::AudioBuffer<float> scratch (2, blockLen);
+            scratch.clear();
+            verb.process (scratch, p);
+            verb.refreshImpulse();
+            verb.prepare (sr, blockLen, 2);
+            verb.reset();
+
+            verb.process (buf, p);
+        };
+
+        auto burst = [] (juce::AudioBuffer<float>& buf)
+        {
+            buf.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+        };
+
+        // Mix at zero is dry.
+        {
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < blockLen; ++i)
+                    buf.setSample (ch, i, 0.3f * std::sin (0.02f * static_cast<float> (i)));
+
+            juce::AudioBuffer<float> before (buf);
+            render (0, 1.0f, 0.0f, 0.0f, buf);
+
+            double worst = 0.0;
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < blockLen; ++i)
+                    worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (ch, i)
+                                                                               - before.getSample (ch, i))));
+
+            ok = check (worst < 1.0e-7, "convolution mix at zero is dry", worst) && ok;
+        }
+
+        // Length trims the tail: a short impulse cannot ring as long as a long one.
+        {
+            auto lateEnergy = [&burst, &render] (float length)
+            {
+                juce::AudioBuffer<float> buf (2, blockLen);
+                burst (buf);
+
+                // Cathedral, the longest impulse, so the trim has room to matter.
+                render (4, length, 1.0f, 0.0f, buf);
+                return rmsOf (buf, static_cast<int> (sr * 0.6), static_cast<int> (sr * 0.4));
+            };
+
+            const double full = lateEnergy (1.0f);
+            const double trimmed = lateEnergy (0.05f);
+
+            ok = check (trimmed < full * 0.5, "convolution Length trims the tail",
+                        trimmed / juce::jmax (1.0e-12, full)) && ok;
+        }
+
+        // Pre-delay holds the wet signal back.
+        {
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            render (0, 1.0f, 1.0f, 0.5f, buf);
+
+            const double early = rmsOf (buf, 0, static_cast<int> (sr * 0.01));
+            const double later = rmsOf (buf, static_cast<int> (sr * 0.15), static_cast<int> (sr * 0.3));
+
+            ok = check (early < later * 0.5, "convolution pre-delay holds the wet back", early) && ok;
+        }
+
+        // A custom selection with no file loaded must be silent - not the previous
+        // impulse, and not a crash.
+        {
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            render (mixxynth::ConvolutionFx::customIrChoice(), 1.0f, 1.0f, 0.0f, buf);
+
+            float peak = 0.0f;
+            bool finite = true;
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+                for (int i = 0; i < blockLen; ++i)
+                    if (! std::isfinite (buf.getSample (ch, i)))
+                        finite = false;
+            }
+
+            ok = check (finite && peak < 0.01f,
+                        "convolution with no file loaded is silent, not stale",
+                        peak) && ok;
         }
     }
 

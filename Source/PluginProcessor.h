@@ -114,6 +114,14 @@ public:
     mixxynth::FxSlotState readFxSlot (int slot) const;
     void writeFxSlot (int slot, const mixxynth::FxSlotState& state);
 
+    // The file a slot's module is using (its impulse response, today). This is
+    // STATE rather than a parameter: an APVTS parameter is a number, and audio data
+    // is not a number. Stored in the state tree beside the shapes, and carried in
+    // presets so a patch does not break when the original file moves.
+    void setFxSlotFile (int slot, const juce::String& name, const juce::MemoryBlock& data);
+    juce::String getFxSlotFileName (int slot) const;
+    juce::MemoryBlock getFxSlotFileData (int slot) const;
+
     // Bumped whenever the host loads a state, so the editor can resync its
     // snapshots instead of mistaking a preset load for a user edit.
     int getStateLoadCount() const { return stateLoadCount.load (std::memory_order_relaxed); }

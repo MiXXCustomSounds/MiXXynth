@@ -1,7 +1,7 @@
 # M5 plan — modulation UX, module expansion, presets, visual world
 
-Status: **in progress**. Workstreams 1 (modulation UX) and 2 (the WeirdVerb rename)
-are done. Workstreams 3-10 are planned but not started.
+Status: **in progress**. Workstreams 1 (modulation UX), 2 (the WeirdVerb rename) and
+3 (convolution reverb) are done. Workstreams 4-10 are planned but not started.
 
 Restore point created before any M5 work, and pushed:
 
@@ -129,35 +129,72 @@ the `+` menu both read `WeirdVerb` now, confirmed visually.
 
 ## Workstream 3 — convolution reverb
 
-The rack currently has **no way to put a file into a module**. The card supports
-choice boxes and knobs only, because `FxParamInfo` only describes those two kinds.
-Convolution therefore needs a third control kind first:
+**Done.** Built on `juce::dsp::Convolution` (MIT, ships with JUCE), which already
+does partitioned FFT convolution with a background loader thread — the real
+problem to solve here. Hand-rolling it would mean solving the same threading
+problem again with more ways to get it wrong.
 
-- `FxParamInfo` gains a file kind (label, picker filter, whether an IR is loaded)
-- The card gains a row with a "Load IR…" button and the current file's name
-- `FxRack` gains a way for a module to be handed a file, on the message thread
+### The framework change it needed
 
-**Engine.** `juce::dsp::Convolution` (MIT, ships with JUCE) already does
-partitioned FFT convolution with a background loader thread, which is the correct
-answer for real-time safety. Hand-rolling it means re-solving the same threading
-problem with more ways to get it wrong. I propose using it, and only hand-rolling
-later if we need something it cannot do (zero-latency mode, IR morphing, or
-blending two IRs).
+The rack had no way to put a file into a module: the card knew choice boxes and
+knobs, because `FxParamInfo` only described those. A file cannot be a parameter —
+an APVTS parameter is a number, and audio data is not a number — so:
 
-**The hard question is the IR itself.** A convolution reverb is nothing without
-impulse responses, and where they come from changes the design:
+- `FxDescriptor` gained `hasFile` / `fileLabel` / `fileFilter`
+- `FxModule` gained `setFile(name, data)`, called on the message thread
+- `FxSlotState` gained `fileName` / `fileData`, so a file travels with its slot
+  through a reorder
+- The card draws a button and a name instead of a knob
 
-| Option | Consequence |
-|---|---|
-| Path only | The preset breaks the moment the IR moves or is on another machine |
-| Embed the IR in the preset | Works anywhere, but one IR can be 1-10 MB and the state is XML |
-| Bundled library, referenced by ID | Robust and small, but we have to ship and license IRs |
+### The impulses are generated, not shipped
 
-I lean toward **path plus a bundled starter library**, with an opt-in "embed this
-IR in the preset" toggle for people who want portable patches.
+A starter library of six: Small Room, Large Room, Bright Plate, Dark Plate,
+Cathedral, Spring Tank. Each is a *shape* rather than a recording — a decay
+envelope, a frequency-dependent tail, a build-up and a handful of early
+reflections — synthesised from a fixed seed so a preset that names "Cathedral"
+sounds the same on every machine and in every future build.
 
-Controls: Pre-Delay, Attack (IR start trim), Length (IR tail trim), Low Cut,
-High Cut, Width, Mix, Normalise.
+Generating them rather than shipping WAVs keeps the repository free of binary
+assets and, more to the point, free of licensing questions: an IR downloaded from
+the internet is exactly the kind of asset whose provenance code review cannot
+check. A user can still load their own WAV or AIFF, and **that file's bytes are
+carried in the preset**, so a patch keeps working when the original file moves.
+
+Only user files embed. A built-in is named by a parameter, so a preset that uses
+one stays small — which is the same promise as embedding, without paying for it on
+every patch.
+
+### Two bugs the tests caught
+
+**1. The pre-delay wrote past the end of its buffer.** The module was first
+written assuming a host block is shorter than the 250 ms delay line. A host is
+free to hand over a longer block, and the smoke test does (one second), so it
+crashed. The first fix chunked the write in two — which is the same bug with a
+bigger constant, since a block can be longer than *twice* the line. It is a loop
+now, with neither assumption.
+
+**2. The smoke test had no `ScopedJuceInitialiser_GUI`.** It never needed one
+until a module arrived that uses JUCE's threading rather than just its DSP. The
+editor audit had always had one. That was a genuine gap in the test harness, not a
+workaround for the module.
+
+### A design change worth noting
+
+The impulse rebuild was going to run on a polling `Timer`. It is a
+`juce::AsyncUpdater` instead: the audio thread records what was asked for in
+atomics and calls `triggerAsyncUpdate()`, which is lock-free and coalesces, so a
+knob drag asks for one rebuild rather than hundreds, and nothing polls.
+
+### Controls
+
+Impulse, Length (tail trim), Pre-Delay, Low Cut, High Cut, Width, Mix, Normalise.
+
+**Verified.** Smoke: all six built-in impulses finite, bounded and audible; mix at
+zero is dry; Length trims the tail; pre-delay holds the wet back; a Custom
+selection with no file loaded is *silent* rather than quietly playing the previous
+impulse. Audit: the card builds with the file control, the impulse list has every
+built-in plus the file option, and the file name **and bytes** survive a state
+round-trip. pluginval strictness 5 SUCCESS.
 
 ---
 

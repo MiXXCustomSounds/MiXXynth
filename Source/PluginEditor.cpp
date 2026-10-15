@@ -1640,6 +1640,22 @@ public:
                 owned.add (k);
                 knobs.add (k);
             }
+
+            // A module that needs a file gets a button and a name, not a knob. The
+            // file is state rather than a parameter, so it cannot be one.
+            if (desc.hasFile)
+            {
+                loadFile.setButtonText (desc.fileLabel);
+                loadFile.setTooltip ("Load an impulse response from a file");
+                loadFile.onClick = [this] { owner.chooseFileFor (slot); };
+                addAndMakeVisible (loadFile);
+
+                fileName.setJustificationType (juce::Justification::centredLeft);
+                fileName.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+                addAndMakeVisible (fileName);
+
+                hasFileControl = true;
+            }
         }
 
         static int preferredHeight() { return 26 + 4 + 30 + 78 + 10; }
@@ -1674,6 +1690,15 @@ public:
                 if (choiceBoxes[b]->getSelectedItemIndex() != idx)
                     choiceBoxes[b]->setSelectedItemIndex (idx, juce::dontSendNotification);
             }
+
+            if (hasFileControl)
+            {
+                const auto name = owner.ed.processor().getFxSlotFileName (slot);
+                const auto shown = name.isEmpty() ? juce::String ("no file") : name;
+
+                if (fileName.getText() != shown)
+                    fileName.setText (shown, juce::dontSendNotification);
+            }
         }
 
         // For the audit: sets a combo through the same path a click takes, so the
@@ -1699,6 +1724,7 @@ public:
               << " type=" << mixxynth::fxTypeName (owner.ed.processor().readFxSlot (slot).type)
               << " combos=" << choiceBoxes.size()
               << " knobs=" << knobs.size()
+              << " file=" << (hasFileControl ? 1 : 0)
               << " zeros=" << zeros;
 
             if (! choiceBoxes.isEmpty())
@@ -1743,13 +1769,27 @@ public:
 
             // Choices get their own row: a module can have several, and sharing
             // the knob row would leave the knobs too narrow to use.
-            if (! choiceBoxes.isEmpty())
+            if (! choiceBoxes.isEmpty() || hasFileControl)
             {
                 auto comboRow = b.removeFromTop (30);
-                const int comboW = juce::jmin (150, comboRow.getWidth() / choiceBoxes.size());
 
-                for (auto* box : choiceBoxes)
-                    box->setBounds (comboRow.removeFromLeft (comboW).reduced (2, 3));
+                // The file button and its name take the right of the row, so they sit
+                // beside the module's own choices rather than pushing them around.
+                if (hasFileControl)
+                {
+                    loadFile.setBounds (comboRow.removeFromRight (120).reduced (2, 3));
+                    comboRow.removeFromRight (6);
+                    fileName.setBounds (comboRow.removeFromRight (200));
+                    comboRow.removeFromRight (6);
+                }
+
+                if (! choiceBoxes.isEmpty())
+                {
+                    const int comboW = juce::jmin (150, comboRow.getWidth() / choiceBoxes.size());
+
+                    for (auto* box : choiceBoxes)
+                        box->setBounds (comboRow.removeFromLeft (comboW).reduced (2, 3));
+                }
             }
 
             if (! knobs.isEmpty())
@@ -1778,6 +1818,11 @@ public:
         juce::OwnedArray<juce::ComboBox> choiceBoxes;
         juce::Array<juce::RangedAudioParameter*> choiceParams;
         juce::Array<int> choiceCounts;
+
+        // Only used when the module declares a file.
+        bool hasFileControl = false;
+        juce::TextButton loadFile;
+        juce::Label fileName;
 
         juce::OwnedArray<ModKnob> owned;
         juce::Array<ModKnob*> knobs;
@@ -1969,6 +2014,47 @@ public:
         content.setSize (w, juce::jmax (44, y));
     }
 
+    // Opens a file picker for a slot whose module wants a file, and hands the bytes
+    // to the processor. Async, because a modal file chooser blocks the message
+    // thread and this is called from a button click inside a card.
+    void chooseFileFor (int slot)
+    {
+        auto& proc = ed.processor();
+        const auto state = proc.readFxSlot (slot);
+        const auto desc = mixxynth::FxRack::descriptorFor (state.type);
+
+        if (! desc.hasFile)
+            return;
+
+        fileChooser = std::make_unique<juce::FileChooser> ("Load " + juce::String (desc.fileLabel),
+                                                           juce::File(),
+                                                           juce::String (desc.fileFilter));
+
+        fileChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                    | juce::FileBrowserComponent::canSelectFiles,
+                                  [this, slot] (const juce::FileChooser& fc)
+        {
+            const auto file = fc.getResult();
+
+            if (! file.existsAsFile())
+                return;
+
+            juce::MemoryBlock data;
+
+            if (! file.loadFileAsData (data))
+                return;
+
+            ed.processor().setFxSlotFile (slot, file.getFileName(), data);
+            ed.setModStatus (file.getFileName() + " loaded into slot "
+                               + juce::String (slot + 1));
+
+            // The module picks the new impulse up on its own timer, but the card's
+            // label should not wait for it.
+            if (slot >= 0 && slot < cards.size())
+                cards[slot]->poll();
+        });
+    }
+
     // For the audit: drives a card's choice combo, so the audit exercises the
     // same code path a click takes.
     void setCardChoice (int cardIndex, int boxIndex, int index)
@@ -2013,6 +2099,9 @@ private:
 
     // Type list at the last rebuild, so a change from anywhere is noticed.
     juce::String signature;
+
+    // Held so the async file picker is not destroyed while it is open.
+    std::unique_ptr<juce::FileChooser> fileChooser;
 };
 
 // ---------------------------------------------------------------------------

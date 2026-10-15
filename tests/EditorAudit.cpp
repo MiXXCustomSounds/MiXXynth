@@ -6,6 +6,7 @@
 // This is the automated half of the editor audit; the interactive half (drag
 // every knob in the standalone) is recorded in docs/EDITOR-AUDIT.md.
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <map>
 #include <set>
@@ -1225,9 +1226,76 @@ int main()
                    "a loaded state republishes the rack", juce::String (proc.getFxSlotType (3)));
         }
 
+        // ---- The convolution module, and the file control it needs ----
+        // This is the first module with a FILE, and a file is state rather than a
+        // parameter, so the path it travels is different from every other control in
+        // the rack and has to be checked separately.
+        {
+            for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+                proc.writeFxSlot (s, mixxynth::FxSlotState {});
+
+            miXXEditor->fxAddModule (mixxynth::fxConvolution);
+            miXXEditor->fxRebuildCards();
+
+            check (slotType (0) == mixxynth::fxConvolution,
+                   "the convolution module can be added", juce::String (slotType (0)));
+            check (proc.fxRack().hasInstance (0, mixxynth::fxConvolution),
+                   "its instance exists", "");
+
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxConvolution);
+            const auto dump = miXXEditor->fxDebug();
+
+            check (desc.hasFile, "the convolution descriptor declares a file", "");
+            check (dump.contains ("cards=1") && dump.contains ("zeros=0"),
+                   "its card builds with no zero bounds", dump);
+            check (dump.contains ("comboItems=" + juce::String (desc.params[0].choices.size())),
+                   "its impulse combo lists every built-in plus the file option", dump);
+            check (dump.contains ("file=1"),
+                   "its card shows a file control", dump);
+        }
+
+        // A file survives a state round-trip, bytes and all. This is the whole point
+        // of embedding: a preset has to work when the original file is gone.
+        {
+            juce::MemoryBlock fake;
+            const char payload[] = "not really a wav, but it is bytes";
+            fake.append (payload, sizeof (payload));
+
+            proc.setFxSlotFile (0, "MyImpulse.wav", fake);
+
+            check (proc.getFxSlotFileName (0) == "MyImpulse.wav",
+                   "the file name is stored", proc.getFxSlotFileName (0));
+            check (proc.getFxSlotFileData (0).getSize() == fake.getSize(),
+                   "the file bytes are stored",
+                   juce::String (proc.getFxSlotFileData (0).getSize()));
+
+            juce::MemoryBlock saved;
+            proc.getStateInformation (saved);
+
+            // Wipe it, then load the state back.
+            proc.setFxSlotFile (0, {}, {});
+            check (proc.getFxSlotFileName (0).isEmpty(), "the file can be cleared", "");
+
+            proc.setStateInformation (saved.getData(), static_cast<int> (saved.getSize()));
+
+            check (proc.getFxSlotFileName (0) == "MyImpulse.wav",
+                   "the file name survives a state round-trip",
+                   proc.getFxSlotFileName (0));
+
+            const auto restored = proc.getFxSlotFileData (0);
+
+            check (restored.getSize() == fake.getSize()
+                     && std::memcmp (restored.getData(), fake.getData(), fake.getSize()) == 0,
+                   "the file BYTES survive a state round-trip, so a preset is portable",
+                   juce::String (restored.getSize()));
+        }
+
         // Leave the rack empty, as it starts.
         for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+        {
             proc.writeFxSlot (s, mixxynth::FxSlotState {});
+            proc.setFxSlotFile (s, {}, {});
+        }
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

@@ -1,6 +1,7 @@
 #include "FxRack.h"
 
 #include "WeirdVerbFx.h"
+#include "ConvolutionFx.h"
 
 namespace mixxynth
 {
@@ -8,9 +9,10 @@ namespace mixxynth
     {
         switch (type)
         {
-            case fxOff:    return "Off";
-            case fxWeirdVerb: return "WeirdVerb";
-            default:       break;
+            case fxOff:         return "Off";
+            case fxWeirdVerb:   return "WeirdVerb";
+            case fxConvolution: return "Convolution";
+            default:            break;
         }
 
         return "Off";
@@ -20,8 +22,9 @@ namespace mixxynth
     {
         switch (type)
         {
-            case fxWeirdVerb: return WeirdVerbFx::descriptor();
-            default:       break;
+            case fxWeirdVerb:   return WeirdVerbFx::descriptor();
+            case fxConvolution: return ConvolutionFx::descriptor();
+            default:            break;
         }
 
         return FxDescriptor {};
@@ -54,8 +57,9 @@ namespace mixxynth
         {
             switch (type)
             {
-                case fxWeirdVerb: module = std::make_unique<WeirdVerbFx>(); break;
-                default:       return nullptr;
+                case fxWeirdVerb:   module = std::make_unique<WeirdVerbFx>(); break;
+                case fxConvolution: module = std::make_unique<ConvolutionFx>(); break;
+                default:            return nullptr;
             }
 
             // Fully built and prepared BEFORE it is ever published, so the audio
@@ -65,6 +69,19 @@ namespace mixxynth
         }
 
         return module.get();
+    }
+
+    void FxRack::setSlotFile (int slot, int type, const juce::String& name,
+                              const juce::MemoryBlock& data)
+    {
+        if (type <= fxOff || type >= kNumFxTypes)
+            return;
+
+        // Creating the instance first, so a file can be handed to a slot that has
+        // never run: the type parameter and the file can arrive in either order
+        // after a state load.
+        if (auto* module = ensureInstance (slot, type))
+            module->setFile (name, data);
     }
 
     void FxRack::setSlotType (int slot, int type)

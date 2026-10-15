@@ -455,7 +455,16 @@ void MiXXynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 void MiXXynthProcessor::syncFxRack()
 {
     for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
-        rack.setSlotType (s, static_cast<int> (getParam (apvts, "fx" + juce::String (s + 1) + "type")));
+    {
+        const int type = static_cast<int> (getParam (apvts, "fx" + juce::String (s + 1) + "type"));
+
+        rack.setSlotType (s, type);
+
+        // The file as well as the type: after a state load the module has to be
+        // handed its impulse, and the file can be present even when the type has not
+        // changed.
+        rack.setSlotFile (s, type, getFxSlotFileName (s), getFxSlotFileData (s));
+    }
 }
 
 mixxynth::FxSlotState MiXXynthProcessor::readFxSlot (int slot) const
@@ -473,7 +482,86 @@ mixxynth::FxSlotState MiXXynthProcessor::readFxSlot (int slot) const
     for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
         state.params[static_cast<size_t> (p)] = getParam (apvts, "fx" + n + "p" + juce::String (p + 1));
 
+    state.fileName = getFxSlotFileName (slot);
+    state.fileData = getFxSlotFileData (slot);
+
     return state;
+}
+
+// The per-slot files live in the state tree rather than the parameter tree, for the
+// same reason the shapes do: a parameter is a number and this is not. One child per
+// slot, with the bytes base64-encoded, because base64 is what the XML round-trip is
+// guaranteed to preserve - and a preset has to survive being written to disk and read
+// back by a different build of the plugin.
+void MiXXynthProcessor::setFxSlotFile (int slot, const juce::String& name,
+                                       const juce::MemoryBlock& data)
+{
+    if (slot < 0 || slot >= mixxynth::kMaxFxSlots)
+        return;
+
+    auto node = apvts.state.getChildWithName ("fxFiles");
+
+    if (! node.isValid())
+    {
+        // Nothing to clear and no node yet: do not create one just to leave it empty.
+        if (name.isEmpty() && data.isEmpty())
+            return;
+
+        node = juce::ValueTree ("fxFiles");
+        apvts.state.appendChild (node, nullptr);
+    }
+
+    auto child = node.getChildWithProperty ("slot", slot);
+
+    if (name.isEmpty() && data.isEmpty())
+    {
+        if (child.isValid())
+            node.removeChild (child, nullptr);
+
+        return;
+    }
+
+    if (! child.isValid())
+    {
+        child = juce::ValueTree ("file");
+        child.setProperty ("slot", slot, nullptr);
+        node.appendChild (child, nullptr);
+    }
+
+    child.setProperty ("name", name, nullptr);
+    child.setProperty ("data", data.toBase64Encoding(), nullptr);
+}
+
+juce::String MiXXynthProcessor::getFxSlotFileName (int slot) const
+{
+    const auto node = apvts.state.getChildWithName ("fxFiles");
+
+    if (! node.isValid())
+        return {};
+
+    const auto child = node.getChildWithProperty ("slot", slot);
+
+    return child.isValid() ? child.getProperty ("name").toString() : juce::String {};
+}
+
+juce::MemoryBlock MiXXynthProcessor::getFxSlotFileData (int slot) const
+{
+    const auto node = apvts.state.getChildWithName ("fxFiles");
+
+    if (! node.isValid())
+        return {};
+
+    const auto child = node.getChildWithProperty ("slot", slot);
+
+    if (! child.isValid())
+        return {};
+
+    juce::MemoryBlock data;
+
+    if (! data.fromBase64Encoding (child.getProperty ("data").toString()))
+        return {};
+
+    return data;
 }
 
 void MiXXynthProcessor::writeFxSlot (int slot, const mixxynth::FxSlotState& state)
@@ -515,8 +603,12 @@ void MiXXynthProcessor::writeFxSlot (int slot, const mixxynth::FxSlotState& stat
     for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
         setFloat ("fx" + n + "p" + juce::String (p + 1), state.params[static_cast<size_t> (p)]);
 
+    // The file travels with the slot, so a reorder moves the module's impulse too.
+    setFxSlotFile (slot, state.fileName, state.fileData);
+
     // The type is part of the state, so the rack has to be told what to run.
     rack.setSlotType (slot, state.type);
+    rack.setSlotFile (slot, state.type, state.fileName, state.fileData);
 }
 
 void MiXXynthProcessor::releaseResources() {}
