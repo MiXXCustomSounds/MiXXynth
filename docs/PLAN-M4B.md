@@ -426,45 +426,79 @@ and a parameter change shows up in the combo.
 parameter defaults, because a default cannot depend on a type the user can change.
 Every new module therefore starts on a usable sound rather than at zero.
 
-### The reverb
+### The reverb, rebuilt
+
+The first version was the classic Schroeder/Moorer recipe, and it sounded like it:
+a small 8-line tank with 20-74 ms lines, two short allpasses of input diffusion,
+and a single one-pole damping filter. Every one of those choices is audible as
+short, boxy and metallic. It has been replaced with a design built from current
+practice in artificial reverberation.
 
 ```
-in -> pre-delay -> input diffusion -> 8-line FDN -> tone -> mix -> out
+in -> pre-delay -> 6-stage modulated diffusion -> early reflections
+   -> 8-line FDN (three-band decay, modulated) -> tone -> width -> duck -> shimmer -> mix
 ```
 
-The tank is eight delay lines combined through a **Householder matrix**. That
-matrix is a reflection, so it is orthogonal and energy preserving - which is what
-makes a genuine infinite tail possible: at maximum Decay the feedback is exactly
-1.0 and the tail sustains instead of decaying, with no gain compensation term.
+**Delay lengths are mutually prime and re-quantised after scaling.** Coprime
+lengths maximise the period before the impulse response repeats, and Schroeder's
+rule of thumb is 0.15 modes per Hz for every second of decay time - Hall sums to
+about 780 ms, roughly 1.5 modes/Hz, comfortable for tails past ten seconds. Size
+rescales the lengths and then re-quantises them to primes, which is the trick JOS
+describes for variable FDNs: the lengths stay coprime at every size.
 
-**One deviation from the plan, and why.** The plan said the clamp in the loop would
-stop a runaway. It does stop one, but a clamp is not enough on its own: with
-feedback at exactly 1.0 and a sustained note, the loop conserves energy *and* keeps
-receiving input, so it accumulates until it hits the ceiling and then distorts.
-There is now a soft ceiling (`x / (1 + |x|/2)`) below the hard clamp. Because a
-nonlinearity dissipates energy, the infinite setting becomes self-limiting - loud
-passages settle instead of piling up, while a quiet tail still sustains. The hard
-clamp stays as a backstop that should never engage. The smoke test asserts both
-halves: bounded under sustained input, and still audible at the end.
+**Decay is genuinely frequency dependent.** Each loop runs a three-band
+attenuation filter (one-pole crossovers at 250 Hz and 3 kHz) with an independent
+loop gain per band, from `g = 10^(-3L / (fs * T60))`. Decay sets the mid band,
+Bass scales the low one, Damping the high one. This is most of what separates a
+real room from a box: air absorbs highs while low modes hang on.
 
-Also added: a second soft guard after the rack in `processBlock`. The rack is the
-last stage, so it is the last thing that can push the output past unity, and a
-reverb at 100% wet has no obligation to stay inside it. With an empty rack the
-signal is already inside unity and the guard is transparent.
+**Coloration is attacked directly.** Metallic ringing comes from modal excitation,
+so the input and output gain vectors are deliberately non-uniform - mixed
+magnitudes *and signs* - and the two channels use different vectors, because with
+identical excitation the tank evolves identically and the reverb comes out mono
+(correlation exactly 1.0). Six modulated allpass stages raise echo density before
+the tank sees anything.
 
-The three modes are the pedal's plate / room / spring. They differ in delay length
-set, diffusion, damping curve and modulation character rather than in topology.
-Tone is high-frequency damping (1 kHz to 18 kHz), as on the pedal, not a tilt EQ.
-Mix passes through the pedal's three points: 100% dry at minimum, 50/50 at
-3 o'clock, 100% wet at maximum - a single linear crossfade would put the split at
-the centre instead.
+### Three bugs the tests caught that listening would not have
 
-**Cost, and what was verified.** `MiXXynthSmoke` covers: an empty rack is a
-bit-exact passthrough and allocates no modules, a bypassed slot is skipped while
-the same slot is live when not bypassed, all three modes are finite/bounded/audible,
-infinite decay stays bounded and still sustains at the end, a short decay dies away,
-mix at zero is dry, and pre-delay holds the wet signal back. `MiXXynthEditorAudit`
-adds 26 checks over the rack. pluginval strictness 5 SUCCESS.
+**1. Modulation was eating the tail.** Depth was set in absolute samples, which is
+~7% of a short plate line. A time-varying delay is a lossy resampling process, so
+at that excursion the tank's modes were swept far enough to interfere and the tail
+collapsed. The measurement that exposed it: Decay 0.55 and Decay 0.9 produced
+almost identical tails, while "no modulation" was 100x longer. Depth is now a
+fraction of the line length.
+
+**2. The soft ceiling was capping the decay time.** `x/(1+|x|/2)` looks harmless
+but is already 5% down at 0.2 and 17% down at 0.4 - and that loss happens once per
+loop pass, so it quietly set the decay time no matter where Decay was. It is now
+transparent below unity and only engages when the tank is actually running away.
+Fixing it raised the tail by ~20 dB and made Decay monotonic across its range.
+
+**3. Delay lines wrapped on the wrong period.** Wrapping on the nominal length
+means a delay of `length + k` folds round to `k`, so the modulated read returns
+the signal being written rather than the tail. Lines now wrap on their allocated
+capacity, with the modulation excursion clamped inside it.
+
+### What was added beyond the pedal
+
+Attack (early reflections, scaled by mode and size), Size, Diffusion, Mod Rate,
+Low Cut, High Cut, Width, Duck, Shimmer and Freeze. The reverb declares 17
+parameters, so the rack's generic block went from 8 to 20 - 387 parameters total.
+
+Shimmer is an octave-up feedback path: two crossfaded read heads, because a single
+head clicks every time its read pointer wraps. It is injected into the tank input
+so it gets re-reverbed rather than layered on top, and the smoke test verifies it
+actually transposes by measuring the 880 Hz bin with a Goertzel filter rather than
+merely checking that the output changed.
+
+**Verified.** Smoke: all five modes finite/bounded/audible; Decay monotonic (147x
+across its range); Size lengthens the tail (23x); Damping does not lengthen it;
+ducking pulls the wet down; freeze holds the tail; width collapses to mono at
+minimum (correlation 1.000) and decorrelates at maximum (0.51); shimmer adds
+octave-up content (107x); infinite decay bounded *and* still sustaining; a short
+decay dies away; mix at zero is dry; pre-delay holds the wet back. Audit: 387
+params, cards build 2 combos + 15 knobs with no zero bounds. pluginval strictness
+5 SUCCESS.
 
 ### Workstream 1, as built
 

@@ -20,7 +20,12 @@
 namespace mixxynth
 {
     constexpr int kMaxFxSlots = 8;
-    constexpr int kMaxFxParams = 8;
+
+    // Generic parameter block per slot. Sized for the largest module rather than
+    // for the average one, because a slot's parameter count is fixed at
+    // construction and cannot follow the type that is currently loaded. A module
+    // declares how many of these it uses; the rest are inert.
+    constexpr int kMaxFxParams = 20;
 
     // Fixed type list. Order must match `fxTypeName` and the choice parameter's
     // item list; the audit checks that it does.

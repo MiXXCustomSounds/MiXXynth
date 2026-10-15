@@ -990,16 +990,28 @@ int main()
         // checking: writing the choice back to the parameter, and showing a
         // parameter that moved from somewhere else.
         {
-            miXXEditor->fxSetCardChoice (0, 2); // Spring
+            // Derived from the descriptor rather than hard-coded: the mode list
+            // grew from three entries to five, and a test that assumes the list
+            // length stops testing the binding and starts testing my arithmetic.
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxReverb);
+            const auto& modes = desc.params[mixxynth::ReverbFx::pMode].choices;
+            const int last = modes.size() - 1;
+
+            miXXEditor->fxSetCardChoice (0, 0, last); // Mode -> last entry
 
             check (std::abs (slotParam (0, mixxynth::ReverbFx::pMode) - 1.0f) < 1.0e-4f,
                    "choosing from the combo writes the generic parameter",
                    juce::String (slotParam (0, mixxynth::ReverbFx::pMode)));
 
-            setSlotParam (0, mixxynth::ReverbFx::pMode, 0.5f); // Room
+            // ...and the other way round: a change from elsewhere must show up.
+            const int midIndex = last / 2;
+
+            setSlotParam (0, mixxynth::ReverbFx::pMode,
+                          static_cast<float> (midIndex) / static_cast<float> (last));
             miXXEditor->fxRebuildCards();
 
-            check (miXXEditor->fxDebug().contains ("comboText=Room"),
+            check (miXXEditor->fxDebug().contains ("comboIdx=" + juce::String (midIndex))
+                     && miXXEditor->fxDebug().contains ("comboText=" + modes[midIndex]),
                    "a parameter change is reflected in the combo",
                    miXXEditor->fxDebug());
         }

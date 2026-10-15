@@ -110,7 +110,7 @@ public:
     void fxMoveModule (int slot, int delta);
 
     // Drives a card's choice combo, so the audit exercises the real binding.
-    void fxSetCardChoice (int cardIndex, int choiceIndex);
+    void fxSetCardChoice (int cardIndex, int boxIndex, int choiceIndex);
 
     // Rebuilds the cards synchronously. The page defers this when a button
     // triggers it (the card would be deleted under its own callback), and the

@@ -1514,9 +1514,9 @@ public:
 
                 if (info.isChoice)
                 {
-                    choiceBox = std::make_unique<juce::ComboBox>();
-                    choiceBox->addItemList (info.choices, 1);
-                    choiceBox->setTooltip (info.name);
+                    auto* box = new juce::ComboBox();
+                    box->addItemList (info.choices, 1);
+                    box->setTooltip (info.name);
 
                     // The rack's slot parameters are all generic floats, so a
                     // choice is stored as index / (numItems - 1) and read back by
@@ -1524,24 +1524,33 @@ public:
                     // ComboBoxParameterAttachment needs a real
                     // AudioParameterChoice, and these deliberately are not one, so
                     // the binding is done by hand.
-                    choiceParam = proc.apvts.getParameter (id);
-                    choiceCount = info.choices.size();
+                    //
+                    // A module may declare more than one choice (the reverb has
+                    // Mode and Freeze), so these are lists rather than single
+                    // members.
+                    const int boxIndex = choiceBoxes.size();
 
-                    choiceBox->onChange = [this]
+                    box->onChange = [this, boxIndex]
                     {
-                        if (choiceParam == nullptr || choiceCount < 2)
+                        auto* param = choiceParams[boxIndex];
+
+                        if (param == nullptr || choiceCounts[boxIndex] < 2)
                             return;
 
-                        const float v = static_cast<float> (choiceBox->getSelectedItemIndex())
-                                          / static_cast<float> (choiceCount - 1);
+                        const float v = static_cast<float> (choiceBoxes[boxIndex]->getSelectedItemIndex())
+                                          / static_cast<float> (choiceCounts[boxIndex] - 1);
 
-                        choiceParam->beginChangeGesture();
-                        choiceParam->setValueNotifyingHost (choiceParam->convertTo0to1 (v));
-                        choiceParam->endChangeGesture();
+                        param->beginChangeGesture();
+                        param->setValueNotifyingHost (param->convertTo0to1 (v));
+                        param->endChangeGesture();
                     };
 
-                    choiceBox->setSelectedItemIndex (indexFromParam(), juce::dontSendNotification);
-                    addAndMakeVisible (*choiceBox);
+                    choiceBoxes.add (box);
+                    choiceParams.add (proc.apvts.getParameter (id));
+                    choiceCounts.add (info.choices.size());
+
+                    addAndMakeVisible (*box);
+                    box->setSelectedItemIndex (indexFromParam (boxIndex), juce::dontSendNotification);
                     continue;
                 }
 
@@ -1557,20 +1566,23 @@ public:
             }
         }
 
-        static int preferredHeight() { return 26 + 4 + 78 + 8; }
+        static int preferredHeight() { return 26 + 4 + 30 + 78 + 10; }
 
         // Keeps the controls honest when a parameter moves from anywhere else -
         // a preset load, or the host.
         // The generic param stores a choice as index / (numItems - 1).
-        int indexFromParam() const
+        int indexFromParam (int boxIndex) const
         {
-            if (choiceParam == nullptr || choiceCount < 2)
+            auto* param = choiceParams[boxIndex];
+            const int count = choiceCounts[boxIndex];
+
+            if (param == nullptr || count < 2)
                 return 0;
 
-            const float v = choiceParam->convertFrom0to1 (choiceParam->getValue());
+            const float v = param->convertFrom0to1 (param->getValue());
 
-            return juce::jlimit (0, choiceCount - 1,
-                                 static_cast<int> (std::lround (v * static_cast<float> (choiceCount - 1))));
+            return juce::jlimit (0, count - 1,
+                                 static_cast<int> (std::lround (v * static_cast<float> (count - 1))));
         }
 
         void poll()
@@ -1578,22 +1590,22 @@ public:
             for (auto* k : knobs)
                 k->refreshFromParam();
 
-            // The combo is bound by hand, so it needs the same refresh.
-            if (choiceBox != nullptr && choiceParam != nullptr)
+            // The combos are bound by hand, so they need the same refresh.
+            for (int b = 0; b < choiceBoxes.size(); ++b)
             {
-                const int idx = indexFromParam();
+                const int idx = indexFromParam (b);
 
-                if (choiceBox->getSelectedItemIndex() != idx)
-                    choiceBox->setSelectedItemIndex (idx, juce::dontSendNotification);
+                if (choiceBoxes[b]->getSelectedItemIndex() != idx)
+                    choiceBoxes[b]->setSelectedItemIndex (idx, juce::dontSendNotification);
             }
         }
 
-        // For the audit: sets the combo through the same path a click takes, so
-        // the write back to the parameter is exercised rather than assumed.
-        void setChoiceIndex (int index)
+        // For the audit: sets a combo through the same path a click takes, so the
+        // write back to the parameter is exercised rather than assumed.
+        void setChoiceIndex (int boxIndex, int index)
         {
-            if (choiceBox != nullptr)
-                choiceBox->setSelectedItemIndex (index, juce::sendNotificationSync);
+            if (juce::isPositiveAndBelow (boxIndex, choiceBoxes.size()))
+                choiceBoxes[boxIndex]->setSelectedItemIndex (index, juce::sendNotificationSync);
         }
 
         // For the audit: what this card built, and whether any control ended up
@@ -1609,14 +1621,14 @@ public:
             juce::String s;
             s << "slot=" << (slot + 1)
               << " type=" << mixxynth::fxTypeName (owner.ed.processor().readFxSlot (slot).type)
-              << " combos=" << (choiceBox != nullptr ? 1 : 0)
+              << " combos=" << choiceBoxes.size()
               << " knobs=" << knobs.size()
               << " zeros=" << zeros;
 
-            if (choiceBox != nullptr)
-                s << " comboItems=" << choiceBox->getNumItems()
-                  << " comboIdx=" << choiceBox->getSelectedItemIndex()
-                  << " comboText=" << choiceBox->getText();
+            if (! choiceBoxes.isEmpty())
+                s << " comboItems=" << choiceBoxes[0]->getNumItems()
+                  << " comboIdx=" << choiceBoxes[0]->getSelectedItemIndex()
+                  << " comboText=" << choiceBoxes[0]->getText();
 
             return s;
         }
@@ -1653,11 +1665,23 @@ public:
 
             b.removeFromTop (4);
 
-            if (choiceBox != nullptr)
-                choiceBox->setBounds (b.removeFromLeft (110).reduced (2, 12));
+            // Choices get their own row: a module can have several, and sharing
+            // the knob row would leave the knobs too narrow to use.
+            if (! choiceBoxes.isEmpty())
+            {
+                auto comboRow = b.removeFromTop (30);
+                const int comboW = juce::jmin (150, comboRow.getWidth() / choiceBoxes.size());
+
+                for (auto* box : choiceBoxes)
+                    box->setBounds (comboRow.removeFromLeft (comboW).reduced (2, 3));
+            }
 
             if (! knobs.isEmpty())
             {
+                // Leave room for the painted slot number, or the last knob ends up
+                // sitting underneath it.
+                b.removeFromRight (56);
+
                 const int colW = juce::jmax (54, b.getWidth() / knobs.size());
 
                 for (auto* k : knobs)
@@ -1673,10 +1697,11 @@ public:
         juce::ToggleButton bypass;
         juce::TextButton up, down, remove;
 
-        std::unique_ptr<juce::ComboBox> choiceBox;
-        juce::RangedAudioParameter* choiceParam = nullptr;
-        int choiceCount = 0;
         std::unique_ptr<juce::ButtonParameterAttachment> bypassAttachment;
+
+        juce::OwnedArray<juce::ComboBox> choiceBoxes;
+        juce::Array<juce::RangedAudioParameter*> choiceParams;
+        juce::Array<int> choiceCounts;
 
         juce::OwnedArray<ModKnob> owned;
         juce::Array<ModKnob*> knobs;
@@ -1870,10 +1895,10 @@ public:
 
     // For the audit: drives a card's choice combo, so the audit exercises the
     // same code path a click takes.
-    void setCardChoice (int cardIndex, int index)
+    void setCardChoice (int cardIndex, int boxIndex, int index)
     {
         if (cardIndex >= 0 && cardIndex < cards.size())
-            cards[cardIndex]->setChoiceIndex (index);
+            cards[cardIndex]->setChoiceIndex (boxIndex, index);
     }
 
     // For the audit.
@@ -2303,10 +2328,10 @@ void MiXXynthEditor::fxMoveModule (int slot, int delta)
         fxPage->moveModule (slot, delta);
 }
 
-void MiXXynthEditor::fxSetCardChoice (int cardIndex, int choiceIndex)
+void MiXXynthEditor::fxSetCardChoice (int cardIndex, int boxIndex, int choiceIndex)
 {
     if (fxPage != nullptr)
-        fxPage->setCardChoice (cardIndex, choiceIndex);
+        fxPage->setCardChoice (cardIndex, boxIndex, choiceIndex);
 }
 
 void MiXXynthEditor::fxRebuildCards()

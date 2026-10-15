@@ -1224,21 +1224,23 @@ int main()
 
     // --- 24. Reverb: every mode is finite, bounded and audible ---
     {
-        const char* names[3] = { "reverb plate audible and bounded",
+        const char* names[5] = { "reverb plate audible and bounded",
                                  "reverb room audible and bounded",
+                                 "reverb chamber audible and bounded",
+                                 "reverb hall audible and bounded",
                                  "reverb spring audible and bounded" };
 
-        for (int mode = 0; mode < 3; ++mode)
+        for (int mode = 0; mode < 5; ++mode)
         {
             mixxynth::ReverbFx verb;
             verb.prepare (sr, blockLen, 2);
 
             float p[mixxynth::kMaxFxParams] {};
-            p[mixxynth::ReverbFx::pMode] = static_cast<float> (mode) / 2.0f;
+            p[mixxynth::ReverbFx::pMode] = static_cast<float> (mode) / 4.0f;
             p[mixxynth::ReverbFx::pDecay] = 0.6f;
             p[mixxynth::ReverbFx::pPreDelay] = 0.1f;
-            p[mixxynth::ReverbFx::pTone] = 0.7f;
-            p[mixxynth::ReverbFx::pMod] = 0.3f;
+            p[mixxynth::ReverbFx::pDamping] = 0.7f;
+            p[mixxynth::ReverbFx::pModDepth] = 0.3f;
             p[mixxynth::ReverbFx::pMix] = 1.0f; // wet only
 
             // A short burst then silence, so what is measured is the tail.
@@ -1266,14 +1268,262 @@ int main()
         }
     }
 
+    // --- 24b. Decay and Size lengthen the tail monotonically ---
+    {
+        auto tailEnergy = [] (float size, float decay, float damp, float bass)
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pSize] = size;
+            p[mixxynth::ReverbFx::pDecay] = decay;
+            p[mixxynth::ReverbFx::pBass] = bass;
+            p[mixxynth::ReverbFx::pDamping] = damp;
+            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
+            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
+            p[mixxynth::ReverbFx::pModDepth] = 0.35f;
+            p[mixxynth::ReverbFx::pModRate] = 0.35f;
+            p[mixxynth::ReverbFx::pWidth] = 0.5f;
+            p[mixxynth::ReverbFx::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            // The second half of the second is pure tail.
+            return rmsOf (buf, static_cast<int> (sr * 0.5), static_cast<int> (sr * 0.5));
+        };
+
+        // This is the check that would have caught the soft ceiling quietly
+        // capping the decay: with it in place, 0.2 and 0.9 were almost identical.
+        const double d0 = tailEnergy (0.5f, 0.2f, 0.35f, 0.5f);
+        const double d1 = tailEnergy (0.5f, 0.55f, 0.35f, 0.5f);
+        const double d2 = tailEnergy (0.5f, 0.9f, 0.35f, 0.5f);
+
+        ok = check (d0 < d1 && d1 < d2, "Decay lengthens the tail monotonically",
+                    d2 / juce::jmax (1.0e-9, d0)) && ok;
+
+        const double s0 = tailEnergy (0.2f, 0.6f, 0.35f, 0.5f);
+        const double s1 = tailEnergy (1.0f, 0.6f, 0.35f, 0.5f);
+
+        ok = check (s1 > s0 * 1.2, "Size lengthens the tail",
+                    s1 / juce::jmax (1.0e-9, s0)) && ok;
+
+        // Damping shortens the high band, which on a sine test tone shows up as a
+        // modest reduction - it is a brightness control, not a length control.
+        // Compared at the SAME Decay, so this is a damping comparison and not a
+        // decay comparison.
+        const double openTail = tailEnergy (0.5f, 0.6f, 0.0f, 0.5f);
+        const double dampedTail = tailEnergy (0.5f, 0.6f, 1.0f, 0.5f);
+
+        ok = check (dampedTail <= openTail * 1.05, "Damping does not lengthen the tail",
+                    dampedTail / juce::jmax (1.0e-9, openTail)) && ok;
+    }
+
+    // --- 24c. Ducking pulls the wet down while the dry is present ---
+    {
+        auto duckedLevel = [] (float duck)
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pDecay] = 0.7f;
+            p[mixxynth::ReverbFx::pDuck] = duck;
+            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
+            p[mixxynth::ReverbFx::pWidth] = 0.5f;
+            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
+            p[mixxynth::ReverbFx::pMix] = 1.0f; // wet only, or the dry would mask it
+
+            // Continuous input, so the duck envelope is fully engaged.
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            return rmsOf (buf, static_cast<int> (sr * 0.8), static_cast<int> (sr * 0.2));
+        };
+
+        const double noDuck = duckedLevel (0.0f);
+        const double withDuck = duckedLevel (1.0f);
+
+        ok = check (withDuck < noDuck * 0.9, "ducking pulls the wet down",
+                    withDuck / juce::jmax (1.0e-9, noDuck)) && ok;
+    }
+
     // --- 25. Infinite decay sustains, but does not run away ---
+    {
+        // Freeze is the manual version of the same thing: hold what is in the
+        // tank and ignore anything new. It has to be tested in two stages, since
+        // freezing from the very start would mean nothing ever got in.
+        mixxynth::ReverbFx verb;
+        verb.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::ReverbFx::pDecay] = 0.25f; // would normally die away quickly
+        p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
+        p[mixxynth::ReverbFx::pHighCut] = 1.0f;
+        p[mixxynth::ReverbFx::pMix] = 1.0f;
+
+        const int half = static_cast<int> (sr * 0.5);
+
+        juce::AudioBuffer<float> burst (2, half);
+        burst.clear();
+
+        for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            burst.setSample (0, i, v);
+            burst.setSample (1, i, v);
+        }
+
+        verb.process (burst, p);
+        const double afterBurst = rmsOf (burst, half - 2000, 2000);
+
+        juce::AudioBuffer<float> silence (2, half);
+        silence.clear();
+
+        p[mixxynth::ReverbFx::pFreeze] = 1.0f;
+        verb.process (silence, p);
+        const double afterFreeze = rmsOf (silence, half - 2000, 2000);
+
+        ok = check (afterFreeze > afterBurst * 0.6, "freeze holds the tail",
+                    afterFreeze / juce::jmax (1.0e-9, afterBurst)) && ok;
+    }
+
+    // --- 25b. Width controls the stereo image of the wet signal ---
+    {
+        auto correlation = [] (float width)
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pDecay] = 0.7f;
+            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
+            p[mixxynth::ReverbFx::pModDepth] = 0.35f;
+            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
+            p[mixxynth::ReverbFx::pWidth] = width;
+            p[mixxynth::ReverbFx::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            const int start = static_cast<int> (sr * 0.3);
+            const int len = static_cast<int> (sr * 0.5);
+            double ll = 0.0, rr = 0.0, lr = 0.0;
+
+            for (int i = 0; i < len; ++i)
+            {
+                const double l = buf.getSample (0, start + i);
+                const double r = buf.getSample (1, start + i);
+                ll += l * l;
+                rr += r * r;
+                lr += l * r;
+            }
+
+            const double denom = std::sqrt (juce::jmax (1.0e-18, ll * rr));
+
+            return lr / denom;
+        };
+
+        const double mono = correlation (0.0f);
+        const double wide = correlation (1.0f);
+
+        ok = check (mono > 0.99, "width at minimum collapses the wet to mono", mono) && ok;
+        ok = check (wide < 0.9, "width at maximum decorrelates the channels", wide) && ok;
+    }
+
+    // --- 25c. Shimmer transposes an octave up ---
+    {
+        // One frequency bin, by Goertzel: enough to ask whether the shimmer is
+        // really transposing rather than merely adding noise.
+        auto octaveContent = [] (float shimmerAmount)
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pDecay] = 0.8f;
+            p[mixxynth::ReverbFx::pDiffusion] = 0.7f;
+            p[mixxynth::ReverbFx::pModDepth] = 0.35f;
+            p[mixxynth::ReverbFx::pHighCut] = 1.0f;
+            p[mixxynth::ReverbFx::pWidth] = 0.5f;
+            p[mixxynth::ReverbFx::pShimmer] = shimmerAmount;
+            p[mixxynth::ReverbFx::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            const int start = static_cast<int> (sr * 0.5);
+            const int len = static_cast<int> (sr * 0.5);
+            const double w = 2.0 * juce::MathConstants<double>::pi * 880.0 / sr;
+            const double coeff = 2.0 * std::cos (w);
+            double s1 = 0.0, s2 = 0.0;
+
+            for (int i = 0; i < len; ++i)
+            {
+                const double s0 = buf.getSample (0, start + i) + coeff * s1 - s2;
+                s2 = s1;
+                s1 = s0;
+            }
+
+            return std::sqrt (juce::jmax (0.0, s1 * s1 + s2 * s2 - coeff * s1 * s2)) / len;
+        };
+
+        const double off = octaveContent (0.0f);
+        const double on = octaveContent (0.9f);
+
+        ok = check (on > off * 3.0, "shimmer adds octave-up content",
+                    on / juce::jmax (1.0e-12, off)) && ok;
+    }
+
+    // --- 26. Pre-delay and mix do what they say ---
     {
         mixxynth::ReverbFx verb;
         verb.prepare (sr, blockLen, 2);
 
         float p[mixxynth::kMaxFxParams] {};
-        p[mixxynth::ReverbFx::pDecay] = 1.0f; // the infinite tail
-        p[mixxynth::ReverbFx::pTone] = 1.0f;  // and as open as it gets
+        p[mixxynth::ReverbFx::pDecay] = 1.0f;    // the infinite tail
+        p[mixxynth::ReverbFx::pDamping] = 0.0f;  // fully open: least loss, hardest case
+        p[mixxynth::ReverbFx::pBass] = 1.0f;     // and the longest low end too
         p[mixxynth::ReverbFx::pMix] = 1.0f;
 
         // Sustained input is the case that would grow without bound if the loop
@@ -1313,7 +1563,7 @@ int main()
 
         float q[mixxynth::kMaxFxParams] {};
         q[mixxynth::ReverbFx::pDecay] = 0.0f;
-        q[mixxynth::ReverbFx::pTone] = 0.5f;
+        q[mixxynth::ReverbFx::pDamping] = 0.5f;
         q[mixxynth::ReverbFx::pMix] = 1.0f;
 
         juce::AudioBuffer<float> shortBuf (2, blockLen);
@@ -1372,7 +1622,7 @@ int main()
             float p[mixxynth::kMaxFxParams] {};
             p[mixxynth::ReverbFx::pPreDelay] = 0.5f; // ~125 ms
             p[mixxynth::ReverbFx::pDecay] = 0.6f;
-            p[mixxynth::ReverbFx::pTone] = 0.8f;
+            p[mixxynth::ReverbFx::pDamping] = 0.8f;
             p[mixxynth::ReverbFx::pMix] = 1.0f;      // wet only
 
             juce::AudioBuffer<float> buf (2, blockLen);
