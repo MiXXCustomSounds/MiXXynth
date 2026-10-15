@@ -391,8 +391,80 @@ Every workstream lands with the same gates as the existing code:
 - [x] 3 Operators: on/off + wave shape
 - [x] 2 FM tab: zeroed defaults + dice
 - [x] 1 Dynamic LFO/ENV modules
-- [ ] 4 FX rack
-- [ ] 5 blueSky-style reverb
+- [x] 4 FX rack
+- [x] 5 blueSky-style reverb
+
+### Workstreams 4 and 5, as built
+
+The rack is a **fixed pool of 8 slots**, as planned, because an APVTS parameter's
+items cannot change after construction - so "add a module" cannot mean "add a
+parameter". Per slot: `fx{n}type` (choice), `fx{n}bypass` (bool), and `fx{n}p1..p8`
+(generic floats). 80 new parameters, 291 in total.
+
+**Module lifetime is the part worth recording.** An instance is created lazily on
+the message thread the first time a slot uses that type, and is never destroyed
+while the plugin lives. The audio thread reaches it through an atomic pointer
+written once per (slot, type) with release ordering and read with acquire. That
+gives no audio-thread allocation, no lock, and no lifetime race at once - a
+pointer the audio thread can see is never freed. Only the slot's *active* pointer
+changes at runtime, and it only ever points at an instance that already exists.
+
+**Adding fills the first free slot, and removing compacts.** The chain being dense
+is what makes "add" mean "append to the end" and the `^`/`v` arrows a plain
+adjacent swap. A removal that left a hole would break both silently, which is why
+the audit checks for holes explicitly.
+
+**Choices are stored in the generic floats.** `p1` is the reverb's Mode, and the
+rack's slot params are all generic floats, so a choice is written as
+`index / (numItems - 1)` and read back by rounding - exactly how the module
+interprets it. `ComboBoxParameterAttachment` needs a real `AudioParameterChoice`,
+and these deliberately are not one, so the combo is bound by hand in both
+directions. The audit checks both: choosing from the combo writes the parameter,
+and a parameter change shows up in the combo.
+
+**The module's own defaults are applied when the type is chosen**, not as
+parameter defaults, because a default cannot depend on a type the user can change.
+Every new module therefore starts on a usable sound rather than at zero.
+
+### The reverb
+
+```
+in -> pre-delay -> input diffusion -> 8-line FDN -> tone -> mix -> out
+```
+
+The tank is eight delay lines combined through a **Householder matrix**. That
+matrix is a reflection, so it is orthogonal and energy preserving - which is what
+makes a genuine infinite tail possible: at maximum Decay the feedback is exactly
+1.0 and the tail sustains instead of decaying, with no gain compensation term.
+
+**One deviation from the plan, and why.** The plan said the clamp in the loop would
+stop a runaway. It does stop one, but a clamp is not enough on its own: with
+feedback at exactly 1.0 and a sustained note, the loop conserves energy *and* keeps
+receiving input, so it accumulates until it hits the ceiling and then distorts.
+There is now a soft ceiling (`x / (1 + |x|/2)`) below the hard clamp. Because a
+nonlinearity dissipates energy, the infinite setting becomes self-limiting - loud
+passages settle instead of piling up, while a quiet tail still sustains. The hard
+clamp stays as a backstop that should never engage. The smoke test asserts both
+halves: bounded under sustained input, and still audible at the end.
+
+Also added: a second soft guard after the rack in `processBlock`. The rack is the
+last stage, so it is the last thing that can push the output past unity, and a
+reverb at 100% wet has no obligation to stay inside it. With an empty rack the
+signal is already inside unity and the guard is transparent.
+
+The three modes are the pedal's plate / room / spring. They differ in delay length
+set, diffusion, damping curve and modulation character rather than in topology.
+Tone is high-frequency damping (1 kHz to 18 kHz), as on the pedal, not a tilt EQ.
+Mix passes through the pedal's three points: 100% dry at minimum, 50/50 at
+3 o'clock, 100% wet at maximum - a single linear crossfade would put the split at
+the centre instead.
+
+**Cost, and what was verified.** `MiXXynthSmoke` covers: an empty rack is a
+bit-exact passthrough and allocates no modules, a bypassed slot is skipped while
+the same slot is live when not bypassed, all three modes are finite/bounded/audible,
+infinite decay stays bounded and still sustains at the end, a short decay dies away,
+mix at zero is dry, and pre-delay holds the wet signal back. `MiXXynthEditorAudit`
+adds 26 checks over the rack. pluginval strictness 5 SUCCESS.
 
 ### Workstream 1, as built
 

@@ -5,6 +5,7 @@
 #include "FmVoice.h"
 #include "VoiceManager.h"
 #include "ModMatrix.h"
+#include "Fx/FxRack.h"
 
 // M2b/M3a: polyphonic 6-op FM synth with per-voice modulation.
 // 32 simultaneous notes, unison stacks up to 16, 64-voice pool, and a 32-slot
@@ -34,7 +35,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return 10.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -90,6 +91,29 @@ public:
     // Published once per block for the editor's playheads (negative = idle).
     float getShapePhase (int index) const;
 
+    // ---- FX rack (M4b workstream 4) ----------------------------------------
+    // The rack sits at the end of processBlock, after the voice mix. An Off or
+    // bypassed slot is skipped, so an empty rack is a bit-exact passthrough.
+    //
+    // Slot state lives in ordinary APVTS parameters (fx{n}type / fx{n}bypass /
+    // fx{n}p1..p8), so it is host-visible, automatable and serialised for free.
+    mixxynth::FxRack& fxRack() { return rack; }
+    const mixxynth::FxRack& fxRack() const { return rack; }
+
+    // The type the rack is actually running for a slot, which can lag the
+    // parameter by one call while a module is being created.
+    int getFxSlotType (int slot) const { return rack.getSlotType (slot); }
+
+    // Publishes every slot's current type to the rack, creating any modules the
+    // state asks for. Message thread. Called after a state load.
+    void syncFxRack();
+
+    // Slot state in and out of the parameters. The editor reads all eight slots,
+    // permutes them for a reorder, and writes them back, so a module's settings
+    // always travel with it.
+    mixxynth::FxSlotState readFxSlot (int slot) const;
+    void writeFxSlot (int slot, const mixxynth::FxSlotState& state);
+
     // Bumped whenever the host loads a state, so the editor can resync its
     // snapshots instead of mistaking a preset load for a user edit.
     int getStateLoadCount() const { return stateLoadCount.load (std::memory_order_relaxed); }
@@ -138,6 +162,15 @@ private:
     // Shared band-limited operator waveform tables (M4b). One copy for the whole
     // plugin; the voices hold a pointer to it.
     mixxynth::OpWaveTables waveTables;
+
+    // M4b workstream 4: the FX rack. Lives at the end of the signal path.
+    mixxynth::FxRack rack;
+
+    // Per-block snapshot of the slot types, so processBlock reads each parameter
+    // once rather than once per slot per block.
+    std::array<int, mixxynth::kMaxFxSlots> fxTypes {};
+    std::array<bool, mixxynth::kMaxFxSlots> fxBypass {};
+    std::array<float, mixxynth::kMaxFxSlots * mixxynth::kMaxFxParams> fxParams {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

@@ -3,6 +3,20 @@
 #include "Algorithms.h"
 #include "OpWave.h"
 
+namespace
+{
+    // Reads a parameter's current value by id. Used by the modulation snapshot,
+    // the FX rack, and the state helpers, so it lives at the top rather than next
+    // to whichever caller happened to need it first.
+    float getParam (const juce::AudioProcessorValueTreeState& apvts, const juce::String& id)
+    {
+        if (auto* p = apvts.getRawParameterValue (id))
+            return p->load();
+
+        return 0.0f;
+    }
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLayout()
 {
     // M1b-ii: per-op ratio/level/feedback/ADSR x6 + index + master.
@@ -228,6 +242,45 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "masterGain", "Master Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
 
+    // M4b workstream 4: the FX rack.
+    //
+    // A fixed pool of eight slots, because an APVTS parameter's items cannot
+    // change after construction, so "add a module" cannot mean "add a parameter".
+    // Each slot gets a type, a bypass, and eight generic float parameters whose
+    // meaning the module declares (see Fx/FxModule.h). The alternative - a named
+    // parameter per control per module - would need a parameter per control per
+    // module and the pool sized for the worst case anyway, so it costs more for
+    // no extra clarity.
+    //
+    // The generic params default to 0 here rather than to a module's defaults,
+    // because a default cannot depend on a type that the user can change. The
+    // editor applies the module's descriptor defaults when a slot's type is set.
+    //
+    // Every slot starts Off, so the rack is empty and a pure passthrough.
+    {
+        juce::StringArray typeNames;
+
+        for (int t = 0; t < mixxynth::kNumFxTypes; ++t)
+            typeNames.add (mixxynth::fxTypeName (t));
+
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+        {
+            const juce::String n = juce::String (s + 1);
+
+            params.push_back (std::make_unique<juce::AudioParameterChoice> (
+                "fx" + n + "type", "FX " + n + " Type", typeNames, 0));
+
+            params.push_back (std::make_unique<juce::AudioParameterBool> (
+                "fx" + n + "bypass", "FX " + n + " Bypass", false));
+
+            for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
+                params.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    "fx" + n + "p" + juce::String (p + 1),
+                    "FX " + n + " P" + juce::String (p + 1),
+                    juce::NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.0f));
+        }
+    }
+
     return { params.begin(), params.end() };
 }
 
@@ -383,7 +436,7 @@ void MiXXynthProcessor::resetShapeToDefault (int index)
     setShape (index, defaultShapeFor (index));
 }
 
-void MiXXynthProcessor::prepareToPlay (double sampleRate, int)
+void MiXXynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = static_cast<float> (sampleRate);
     voiceManager.prepare (sampleRate);
@@ -391,16 +444,82 @@ void MiXXynthProcessor::prepareToPlay (double sampleRate, int)
     // Band-limited operator waveform tables. Built here, never on the audio
     // thread, and shared by every voice.
     waveTables.prepare (sampleRate);
+
+    // The rack is stereo. Modules are created on demand; this prepares the ones
+    // that already exist, and then publishes whatever the current parameters ask
+    // for, which matters when a host restores state before preparing.
+    rack.prepare (sampleRate, samplesPerBlock, 2);
+    syncFxRack();
+}
+
+void MiXXynthProcessor::syncFxRack()
+{
+    for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+        rack.setSlotType (s, static_cast<int> (getParam (apvts, "fx" + juce::String (s + 1) + "type")));
+}
+
+mixxynth::FxSlotState MiXXynthProcessor::readFxSlot (int slot) const
+{
+    mixxynth::FxSlotState state;
+
+    if (slot < 0 || slot >= mixxynth::kMaxFxSlots)
+        return state;
+
+    const juce::String n = juce::String (slot + 1);
+
+    state.type = static_cast<int> (getParam (apvts, "fx" + n + "type"));
+    state.bypass = getParam (apvts, "fx" + n + "bypass") > 0.5f;
+
+    for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
+        state.params[static_cast<size_t> (p)] = getParam (apvts, "fx" + n + "p" + juce::String (p + 1));
+
+    return state;
+}
+
+void MiXXynthProcessor::writeFxSlot (int slot, const mixxynth::FxSlotState& state)
+{
+    if (slot < 0 || slot >= mixxynth::kMaxFxSlots)
+        return;
+
+    const juce::String n = juce::String (slot + 1);
+
+    auto setChoice = [this] (const juce::String& id, int index)
+    {
+        if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter (id)))
+        {
+            c->beginChangeGesture();
+            c->setValueNotifyingHost (c->convertTo0to1 (static_cast<float> (index)));
+            c->endChangeGesture();
+        }
+    };
+
+    auto setFloat = [this] (const juce::String& id, float value)
+    {
+        if (auto* f = apvts.getParameter (id))
+        {
+            f->beginChangeGesture();
+            f->setValueNotifyingHost (f->convertTo0to1 (value));
+            f->endChangeGesture();
+        }
+    };
+
+    setChoice ("fx" + n + "type", state.type);
+
+    if (auto* b = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter ("fx" + n + "bypass")))
+    {
+        b->beginChangeGesture();
+        b->setValueNotifyingHost (state.bypass ? 1.0f : 0.0f);
+        b->endChangeGesture();
+    }
+
+    for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
+        setFloat ("fx" + n + "p" + juce::String (p + 1), state.params[static_cast<size_t> (p)]);
+
+    // The type is part of the state, so the rack has to be told what to run.
+    rack.setSlotType (slot, state.type);
 }
 
 void MiXXynthProcessor::releaseResources() {}
-
-static float getParam (juce::AudioProcessorValueTreeState& apvts, const juce::String& id)
-{
-    if (auto* p = apvts.getRawParameterValue (id))
-        return p->load();
-    return 0.0f;
-}
 
 void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
@@ -564,6 +683,38 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         voiceManager.renderBlock (buffer, midi, vp, mod, poly);
     }
 
+    // ---- FX rack, at the end of the chain ------------------------------------
+    // Read each slot once, then hand the rack flat arrays. A slot that is Off or
+    // bypassed is skipped inside the rack, so an empty rack is a passthrough and
+    // costs nothing beyond this parameter read.
+    for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+    {
+        const juce::String n = juce::String (s + 1);
+
+        fxTypes[static_cast<size_t> (s)] = static_cast<int> (getParam (apvts, "fx" + n + "type"));
+        fxBypass[static_cast<size_t> (s)] = getParam (apvts, "fx" + n + "bypass") > 0.5f;
+
+        for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
+            fxParams[static_cast<size_t> (s) * mixxynth::kMaxFxParams + static_cast<size_t> (p)]
+                = getParam (apvts, "fx" + n + "p" + juce::String (p + 1));
+    }
+
+    rack.process (buffer, fxTypes.data(), fxBypass.data(), fxParams.data());
+
+    // The rack is the last stage, so it is the last thing that can push the
+    // output past unity - a reverb at 100% wet has no obligation to stay inside
+    // it. The voice stage's own soft clip runs before the rack, so this is a
+    // second, deliberately gentle guard rather than the working limiter. With an
+    // empty rack the signal is already inside unity and this is transparent.
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        auto* data = buffer.getWritePointer (ch);
+
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+            if (std::abs (data[i]) > 1.0f)
+                data[i] = std::tanh (data[i]);
+    }
+
     // Publish the newest voice's shape phases for the editor's playheads. Single
     // writer (audio thread), single reader (UI), so relaxed atomics are enough.
     {
@@ -661,6 +812,10 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
 
     apvts.replaceState (tree);
+
+    // The rack's slot types live in parameters, so it has to be told what the
+    // loaded state asks for - and any module it has not built yet is created now.
+    syncFxRack();
 
     // Tell the editor this was a load, not a user edit, so pages that watch
     // parameters for changes can resync instead of reacting.

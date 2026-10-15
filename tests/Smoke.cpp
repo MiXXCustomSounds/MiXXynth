@@ -4,6 +4,8 @@
 #include "../Source/Algorithms.h"
 #include "../Source/FmVoice.h"
 #include "../Source/VoiceManager.h"
+#include "../Source/Fx/FxRack.h"
+#include "../Source/Fx/ReverbFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1133,6 +1135,263 @@ int main()
         float peak = 0.0f;
         ok = check (renderAndCheck (paramsForAlgo (4), rms, peak) && vm.getActiveVoiceCount() == 1,
                     "MPE pressure/timbre are safe", vm.getActiveVoiceCount()) && ok;
+    }
+
+    // --- 22. FX rack: an empty rack is a bit-exact passthrough ---
+    {
+        mixxynth::FxRack rack;
+        rack.prepare (sr, 512, 2);
+
+        juce::AudioBuffer<float> buf (2, 512);
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 512; ++i)
+                buf.setSample (ch, i, 0.5f * std::sin (0.01f * static_cast<float> (i)));
+
+        juce::AudioBuffer<float> before (buf);
+
+        int types[mixxynth::kMaxFxSlots] {};
+        bool bypass[mixxynth::kMaxFxSlots] {};
+        float params[mixxynth::kMaxFxSlots * mixxynth::kMaxFxParams] {};
+
+        rack.process (buf, types, bypass, params);
+
+        bool identical = true;
+
+        for (int ch = 0; ch < 2 && identical; ++ch)
+            for (int i = 0; i < 512; ++i)
+                if (buf.getSample (ch, i) != before.getSample (ch, i))
+                    identical = false;
+
+        ok = check (identical, "empty rack is a bit-exact passthrough", 1.0) && ok;
+        ok = check (rack.getNumInstances() == 0, "empty rack allocates no modules", 0.0) && ok;
+    }
+
+    // --- 23. A bypassed slot is skipped entirely ---
+    {
+        mixxynth::FxRack rack;
+        rack.prepare (sr, 512, 2);
+
+        int types[mixxynth::kMaxFxSlots] {};
+        bool bypass[mixxynth::kMaxFxSlots] {};
+        float params[mixxynth::kMaxFxSlots * mixxynth::kMaxFxParams] {};
+
+        // Selecting a type is what creates the module, and it happens on the
+        // caller's (message) thread - never on the audio thread.
+        types[0] = mixxynth::fxReverb;
+        rack.setSlotType (0, mixxynth::fxReverb);
+
+        ok = check (rack.hasInstance (0, mixxynth::fxReverb),
+                    "selecting a type builds its module", 1.0) && ok;
+
+        // Fully wet, so if the slot ran at all the output could not match.
+        params[mixxynth::ReverbFx::pMix] = 1.0f;
+
+        juce::AudioBuffer<float> buf (2, 512);
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 512; ++i)
+                buf.setSample (ch, i, 0.4f * std::sin (0.05f * static_cast<float> (i)));
+
+        juce::AudioBuffer<float> before (buf);
+
+        bypass[0] = true;
+        rack.process (buf, types, bypass, params);
+
+        bool identical = true;
+
+        for (int ch = 0; ch < 2 && identical; ++ch)
+            for (int i = 0; i < 512; ++i)
+                if (buf.getSample (ch, i) != before.getSample (ch, i))
+                    identical = false;
+
+        ok = check (identical, "a bypassed slot is skipped", 1.0) && ok;
+
+        // ...and un-bypassed, the same slot does change the signal.
+        bypass[0] = false;
+        juce::AudioBuffer<float> wet (before);
+        rack.process (wet, types, bypass, params);
+
+        bool changed = false;
+
+        for (int ch = 0; ch < 2 && ! changed; ++ch)
+            for (int i = 0; i < 512; ++i)
+                if (std::abs (wet.getSample (ch, i) - before.getSample (ch, i)) > 1.0e-6f)
+                    changed = true;
+
+        ok = check (changed, "the same slot is live when not bypassed", 1.0) && ok;
+    }
+
+    // --- 24. Reverb: every mode is finite, bounded and audible ---
+    {
+        const char* names[3] = { "reverb plate audible and bounded",
+                                 "reverb room audible and bounded",
+                                 "reverb spring audible and bounded" };
+
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pMode] = static_cast<float> (mode) / 2.0f;
+            p[mixxynth::ReverbFx::pDecay] = 0.6f;
+            p[mixxynth::ReverbFx::pPreDelay] = 0.1f;
+            p[mixxynth::ReverbFx::pTone] = 0.7f;
+            p[mixxynth::ReverbFx::pMod] = 0.3f;
+            p[mixxynth::ReverbFx::pMix] = 1.0f; // wet only
+
+            // A short burst then silence, so what is measured is the tail.
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            const double tailRms = rmsOf (buf, static_cast<int> (sr * 0.2), static_cast<int> (sr * 0.5));
+            float peak = 0.0f;
+
+            for (int ch = 0; ch < 2; ++ch)
+                peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+            ok = check (std::isfinite (tailRms) && tailRms > 0.0005 && peak <= 1.0f,
+                        names[mode], tailRms) && ok;
+        }
+    }
+
+    // --- 25. Infinite decay sustains, but does not run away ---
+    {
+        mixxynth::ReverbFx verb;
+        verb.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::ReverbFx::pDecay] = 1.0f; // the infinite tail
+        p[mixxynth::ReverbFx::pTone] = 1.0f;  // and as open as it gets
+        p[mixxynth::ReverbFx::pMix] = 1.0f;
+
+        // Sustained input is the case that would grow without bound if the loop
+        // were not self-limiting.
+        juce::AudioBuffer<float> buf (2, blockLen);
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 220.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            buf.setSample (0, i, v);
+            buf.setSample (1, i, v);
+        }
+
+        verb.process (buf, p);
+
+        float peak = 0.0f;
+        bool finite = true;
+
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+            for (int i = 0; i < blockLen; ++i)
+                if (! std::isfinite (buf.getSample (ch, i)))
+                    finite = false;
+        }
+
+        const double lateRms = rmsOf (buf, static_cast<int> (sr * 0.7), static_cast<int> (sr * 0.3));
+
+        ok = check (finite && peak <= 1.0f, "infinite decay stays finite and bounded", peak) && ok;
+        ok = check (lateRms > 0.0005, "infinite decay still sustains at the end", lateRms) && ok;
+
+        // A finite decay must actually die away, or Decay is doing nothing.
+        mixxynth::ReverbFx shortVerb;
+        shortVerb.prepare (sr, blockLen, 2);
+
+        float q[mixxynth::kMaxFxParams] {};
+        q[mixxynth::ReverbFx::pDecay] = 0.0f;
+        q[mixxynth::ReverbFx::pTone] = 0.5f;
+        q[mixxynth::ReverbFx::pMix] = 1.0f;
+
+        juce::AudioBuffer<float> shortBuf (2, blockLen);
+        shortBuf.clear();
+
+        for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            shortBuf.setSample (0, i, v);
+            shortBuf.setSample (1, i, v);
+        }
+
+        shortVerb.process (shortBuf, q);
+
+        const double late = rmsOf (shortBuf, static_cast<int> (sr * 0.6), static_cast<int> (sr * 0.3));
+
+        ok = check (late < 0.0005, "a short decay dies away", late) && ok;
+    }
+
+    // --- 26. Pre-delay and mix do what they say ---
+    {
+        // Mix at zero must leave the signal untouched.
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pMix] = 0.0f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 512; ++i)
+                    buf.setSample (ch, i, 0.3f * std::sin (0.02f * static_cast<float> (i)));
+
+            juce::AudioBuffer<float> before (buf);
+            verb.process (buf, p);
+
+            double worst = 0.0;
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 512; ++i)
+                    worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (ch, i)
+                                                                               - before.getSample (ch, i))));
+
+            ok = check (worst < 1.0e-7, "mix at zero is dry", worst) && ok;
+        }
+
+        // Pre-delay must hold the wet signal back, so a wet-only reverb produces
+        // almost nothing for the first part of the pre-delay window.
+        {
+            mixxynth::ReverbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::ReverbFx::pPreDelay] = 0.5f; // ~125 ms
+            p[mixxynth::ReverbFx::pDecay] = 0.6f;
+            p[mixxynth::ReverbFx::pTone] = 0.8f;
+            p[mixxynth::ReverbFx::pMix] = 1.0f;      // wet only
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            const double early = rmsOf (buf, 0, static_cast<int> (sr * 0.03));
+            const double later = rmsOf (buf, static_cast<int> (sr * 0.2), static_cast<int> (sr * 0.3));
+
+            ok = check (early < later * 0.25, "pre-delay holds the wet signal back", early) && ok;
+        }
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

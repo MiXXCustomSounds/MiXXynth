@@ -1429,24 +1429,489 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// FX page: the fixed FX tail arrives in M4
+// FX page: the rack (M4b workstream 4)
+//
+// A card per live slot, in chain order. Slots are a fixed pool of eight with a
+// per-slot type, so "add" means filling the first free slot rather than growing
+// anything, and the chain always stays dense - which is what lets the arrows
+// reorder by swapping one adjacent pair.
 // ---------------------------------------------------------------------------
 class MiXXynthEditor::FxPage : public juce::Component
 {
 public:
-    explicit FxPage (MiXXynthEditor&)
+    explicit FxPage (MiXXynthEditor& e) : ed (e)
     {
-        message.setText ("FX tail (Hyper, Chorus, Delay, Reverb, Distortion, EQ, Limiter) lands in M4.",
-                         juce::dontSendNotification);
-        message.setJustificationType (juce::Justification::centred);
-        message.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
-        addAndMakeVisible (message);
+        viewport.setViewedComponent (&content, false);
+        viewport.setScrollBarsShown (true, false);
+        addAndMakeVisible (viewport);
+
+        addButton.setButtonText ("+  Add a module");
+        addButton.setTooltip ("Append a module to the end of the chain");
+        addButton.onClick = [this] { showAddMenu(); };
+        addAndMakeVisible (addButton);
+
+        empty.setText ("The rack is empty. Modules run top to bottom, so slot 1 is first "
+                       "in the chain and slot 8 is last.",
+                       juce::dontSendNotification);
+        empty.setJustificationType (juce::Justification::centredLeft);
+        empty.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+        content.addAndMakeVisible (empty);
+
+        rebuild();
     }
 
-    void resized() override { message.setBounds (getLocalBounds().reduced (20)); }
+    // One module in the rack: title, bypass, the two arrows, remove, and the
+    // controls the module's descriptor declares.
+    class Card : public juce::Component
+    {
+    public:
+        Card (FxPage& o, int slotIndex) : owner (o), slot (slotIndex)
+        {
+            auto& proc = o.ed.processor();
+            const auto state = proc.readFxSlot (slot);
+            const auto desc = mixxynth::FxRack::descriptorFor (state.type);
+            const juce::String prefix = "fx" + juce::String (slot + 1);
+
+            title.setText (desc.name, juce::dontSendNotification);
+            title.setColour (juce::Label::textColourId, juce::Colour (0xff35e0ff));
+            title.setFont (juce::FontOptions (14.0f));
+            addAndMakeVisible (title);
+
+            up.setButtonText ("^");
+            up.setTooltip ("Move one step earlier in the chain");
+            down.setButtonText ("v");
+            down.setTooltip ("Move one step later in the chain");
+            remove.setButtonText ("-");
+            remove.setTooltip ("Remove this module");
+
+            // An arrow that cannot act is disabled rather than silently doing
+            // nothing, so the chain's ends are visible.
+            up.setEnabled (slot > 0);
+            down.setEnabled (slot + 1 < mixxynth::kMaxFxSlots
+                               && ! proc.readFxSlot (slot + 1).isEmpty());
+
+            up.onClick = [this] { owner.moveModule (slot, -1); };
+            down.onClick = [this] { owner.moveModule (slot, 1); };
+            remove.onClick = [this] { owner.removeModule (slot); };
+
+            addAndMakeVisible (up);
+            addAndMakeVisible (down);
+            addAndMakeVisible (remove);
+
+            bypass.setButtonText ("bypass");
+            bypass.setTooltip ("Bypass this module");
+
+            if (auto* b = dynamic_cast<juce::AudioParameterBool*> (
+                    proc.apvts.getParameter (prefix + "bypass")))
+                bypassAttachment = std::make_unique<juce::ButtonParameterAttachment> (*b, bypass);
+
+            addAndMakeVisible (bypass);
+
+            for (int p = 0; p < desc.numParams && p < mixxynth::kMaxFxParams; ++p)
+            {
+                const auto& info = desc.params[static_cast<size_t> (p)];
+                const juce::String id = prefix + "p" + juce::String (p + 1);
+
+                if (info.isChoice)
+                {
+                    choiceBox = std::make_unique<juce::ComboBox>();
+                    choiceBox->addItemList (info.choices, 1);
+                    choiceBox->setTooltip (info.name);
+
+                    // The rack's slot parameters are all generic floats, so a
+                    // choice is stored as index / (numItems - 1) and read back by
+                    // rounding - which is exactly how the module interprets it.
+                    // ComboBoxParameterAttachment needs a real
+                    // AudioParameterChoice, and these deliberately are not one, so
+                    // the binding is done by hand.
+                    choiceParam = proc.apvts.getParameter (id);
+                    choiceCount = info.choices.size();
+
+                    choiceBox->onChange = [this]
+                    {
+                        if (choiceParam == nullptr || choiceCount < 2)
+                            return;
+
+                        const float v = static_cast<float> (choiceBox->getSelectedItemIndex())
+                                          / static_cast<float> (choiceCount - 1);
+
+                        choiceParam->beginChangeGesture();
+                        choiceParam->setValueNotifyingHost (choiceParam->convertTo0to1 (v));
+                        choiceParam->endChangeGesture();
+                    };
+
+                    choiceBox->setSelectedItemIndex (indexFromParam(), juce::dontSendNotification);
+                    addAndMakeVisible (*choiceBox);
+                    continue;
+                }
+
+                // Dest Off: the rack's generic params are not in the matrix's
+                // destination list, so these knobs are not modulation targets and
+                // a dropped chip is rejected with a flash rather than ignored.
+                auto* k = new ModKnob (info.name, proc.apvts.getParameter (id),
+                                       mixxynth::dstOff, true);
+                owner.ed.wireModKnob (*k);
+                addAndMakeVisible (k);
+                owned.add (k);
+                knobs.add (k);
+            }
+        }
+
+        static int preferredHeight() { return 26 + 4 + 78 + 8; }
+
+        // Keeps the controls honest when a parameter moves from anywhere else -
+        // a preset load, or the host.
+        // The generic param stores a choice as index / (numItems - 1).
+        int indexFromParam() const
+        {
+            if (choiceParam == nullptr || choiceCount < 2)
+                return 0;
+
+            const float v = choiceParam->convertFrom0to1 (choiceParam->getValue());
+
+            return juce::jlimit (0, choiceCount - 1,
+                                 static_cast<int> (std::lround (v * static_cast<float> (choiceCount - 1))));
+        }
+
+        void poll()
+        {
+            for (auto* k : knobs)
+                k->refreshFromParam();
+
+            // The combo is bound by hand, so it needs the same refresh.
+            if (choiceBox != nullptr && choiceParam != nullptr)
+            {
+                const int idx = indexFromParam();
+
+                if (choiceBox->getSelectedItemIndex() != idx)
+                    choiceBox->setSelectedItemIndex (idx, juce::dontSendNotification);
+            }
+        }
+
+        // For the audit: sets the combo through the same path a click takes, so
+        // the write back to the parameter is exercised rather than assumed.
+        void setChoiceIndex (int index)
+        {
+            if (choiceBox != nullptr)
+                choiceBox->setSelectedItemIndex (index, juce::sendNotificationSync);
+        }
+
+        // For the audit: what this card built, and whether any control ended up
+        // with no size.
+        juce::String debugDump() const
+        {
+            int zeros = 0;
+
+            for (auto* c : getChildren())
+                if (c->isVisible() && (c->getWidth() <= 0 || c->getHeight() <= 0))
+                    ++zeros;
+
+            juce::String s;
+            s << "slot=" << (slot + 1)
+              << " type=" << mixxynth::fxTypeName (owner.ed.processor().readFxSlot (slot).type)
+              << " combos=" << (choiceBox != nullptr ? 1 : 0)
+              << " knobs=" << knobs.size()
+              << " zeros=" << zeros;
+
+            if (choiceBox != nullptr)
+                s << " comboItems=" << choiceBox->getNumItems()
+                  << " comboIdx=" << choiceBox->getSelectedItemIndex()
+                  << " comboText=" << choiceBox->getText();
+
+            return s;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto b = getLocalBounds().toFloat().reduced (1.0f);
+
+            g.setColour (juce::Colour (0xff1b2128));
+            g.fillRoundedRectangle (b, 4.0f);
+
+            g.setColour (juce::Colour (0xff2f3a45));
+            g.drawRoundedRectangle (b, 4.0f, 1.0f);
+
+            // The slot number, so the chain order is readable at a glance.
+            g.setColour (juce::Colour (0xff5d6b78));
+            g.setFont (11.0f);
+            g.drawText ("slot " + juce::String (slot + 1),
+                        getLocalBounds().removeFromRight (56).reduced (6, 4),
+                        juce::Justification::centredRight, false);
+        }
+
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced (6);
+            auto top = b.removeFromTop (24);
+
+            title.setBounds (top.removeFromLeft (110));
+            remove.setBounds (top.removeFromRight (26).reduced (0, 1));
+            down.setBounds (top.removeFromRight (26).reduced (0, 1));
+            up.setBounds (top.removeFromRight (26).reduced (0, 1));
+            top.removeFromRight (56); // the slot number is painted, not a control
+            bypass.setBounds (top.removeFromRight (78).reduced (0, 1));
+
+            b.removeFromTop (4);
+
+            if (choiceBox != nullptr)
+                choiceBox->setBounds (b.removeFromLeft (110).reduced (2, 12));
+
+            if (! knobs.isEmpty())
+            {
+                const int colW = juce::jmax (54, b.getWidth() / knobs.size());
+
+                for (auto* k : knobs)
+                    k->setBounds (b.removeFromLeft (colW).reduced (2));
+            }
+        }
+
+    private:
+        FxPage& owner;
+        int slot = 0;
+
+        juce::Label title;
+        juce::ToggleButton bypass;
+        juce::TextButton up, down, remove;
+
+        std::unique_ptr<juce::ComboBox> choiceBox;
+        juce::RangedAudioParameter* choiceParam = nullptr;
+        int choiceCount = 0;
+        std::unique_ptr<juce::ButtonParameterAttachment> bypassAttachment;
+
+        juce::OwnedArray<ModKnob> owned;
+        juce::Array<ModKnob*> knobs;
+    };
+
+public:
+    // rebuild() is public so the editor can drive it from the audit; the page
+    // itself only ever reaches it through requestRebuild or poll.
+    juce::String typeSignature() const
+    {
+        juce::String s;
+
+        for (int i = 0; i < mixxynth::kMaxFxSlots; ++i)
+            s << ed.processor().readFxSlot (i).type << ",";
+
+        return s;
+    }
+
+    // Rebuilds the card list from the current slot types.
+    //
+    // Never call this from inside a card's own callback - the card would be
+    // deleted under the callback that is running - so use requestRebuild for
+    // anything a card triggers.
+    void rebuild()
+    {
+        cards.clear();
+        content.removeAllChildren();
+        content.addAndMakeVisible (empty);
+
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+        {
+            if (ed.processor().readFxSlot (s).isEmpty())
+                continue;
+
+            // OwnedArray owns it; it does NOT parent it. Forgetting this leaves
+            // the card constructed, sized, and completely invisible.
+            auto* card = new Card (*this, s);
+            content.addAndMakeVisible (*card);
+            cards.add (card);
+        }
+
+        empty.setVisible (cards.isEmpty());
+        signature = typeSignature();
+
+        resized();
+    }
+
+    void requestRebuild()
+    {
+        juce::Component::SafePointer<FxPage> safe (this);
+
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                safe->rebuild();
+        });
+    }
+
+public:
+    // Called from the editor's timer. Picks up type changes that did not come
+    // from this page - a preset load, or a host restoring state - and otherwise
+    // just refreshes the knobs.
+    void poll()
+    {
+        if (typeSignature() != signature)
+        {
+            // Never rebuild under a mouse gesture: the card being dragged would
+            // be deleted mid-drag. The next tick picks it up instead.
+            if (juce::ModifierKeys::getCurrentModifiers().isAnyMouseButtonDown())
+                return;
+
+            rebuild();
+            return;
+        }
+
+        for (auto* c : cards)
+            c->poll();
+    }
+
+    void showAddMenu()
+    {
+        juce::PopupMenu menu;
+
+        for (int t = 1; t < mixxynth::kNumFxTypes; ++t)
+            menu.addItem (t, mixxynth::fxTypeName (t));
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addButton),
+                            [this] (int result)
+                            {
+                                if (result > 0)
+                                    addModule (result);
+                            });
+    }
+
+    void addModule (int type)
+    {
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+        {
+            if (! ed.processor().readFxSlot (s).isEmpty())
+                continue;
+
+            const auto desc = mixxynth::FxRack::descriptorFor (type);
+
+            mixxynth::FxSlotState state;
+            state.type = type;
+
+            // The parameter defaults cannot depend on a type the user can change,
+            // so the module's own defaults are applied here, at the moment the
+            // type is picked. Every new module therefore starts on a usable sound
+            // rather than at zero.
+            for (int p = 0; p < desc.numParams && p < mixxynth::kMaxFxParams; ++p)
+                state.params[static_cast<size_t> (p)] = desc.params[static_cast<size_t> (p)].defaultValue;
+
+            ed.processor().writeFxSlot (s, state);
+            ed.setModStatus (juce::String (desc.name) + " added in slot " + juce::String (s + 1));
+
+            requestRebuild();
+            return;
+        }
+
+        ed.setModStatus ("The rack is full - eight modules is the maximum");
+    }
+
+    void removeModule (int slot)
+    {
+        auto& proc = ed.processor();
+
+        // Compact rather than leaving a hole. The chain being dense is what makes
+        // "add fills the first free slot" mean "append to the end", and what makes
+        // the arrows a plain adjacent swap. A hole would silently break both.
+        for (int s = slot; s < mixxynth::kMaxFxSlots - 1; ++s)
+            proc.writeFxSlot (s, proc.readFxSlot (s + 1));
+
+        proc.writeFxSlot (mixxynth::kMaxFxSlots - 1, mixxynth::FxSlotState {});
+
+        ed.setModStatus ("Module removed from slot " + juce::String (slot + 1));
+
+        requestRebuild();
+    }
+
+    // Swaps this slot with its neighbour. Because the chain is always dense,
+    // swapping an adjacent pair IS a reorder - and every setting travels with the
+    // module, because a whole slot's state moves at once.
+    void moveModule (int slot, int delta)
+    {
+        const int target = slot + delta;
+
+        if (target < 0 || target >= mixxynth::kMaxFxSlots)
+            return;
+
+        auto& proc = ed.processor();
+        const auto here = proc.readFxSlot (slot);
+
+        if (here.isEmpty())
+            return;
+
+        const auto there = proc.readFxSlot (target);
+
+        proc.writeFxSlot (slot, there);
+        proc.writeFxSlot (target, here);
+
+        ed.setModStatus (juce::String (mixxynth::FxRack::descriptorFor (here.type).name)
+                           + (delta < 0 ? " moved earlier" : " moved later"));
+
+        requestRebuild();
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (8);
+
+        addButton.setBounds (b.removeFromBottom (26).removeFromLeft (180));
+        b.removeFromBottom (6);
+
+        viewport.setBounds (b);
+
+        const int w = juce::jmax (340, viewport.getMaximumVisibleWidth());
+        const int cardH = Card::preferredHeight();
+
+        int y = 0;
+
+        for (auto* c : cards)
+        {
+            c->setBounds (0, y, w, cardH);
+            y += cardH + 6;
+        }
+
+        empty.setBounds (0, 0, w, 44);
+        content.setSize (w, juce::jmax (44, y));
+    }
+
+    // For the audit: drives a card's choice combo, so the audit exercises the
+    // same code path a click takes.
+    void setCardChoice (int cardIndex, int index)
+    {
+        if (cardIndex >= 0 && cardIndex < cards.size())
+            cards[cardIndex]->setChoiceIndex (index);
+    }
+
+    // For the audit.
+    juce::String debugDump() const
+    {
+        // A card can exist and be sized while never being parented, which makes
+        // it invisible - so report that separately rather than assuming that
+        // "a card exists" means "a card is on screen".
+        int parented = 0;
+
+        for (auto* c : cards)
+            if (c->getParentComponent() == &content && c->isVisible()
+                  && c->getWidth() > 0 && c->getHeight() > 0)
+                ++parented;
+
+        juce::String s;
+        s << "cards=" << cards.size()
+          << " parented=" << parented
+          << " addVisible=" << (addButton.isVisible() ? 1 : 0)
+          << " emptyVisible=" << (empty.isVisible() ? 1 : 0);
+
+        for (auto* c : cards)
+            s << " [" << c->debugDump() << "]";
+
+        return s;
+    }
 
 private:
-    juce::Label message;
+    MiXXynthEditor& ed;
+
+    juce::Viewport viewport;
+    juce::Component content;
+    juce::OwnedArray<Card> cards;
+    juce::TextButton addButton;
+    juce::Label empty;
+
+    // Type list at the last rebuild, so a change from anywhere is noticed.
+    juce::String signature;
 };
 
 // ---------------------------------------------------------------------------
@@ -1820,6 +2285,41 @@ void MiXXynthEditor::removeShapeModule (int index)
     });
 }
 
+void MiXXynthEditor::fxAddModule (int type)
+{
+    if (fxPage != nullptr)
+        fxPage->addModule (type);
+}
+
+void MiXXynthEditor::fxRemoveModule (int slot)
+{
+    if (fxPage != nullptr)
+        fxPage->removeModule (slot);
+}
+
+void MiXXynthEditor::fxMoveModule (int slot, int delta)
+{
+    if (fxPage != nullptr)
+        fxPage->moveModule (slot, delta);
+}
+
+void MiXXynthEditor::fxSetCardChoice (int cardIndex, int choiceIndex)
+{
+    if (fxPage != nullptr)
+        fxPage->setCardChoice (cardIndex, choiceIndex);
+}
+
+void MiXXynthEditor::fxRebuildCards()
+{
+    if (fxPage != nullptr)
+        fxPage->rebuild();
+}
+
+juce::String MiXXynthEditor::fxDebug() const
+{
+    return fxPage != nullptr ? fxPage->debugDump() : juce::String ("no page");
+}
+
 void MiXXynthEditor::runTabPolls()
 {
     // The matrix page watches for routing edits that need to switch the patch
@@ -1835,6 +2335,10 @@ void MiXXynthEditor::runTabPolls()
         fmPage->refreshWaveLabels();
         fmPage->refreshAudibility();
     }
+
+    // The FX page watches the slot types so a preset load repopulates the rack.
+    if (fxPage != nullptr)
+        fxPage->poll();
 }
 
 void MiXXynthEditor::rollFmDice()

@@ -62,6 +62,11 @@ target_sources(MiXXynth PRIVATE
     Source/OpWave.h
     Source/ShapeEditorComponent.cpp
     Source/ShapeEditorComponent.h
+    Source/Fx/FxModule.h
+    Source/Fx/FxRack.cpp
+    Source/Fx/FxRack.h
+    Source/Fx/ReverbFx.cpp
+    Source/Fx/ReverbFx.h
     Source/Algorithms.h
 )
 
@@ -98,6 +103,8 @@ add_executable(MiXXynthSmoke
     Source/ModMatrix.cpp
     Source/ModShape.cpp
     Source/OpWave.cpp
+    Source/Fx/FxRack.cpp
+    Source/Fx/ReverbFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -128,6 +135,8 @@ add_executable(MiXXynthEditorAudit
     Source/ModShape.cpp
     Source/OpWave.cpp
     Source/ShapeEditorComponent.cpp
+    Source/Fx/FxRack.cpp
+    Source/Fx/ReverbFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils

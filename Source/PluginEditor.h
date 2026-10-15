@@ -102,6 +102,24 @@ public:
     // Geometry dump for the editor audit (modulation sidebar).
     juce::String sidebarDebug() const;
 
+    // ---- FX rack, driven by the editor audit -------------------------------
+    // These call the same methods the page's own buttons call, so the checks
+    // exercise the real code path rather than a parallel implementation.
+    void fxAddModule (int type);
+    void fxRemoveModule (int slot);
+    void fxMoveModule (int slot, int delta);
+
+    // Drives a card's choice combo, so the audit exercises the real binding.
+    void fxSetCardChoice (int cardIndex, int choiceIndex);
+
+    // Rebuilds the cards synchronously. The page defers this when a button
+    // triggers it (the card would be deleted under its own callback), and the
+    // audit does not run a message loop, so it asks for it directly.
+    void fxRebuildCards();
+
+    // Card and control counts plus a zero-bounds tally, for the audit.
+    juce::String fxDebug() const;
+
     // Geometry dump for the editor audit (performance bar layout).
     juce::String perfBarDebug() const
     {

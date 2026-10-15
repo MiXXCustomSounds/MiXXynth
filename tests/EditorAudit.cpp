@@ -18,6 +18,8 @@
 #include "../Source/ModMatrix.h"
 #include "../Source/PluginEditor.h"
 #include "../Source/PluginProcessor.h"
+#include "../Source/Fx/FxRack.h"
+#include "../Source/Fx/ReverbFx.h"
 
 namespace
 {
@@ -219,6 +221,14 @@ int main()
             continue;
 
         const auto id = withId->getParameterID();
+
+        // The rack's slot parameters are deliberately exempt. A slot's controls
+        // only exist once that slot is in use, and the generic p7/p8 are spare
+        // for most modules, so "has a control right now" cannot hold for them.
+        // Section 16 checks them properly instead: it activates a slot and
+        // verifies every parameter the module declares is wired to a control.
+        if (id.startsWith ("fx"))
+            continue;
 
         if (knobDest.count (id) == 0 && nonKnob.count (id) == 0)
             unreachable.add (id);
@@ -893,6 +903,236 @@ int main()
         check (proc.getNumShapeModules() == mixxynth::kMaxShapes, "modules: sixteen in total",
                juce::String (proc.getNumShapeModules()));
         check (proc.addShapeModule (false) < 0, "modules: a seventeenth is refused", "");
+    }
+
+    // ---- 16. FX rack: add, reorder, remove, capacity, and state ----
+    // Placed last for the same reason as the module checks: it changes the rack,
+    // and the layout checks above want the default (empty) rack.
+    {
+        auto slotType = [&proc] (int s)
+        {
+            if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (
+                    proc.apvts.getParameter ("fx" + juce::String (s + 1) + "type")))
+                return c->getIndex();
+
+            return -1;
+        };
+
+        auto setSlotParam = [&proc] (int s, int p, float v)
+        {
+            if (auto* f = proc.apvts.getParameter ("fx" + juce::String (s + 1)
+                                                     + "p" + juce::String (p + 1)))
+            {
+                f->beginChangeGesture();
+                f->setValueNotifyingHost (f->convertTo0to1 (v));
+                f->endChangeGesture();
+            }
+        };
+
+        auto slotParam = [&proc] (int s, int p)
+        {
+            if (auto* f = proc.apvts.getParameter ("fx" + juce::String (s + 1)
+                                                     + "p" + juce::String (p + 1)))
+                return f->convertFrom0to1 (f->getValue());
+
+            return -1.0f;
+        };
+
+        // The rack starts empty.
+        int live = 0;
+
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+            if (slotType (s) != mixxynth::fxOff)
+                ++live;
+
+        check (live == 0, "rack starts empty", juce::String (live));
+        check (proc.fxRack().getNumInstances() == 0, "an empty rack builds no modules", "");
+
+        // Adding fills the first free slot, so the chain stays dense.
+        miXXEditor->fxAddModule (mixxynth::fxReverb);
+        miXXEditor->fxRebuildCards();
+
+        check (slotType (0) == mixxynth::fxReverb, "adding puts the module in slot 1",
+               juce::String (slotType (0)));
+        check (proc.getFxSlotType (0) == mixxynth::fxReverb,
+               "the rack is running the module the parameter asks for", "");
+        check (proc.fxRack().hasInstance (0, mixxynth::fxReverb),
+               "the module instance exists", "");
+
+        // The card must have a control per declared parameter, and none of them
+        // may end up with no size.
+        {
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxReverb);
+            const auto dump = miXXEditor->fxDebug();
+
+            int expectedCombos = 0, expectedKnobs = 0;
+
+            for (int p = 0; p < desc.numParams; ++p)
+                (desc.params[static_cast<size_t> (p)].isChoice ? expectedCombos : expectedKnobs) += 1;
+
+            check (dump.contains ("cards=1"), "one card per live module", dump);
+            check (dump.contains ("parented=1"),
+                   "the card is parented and sized, not just constructed", dump);
+            check (dump.contains ("combos=" + juce::String (expectedCombos)
+                                    + " knobs=" + juce::String (expectedKnobs)),
+                   "the card builds one control per declared parameter", dump);
+            check (dump.contains ("zeros=0"), "no FX control has zero bounds", dump);
+
+            // A combo whose selection never lands renders blank while looking
+            // perfectly healthy in the model, so check the visible text too.
+            check (dump.contains ("comboIdx=0") && dump.contains ("comboText=Plate"),
+                   "the mode combo shows its parameter's choice", dump);
+            check (! dump.contains ("emptyVisible=1"),
+                   "the empty-rack hint hides once there is a module", dump);
+        }
+
+        // The combo is bound by hand to a generic float, so both directions need
+        // checking: writing the choice back to the parameter, and showing a
+        // parameter that moved from somewhere else.
+        {
+            miXXEditor->fxSetCardChoice (0, 2); // Spring
+
+            check (std::abs (slotParam (0, mixxynth::ReverbFx::pMode) - 1.0f) < 1.0e-4f,
+                   "choosing from the combo writes the generic parameter",
+                   juce::String (slotParam (0, mixxynth::ReverbFx::pMode)));
+
+            setSlotParam (0, mixxynth::ReverbFx::pMode, 0.5f); // Room
+            miXXEditor->fxRebuildCards();
+
+            check (miXXEditor->fxDebug().contains ("comboText=Room"),
+                   "a parameter change is reflected in the combo",
+                   miXXEditor->fxDebug());
+        }
+
+        // A module's defaults are applied when its type is chosen, so a fresh
+        // module never starts silent at zero.
+        {
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxReverb);
+            int defaultsApplied = 0, defaultsDeclared = 0;
+
+            for (int p = 0; p < desc.numParams; ++p)
+            {
+                const float want = desc.params[static_cast<size_t> (p)].defaultValue;
+
+                if (want <= 0.0f)
+                    continue;
+
+                ++defaultsDeclared;
+
+                if (std::abs (slotParam (0, p) - want) < 1.0e-4f)
+                    ++defaultsApplied;
+            }
+
+            check (defaultsApplied == defaultsDeclared && defaultsDeclared > 0,
+                   "a new module starts on its declared defaults",
+                   juce::String (defaultsApplied) + "/" + juce::String (defaultsDeclared));
+        }
+
+        // A second module goes to the next slot, and the two do not share params.
+        miXXEditor->fxAddModule (mixxynth::fxReverb);
+        miXXEditor->fxRebuildCards();
+
+        check (slotType (1) == mixxynth::fxReverb, "the second module takes slot 2",
+               juce::String (slotType (1)));
+
+        setSlotParam (0, mixxynth::ReverbFx::pMix, 0.9f);
+
+        check (std::abs (slotParam (0, mixxynth::ReverbFx::pMix) - 0.9f) < 1.0e-4f
+                 && std::abs (slotParam (1, mixxynth::ReverbFx::pMix) - 0.35f) < 1.0e-3f,
+               "slots hold independent settings",
+               juce::String (slotParam (0, mixxynth::ReverbFx::pMix)) + "/"
+                 + juce::String (slotParam (1, mixxynth::ReverbFx::pMix)));
+
+        // Reorder: swapping a pair must carry the whole slot, settings included.
+        miXXEditor->fxMoveModule (1, -1);
+
+        check (std::abs (slotParam (0, mixxynth::ReverbFx::pMix) - 0.35f) < 1.0e-3f
+                 && std::abs (slotParam (1, mixxynth::ReverbFx::pMix) - 0.9f) < 1.0e-4f,
+               "a reorder carries the module's settings with it",
+               juce::String (slotParam (0, mixxynth::ReverbFx::pMix)) + "/"
+                 + juce::String (slotParam (1, mixxynth::ReverbFx::pMix)));
+
+        // Removing empties the slot and the chain stays dense.
+        miXXEditor->fxRemoveModule (0);
+        miXXEditor->fxRebuildCards();
+
+        check (slotType (0) == mixxynth::fxReverb, "removing pulls the chain up",
+               juce::String (slotType (0)));
+        check (slotType (1) == mixxynth::fxOff, "the freed slot is Off",
+               juce::String (slotType (1)));
+        check (miXXEditor->fxDebug().contains ("cards=1"), "the card list follows",
+               miXXEditor->fxDebug());
+
+        // The chain must stay dense. Both "add fills the first free slot" and the
+        // adjacent-swap reorder depend on there being no holes, so a removal that
+        // left one behind would break them silently.
+        {
+            bool dense = true, seenEmpty = false;
+
+            for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+            {
+                if (slotType (s) == mixxynth::fxOff)
+                    seenEmpty = true;
+                else if (seenEmpty)
+                    dense = false;
+            }
+
+            check (dense, "the chain has no holes after a removal", miXXEditor->fxDebug());
+        }
+
+        // Capacity: eight slots, and a ninth is refused rather than overwriting.
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+            if (slotType (s) == mixxynth::fxOff)
+                miXXEditor->fxAddModule (mixxynth::fxReverb);
+
+        miXXEditor->fxRebuildCards();
+
+        auto countFilled = [&slotType] ()
+        {
+            int n = 0;
+
+            for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+                if (slotType (s) != mixxynth::fxOff)
+                    ++n;
+
+            return n;
+        };
+
+        check (countFilled() == mixxynth::kMaxFxSlots, "all eight slots fill",
+               juce::String (countFilled()));
+
+        miXXEditor->fxAddModule (mixxynth::fxReverb);
+
+        check (countFilled() == mixxynth::kMaxFxSlots,
+               "a ninth module is refused, not written over", juce::String (countFilled()));
+
+        // State round-trip: the rack rides in the APVTS, so it must survive.
+        {
+            setSlotParam (3, mixxynth::ReverbFx::pDecay, 0.83f);
+
+            juce::MemoryBlock saved;
+            proc.getStateInformation (saved);
+
+            for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+                proc.writeFxSlot (s, mixxynth::FxSlotState {});
+
+            proc.setStateInformation (saved.getData(), static_cast<int> (saved.getSize()));
+
+            check (countFilled() == mixxynth::kMaxFxSlots,
+                   "the rack survives a state round-trip", juce::String (countFilled()));
+            check (std::abs (slotParam (3, mixxynth::ReverbFx::pDecay) - 0.83f) < 1.0e-4f,
+                   "a slot's settings survive too",
+                   juce::String (slotParam (3, mixxynth::ReverbFx::pDecay)));
+
+            // The loaded types must reach the audio side, not just the
+            // parameters: a module the state asked for has to actually exist.
+            check (proc.getFxSlotType (3) == mixxynth::fxReverb,
+                   "a loaded state republishes the rack", juce::String (proc.getFxSlotType (3)));
+        }
+
+        // Leave the rack empty, as it starts.
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+            proc.writeFxSlot (s, mixxynth::FxSlotState {});
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);
