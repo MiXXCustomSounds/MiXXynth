@@ -30,6 +30,12 @@ jobs:
       - name: Run DSP smoke test (TDD gate)
         run: ./build/Release/MiXXynthSmoke.exe
 
+      - name: Build editor audit
+        run: cmake --build build --config Release --target MiXXynthEditorAudit
+
+      - name: Run editor audit (knob wiring + drag-drop)
+        run: ./build/Release/MiXXynthEditorAudit.exe
+
       - name: Build VST3 and Standalone
         run: cmake --build build --config Release --target MiXXynth_VST3 MiXXynth_Standalone
 

@@ -13,8 +13,11 @@ namespace mixxynth::ui
     // resulting depth as a ring around the dial.
     //   - drop a source chip on it  -> creates/fills a modulation slot
     //   - right-click               -> clears every slot targeting this knob
+    // A knob whose dest is dstOff cannot be a modulation target, so a drop on it
+    // is rejected with a visible flash instead of silently doing nothing.
     class ModKnob : public juce::Component,
-                    public juce::DragAndDropTarget
+                    public juce::DragAndDropTarget,
+                    private juce::Timer
     {
     public:
         ModKnob (const juce::String& labelText,
@@ -33,6 +36,17 @@ namespace mixxynth::ui
 
         int getDestIndex() const { return dest; }
 
+        // True when this knob is a valid modulation destination.
+        bool isModTarget() const { return dest != 0; }
+
+        // The parameter this knob drives (used by the editor audit).
+        juce::RangedAudioParameter* getParam() const { return source.p; }
+        juce::String getParamID() const
+        {
+            return source.p != nullptr ? source.p->getParameterID() : juce::String {};
+        }
+        const juce::String& getLabelText() const { return text; }
+
         // Total signed modulation depth currently aimed at this knob.
         void setModDepth (float d);
         float getModDepth() const { return modDepth; }
@@ -44,6 +58,8 @@ namespace mixxynth::ui
 
     private:
         void mouseDown (const juce::MouseEvent&) override;
+        void timerCallback() override;
+        void flashRejected();
 
         sst::jucegui::components::Knob knob;
         ContinuousSource source;
@@ -51,6 +67,7 @@ namespace mixxynth::ui
         int dest = 0;
         float modDepth = 0.0f;
         bool dragOver = false;
+        bool rejectFlash = false;
         bool labelVisible = true;
         static constexpr int labelHeight = 14;
 

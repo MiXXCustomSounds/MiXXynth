@@ -102,3 +102,30 @@ target_compile_definitions(MiXXynthSmoke PRIVATE
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_STANDALONE_APPLICATION=0
 )
+
+# Editor audit: builds the processor + editor offscreen and checks every knob's
+# parameter/destination wiring, the destination name list, UI coverage of all
+# parameters, and the drag-and-drop modulation slot logic.
+add_executable(MiXXynthEditorAudit
+    tests/EditorAudit.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/ModKnob.cpp
+    Source/FmVoice.cpp
+    Source/VoiceManager.cpp
+    Source/ModMatrix.cpp
+)
+target_link_libraries(MiXXynthEditorAudit PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    sst-jucegui
+    PUBLIC juce::juce_recommended_config_flags
+           juce::juce_recommended_warning_flags
+)
+target_compile_features(MiXXynthEditorAudit PRIVATE cxx_std_20)
+target_compile_definitions(MiXXynthEditorAudit PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_STANDALONE_APPLICATION=0
+)

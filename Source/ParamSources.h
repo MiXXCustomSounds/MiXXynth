@@ -18,8 +18,26 @@ namespace mixxynth::ui
             return p != nullptr ? p->getName (64).toStdString() : std::string {};
         }
 
-        float getValue() const override { return p != nullptr ? p->getValue() : 0.0f; }
-        float getDefaultValue() const override { return p != nullptr ? p->getDefaultValue() : 0.0f; }
+        // AudioProcessorParameter::getValue() is the NORMALISED 0..1 value, while
+        // getMin/getMax below are the real range, so it has to be denormalised
+        // here or every dial reads the wrong position.
+        float getValue() const override
+        {
+            return p != nullptr ? p->convertFrom0to1 (p->getValue()) : 0.0f;
+        }
+
+        float getDefaultValue() const override
+        {
+            return p != nullptr ? p->convertFrom0to1 (p->getDefaultValue()) : 0.0f;
+        }
+
+        // sst-jucegui draws the dial from getValue01(). The parameter's
+        // normalised value already is that fraction, so return it directly:
+        // this is also correct for skewed ranges such as the log filter cutoff.
+        float getValue01() override
+        {
+            return p != nullptr ? p->getValue() : 0.0f;
+        }
 
         float getMin() const override
         {

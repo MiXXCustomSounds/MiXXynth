@@ -109,7 +109,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     for (int s = 0; s < MiXXFmVoice::numOps; ++s)
         for (int d = 0; d < MiXXFmVoice::numOps; ++d)
             if (s != d)
-                modDests.add ("Op" + juce::String (s + 1) + ">" + juce::String (d + 1));
+                modDests.add ("Op" + juce::String (s + 1) + " > Op" + juce::String (d + 1));
 
     for (int n = 0; n < mixxynth::kNumModSlots; ++n)
     {

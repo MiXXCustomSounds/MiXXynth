@@ -15,6 +15,15 @@ ModKnob::ModKnob (const juce::String& labelText,
     knob.setSource (&source);
     style (knob);
     addAndMakeVisible (knob);
+
+    // sst-jucegui's mouseDown consumes right-clicks and calls onPopupMenu
+    // instead of forwarding them, so the clear gesture has to be hooked here
+    // rather than in our own mouseDown override.
+    knob.onPopupMenu = [this] (const juce::ModifierKeys&)
+    {
+        if (onClearRequested != nullptr && isModTarget())
+            onClearRequested (dest);
+    };
 }
 
 ModKnob::~ModKnob() = default;
@@ -57,9 +66,16 @@ void ModKnob::paint (juce::Graphics& g)
                           juce::Justification::centred, 1);
     }
 
-    if (dragOver)
+    if (rejectFlash)
     {
-        g.setColour (juce::Colour (0xff35e0ff));
+        g.setColour (juce::Colour (0xffef4444));
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 2.5f);
+    }
+    else if (dragOver)
+    {
+        // Green when the knob can be modulated, red when the drop would be
+        // rejected, so the gesture is legible before releasing the mouse.
+        g.setColour (isModTarget() ? juce::Colour (0xff4ade80) : juce::Colour (0xffef4444));
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 1.5f);
     }
 
@@ -103,17 +119,42 @@ void ModKnob::itemDragExit (const SourceDetails&)
 void ModKnob::itemDropped (const SourceDetails& details)
 {
     dragOver = false;
-    repaint();
 
     const int srcIndex = static_cast<int> (details.description.toString().getIntValue());
+
+    if (! isModTarget())
+    {
+        // Not a modulation destination: make the rejection visible rather than
+        // silently swallowing the drop.
+        flashRejected();
+        return;
+    }
+
+    repaint();
 
     if (onSourceDropped != nullptr)
         onSourceDropped (srcIndex, dest);
 }
 
+void ModKnob::flashRejected()
+{
+    rejectFlash = true;
+    repaint();
+    startTimer (450);
+}
+
+void ModKnob::timerCallback()
+{
+    stopTimer();
+    rejectFlash = false;
+    repaint();
+}
+
 void ModKnob::mouseDown (const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu() && onClearRequested != nullptr)
+    // Only reached for clicks outside the dial square, since the sst knob child
+    // covers the dial itself.
+    if (e.mods.isPopupMenu() && onClearRequested != nullptr && isModTarget())
         onClearRequested (dest);
     else
         Component::mouseDown (e);

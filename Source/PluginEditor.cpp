@@ -44,6 +44,49 @@ namespace
     {
         return dynamic_cast<juce::AudioParameterChoice*> (p.apvts.getParameter (id));
     }
+
+    // Bool toggle wired straight to an APVTS parameter.
+    juce::ToggleButton* makeBoolToggle (MiXXynthProcessor& p, const juce::String& id,
+                                        const juce::String& text)
+    {
+        auto* t = new juce::ToggleButton (text);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterBool*> (p.apvts.getParameter (id)))
+        {
+            t->setToggleState (param->get(), juce::dontSendNotification);
+            t->onClick = [t, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (t->getToggleState() ? 1.0f : 0.0f);
+                param->endChangeGesture();
+            };
+        }
+
+        return t;
+    }
+
+    // Choice combo wired straight to an APVTS parameter.
+    juce::ComboBox* makeChoiceCombo (MiXXynthProcessor& p, const juce::String& id)
+    {
+        auto* c = new juce::ComboBox();
+
+        if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (p.apvts.getParameter (id)))
+        {
+            for (int i = 0; i < param->choices.size(); ++i)
+                c->addItem (param->choices[i], i + 1);
+
+            c->setSelectedId (param->getIndex() + 1, juce::dontSendNotification);
+            c->onChange = [c, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (
+                    param->convertTo0to1 (static_cast<float> (c->getSelectedId() - 1)));
+                param->endChangeGesture();
+            };
+        }
+
+        return c;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +423,8 @@ namespace
 
         std::function<void()> onChanged;
 
+        ModKnob* getDepthKnob() const { return depth; }
+
     private:
         juce::Label label;
         juce::ComboBox src, dst;
@@ -404,6 +449,7 @@ public:
             row->onChanged = [this] { ed.refreshModRings(); };
             content.addAndMakeVisible (row);
             rows.add (row);
+            ed.modKnobs.push_back (row->getDepthKnob());
         }
 
         content.setSize (420, mixxynth::kNumModSlots * rowHeight);
@@ -443,21 +489,28 @@ public:
             auto* rate = new ModKnob ("Rate", ranged (p, "lfo" + id + "rate"), mixxynth::dstOff, true);
             lfoRates.add (rate);
             addAndMakeVisible (rate);
+            ed.modKnobs.push_back (rate);
 
-            auto* bip = new juce::ToggleButton ("bipolar");
+            auto* bip = makeBoolToggle (p, "lfo" + id + "bipolar", "bipolar");
             lfoBipolar.add (bip);
             addAndMakeVisible (bip);
 
-            if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, "lfo" + id + "bipolar")))
-            {
-                bip->setToggleState (param->get(), juce::dontSendNotification);
-                bip->onClick = [bip, param]
-                {
-                    param->beginChangeGesture();
-                    param->setValueNotifyingHost (bip->getToggleState() ? 1.0f : 0.0f);
-                    param->endChangeGesture();
-                };
-            }
+            auto* sync = makeBoolToggle (p, "lfo" + id + "sync", "sync");
+            lfoSync.add (sync);
+            addAndMakeVisible (sync);
+
+            auto* div = makeChoiceCombo (p, "lfo" + id + "syncDiv");
+            lfoDiv.add (div);
+            addAndMakeVisible (div);
+
+            auto* phase = new ModKnob ("Phase", ranged (p, "lfo" + id + "phase"), mixxynth::dstOff, true);
+            lfoPhase.add (phase);
+            addAndMakeVisible (phase);
+            ed.modKnobs.push_back (phase);
+
+            auto* retrig = makeBoolToggle (p, "lfo" + id + "retrig", "retrig");
+            lfoRetrig.add (retrig);
+            addAndMakeVisible (retrig);
         }
 
         // Modulation envelopes.
@@ -478,6 +531,7 @@ public:
                 auto* kn = new ModKnob (names[k], ranged (p, "menv" + id + suffix[k]), mixxynth::dstOff, true);
                 envKnobs.add (kn);
                 addAndMakeVisible (kn);
+                ed.modKnobs.push_back (kn);
             }
         }
 
@@ -503,6 +557,10 @@ public:
 
         msegRate = new ModKnob ("MSEG Rate", ranged (p, "msegRate"), mixxynth::dstOff, true);
         addAndMakeVisible (msegRate);
+        ed.modKnobs.push_back (msegRate);
+
+        msegLoop = makeBoolToggle (p, "msegLoop", "MSEG loop");
+        addAndMakeVisible (msegLoop);
     }
 
     void paint (juce::Graphics& g) override
@@ -528,10 +586,14 @@ public:
         for (int n = 0; n < mixxynth::kNumLfos; ++n)
         {
             auto row = contentArea.removeFromTop (rowH);
-            lfoLabels[n]->setBounds (row.removeFromLeft (48));
-            lfoShapes[n]->setBounds (row.removeFromLeft (86).reduced (2, 8));
-            lfoRates[n]->setBounds (row.removeFromLeft (62));
-            lfoBipolar[n]->setBounds (row.removeFromLeft (80).reduced (2, 8));
+            lfoLabels[n]->setBounds (row.removeFromLeft (44));
+            lfoShapes[n]->setBounds (row.removeFromLeft (78).reduced (2, 8));
+            lfoRates[n]->setBounds (row.removeFromLeft (58));
+            lfoBipolar[n]->setBounds (row.removeFromLeft (66).reduced (2, 8));
+            lfoSync[n]->setBounds (row.removeFromLeft (52).reduced (2, 8));
+            lfoDiv[n]->setBounds (row.removeFromLeft (70).reduced (2, 8));
+            lfoPhase[n]->setBounds (row.removeFromLeft (56));
+            lfoRetrig[n]->setBounds (row.removeFromLeft (62).reduced (2, 8));
         }
 
         contentArea.removeFromTop (4);
@@ -550,6 +612,9 @@ public:
         auto msegRow = contentArea.removeFromTop (juce::jmax (70, contentArea.getHeight() - 60));
         msegRate->setBounds (msegRow.removeFromRight (70));
 
+        if (msegLoop != nullptr)
+            msegLoop->setBounds (msegRow.removeFromRight (110).reduced (2, 4));
+
         for (auto* s : msegSliders)
             s->setBounds (msegRow.removeFromLeft (juce::jmax (14, msegRow.getWidth() / mixxynth::kNumMsegSteps)).reduced (1));
     }
@@ -565,10 +630,15 @@ private:
     juce::OwnedArray<juce::ComboBox> lfoShapes;
     juce::OwnedArray<ModKnob> lfoRates;
     juce::OwnedArray<juce::ToggleButton> lfoBipolar;
+    juce::OwnedArray<juce::ToggleButton> lfoSync;
+    juce::OwnedArray<juce::ComboBox> lfoDiv;
+    juce::OwnedArray<ModKnob> lfoPhase;
+    juce::OwnedArray<juce::ToggleButton> lfoRetrig;
     juce::OwnedArray<juce::Label> envLabels;
     juce::OwnedArray<ModKnob> envKnobs;
     juce::OwnedArray<juce::Slider> msegSliders;
     ModKnob* msegRate = nullptr;
+    juce::ToggleButton* msegLoop = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -719,20 +789,77 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// Voice page: polyphony and unison
+// ---------------------------------------------------------------------------
+class MiXXynthEditor::VoicePage : public juce::Component
+{
+public:
+    explicit VoicePage (MiXXynthEditor& e) : ed (e)
+    {
+        auto& p = e.processor();
+
+        addKnob (ranged (p, "polyphony"), "Polyphony");
+        addKnob (ranged (p, "unison"), "Unison");
+        addKnob (ranged (p, "unisonDetune"), "Unison Detune");
+        addKnob (ranged (p, "unisonSpread"), "Unison Spread");
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colour (0xff8b98a5));
+        g.setFont (11.5f);
+        g.drawFittedText ("Polyphony is the maximum number of notes held at once; unison stacks detuned, "
+                          "stereo-spread copies per note. They share a 64-voice pool, so a large unison "
+                          "reduces how many notes fit.",
+                          getLocalBounds().removeFromTop (34), juce::Justification::centredLeft, 2);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (10);
+        b.removeFromTop (38);
+
+        auto row = b.removeFromTop (110);
+
+        for (auto* k : knobs)
+            k->setBounds (row.removeFromLeft (juce::jmax (90, row.getWidth() / 4)).reduced (6));
+    }
+
+private:
+    void addKnob (juce::RangedAudioParameter* param, const juce::String& label)
+    {
+        // Voice settings are not modulation destinations.
+        auto* k = new ModKnob (label, param, mixxynth::dstOff, true);
+        addAndMakeVisible (k);
+        ed.modKnobs.push_back (k);
+        owned.add (k);
+        knobs.add (k);
+    }
+
+    MiXXynthEditor& ed;
+    juce::OwnedArray<ModKnob> owned;
+    juce::Array<ModKnob*> knobs;
+};
+
+// ---------------------------------------------------------------------------
 // FX page: the fixed FX tail arrives in M4
 // ---------------------------------------------------------------------------
 class MiXXynthEditor::FxPage : public juce::Component
 {
 public:
-    explicit FxPage (MiXXynthEditor&) {}
-
-    void paint (juce::Graphics& g) override
+    explicit FxPage (MiXXynthEditor&)
     {
-        g.setColour (juce::Colour (0xff8b98a5));
-        g.setFont (14.0f);
-        g.drawFittedText ("FX tail (Hyper, Chorus, Delay, Reverb, Distortion, EQ, Limiter) lands in M4.",
-                          getLocalBounds(), juce::Justification::centred, 2);
+        message.setText ("FX tail (Hyper, Chorus, Delay, Reverb, Distortion, EQ, Limiter) lands in M4.",
+                         juce::dontSendNotification);
+        message.setJustificationType (juce::Justification::centred);
+        message.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+        addAndMakeVisible (message);
     }
+
+    void resized() override { message.setBounds (getLocalBounds().reduced (20)); }
+
+private:
+    juce::Label message;
 };
 
 // ---------------------------------------------------------------------------
@@ -781,6 +908,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
                                mixxynth::dstOff, true);
         bar.addAndMakeVisible (k);
         macroKnobs.add (k);
+        modKnobs.push_back (k);
     }
 
     auto* master = new ModKnob ("Master", ranged (proc, "masterGain"), mixxynth::dstMaster, true);
@@ -794,12 +922,14 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     matrixPage = std::make_unique<MatrixPage> (*this);
     modPage = std::make_unique<ModPage> (*this);
     vaPage = std::make_unique<VaPage> (*this);
+    voicePage = std::make_unique<VoicePage> (*this);
     fxPage = std::make_unique<FxPage> (*this);
 
     tabs.setOutline (0);
     tabs.addTab ("FM", juce::Colour (0xff14181d), fmPage.get(), false);
     tabs.addTab ("Matrix", juce::Colour (0xff14181d), matrixPage.get(), false);
     tabs.addTab ("VA/Filt", juce::Colour (0xff14181d), vaPage.get(), false);
+    tabs.addTab ("Voice", juce::Colour (0xff14181d), voicePage.get(), false);
     tabs.addTab ("Mod", juce::Colour (0xff14181d), modPage.get(), false);
     tabs.addTab ("FX", juce::Colour (0xff14181d), fxPage.get(), false);
     addAndMakeVisible (tabs);
@@ -897,7 +1027,10 @@ void MiXXynthEditor::assignModSlot (int srcIndex, int destIndex)
 
     if (auto* dep = ranged (proc, "mod" + id + "depth"))
     {
-        if (std::abs (dep->getValue()) < 0.0001f)
+        // getValue() is normalised, so denormalise before testing for zero.
+        const float current = dep->convertFrom0to1 (dep->getValue());
+
+        if (std::abs (current) < 0.0001f)
         {
             dep->beginChangeGesture();
             dep->setValueNotifyingHost (dep->convertTo0to1 (0.35f));
@@ -961,7 +1094,7 @@ void MiXXynthEditor::refreshModRings()
 
         if (dest >= 0 && dest < mixxynth::kNumModDests)
             if (auto* dep = ranged (proc, "mod" + id + "depth"))
-                totals[static_cast<size_t> (dest)] += dep->getValue();
+                totals[static_cast<size_t> (dest)] += dep->convertFrom0to1 (dep->getValue());
     }
 
     for (auto* k : modKnobs)
