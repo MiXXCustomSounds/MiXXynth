@@ -5,17 +5,23 @@
 #include <array>
 
 #include "FmVoice.h"
+#include "ModMatrix.h"
 
-// M2b: polyphonic voice allocation with unison stacks.
+// M2b/M3a: polyphonic voice allocation with unison stacks, plus per-voice
+// modulation.
 //
 // Voice pool is a fixed compile-time size. A note allocates `unison` voices
 // (detuned + stereo-spread); the pool is shared across all held notes, so
 // polyphony x unison is capped by the pool and excess notes steal the oldest.
 // Stealing is oldest-note-first, which is the standard "oldest" policy.
+//
+// Modulation is evaluated per voice in short sub-blocks (see modBlockSize) so
+// LFOs and mod envelopes stay smooth instead of stepping once per host block.
 class MiXXVoiceManager
 {
 public:
     static constexpr int maxVoices = 64;
+    static constexpr int modBlockSize = 32;
 
     struct PolyParams
     {
@@ -31,6 +37,7 @@ public:
     void renderBlock (juce::AudioBuffer<float>& buffer,
                       juce::MidiBuffer& midi,
                       const MiXXFmVoice::VoiceParams& params,
+                      const mixxynth::ModParams& mod,
                       const PolyParams& poly);
 
     int getActiveNoteCount() const;
@@ -40,15 +47,16 @@ private:
     struct Slot
     {
         MiXXFmVoice voice;
+        mixxynth::ModState modState;
         int note = -1;
         juce::uint64 order = 0;
         bool held = false;
     };
 
-    void startNote (int note, float velocity, const PolyParams& poly);
-    void releaseNote (int note);
+    void startNote (int note, float velocity, const mixxynth::ModParams& mod, const PolyParams& poly);
+    void releaseNote (int note, const mixxynth::ModParams& mod);
     void renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples,
-                      const MiXXFmVoice::VoiceParams& params);
+                      const MiXXFmVoice::VoiceParams& params, const mixxynth::ModParams& mod);
     int countHeldNotes() const;
 
     std::array<Slot, maxVoices> slots;

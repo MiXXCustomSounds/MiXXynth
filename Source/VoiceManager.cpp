@@ -11,6 +11,7 @@ void MiXXVoiceManager::prepare (double sr)
     {
         s.voice.setSampleRate (sampleRate);
         s.voice.reset();
+        s.modState.reset();
         s.note = -1;
         s.order = 0;
         s.held = false;
@@ -22,6 +23,7 @@ void MiXXVoiceManager::reset()
     for (auto& s : slots)
     {
         s.voice.reset();
+        s.modState.reset();
         s.note = -1;
         s.order = 0;
         s.held = false;
@@ -39,7 +41,7 @@ int MiXXVoiceManager::countHeldNotes() const
     return static_cast<int> (std::count (seen.begin(), seen.end(), true));
 }
 
-void MiXXVoiceManager::releaseNote (int note)
+void MiXXVoiceManager::releaseNote (int note, const mixxynth::ModParams& mod)
 {
     for (auto& s : slots)
     {
@@ -47,11 +49,12 @@ void MiXXVoiceManager::releaseNote (int note)
         {
             s.held = false;
             s.voice.noteOff (note);
+            s.modState.noteOff (mod);
         }
     }
 }
 
-void MiXXVoiceManager::startNote (int note, float velocity, const PolyParams& poly)
+void MiXXVoiceManager::startNote (int note, float velocity, const mixxynth::ModParams& mod, const PolyParams& poly)
 {
     const int uni = juce::jlimit (1, 16, poly.unison);
 
@@ -76,7 +79,7 @@ void MiXXVoiceManager::startNote (int note, float velocity, const PolyParams& po
         if (oldestIdx < 0)
             break;
 
-        releaseNote (slots[static_cast<size_t> (oldestIdx)].note);
+        releaseNote (slots[static_cast<size_t> (oldestIdx)].note, mod);
     }
 
     // Pick slots: fully idle voices first, then the oldest sounding voices.
@@ -111,6 +114,8 @@ void MiXXVoiceManager::startNote (int note, float velocity, const PolyParams& po
         s.voice.setDetune (pos * poly.unisonDetune * 0.5f);
         s.voice.setPan (pos * poly.unisonSpread);
         s.voice.noteOn (note, velocity);
+        s.modState.reset();
+        s.modState.noteOn (mod);
         s.note = note;
         s.order = counter++;
         s.held = true;
@@ -118,16 +123,37 @@ void MiXXVoiceManager::startNote (int note, float velocity, const PolyParams& po
 }
 
 void MiXXVoiceManager::renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples,
-                                    const MiXXFmVoice::VoiceParams& params)
+                                    const MiXXFmVoice::VoiceParams& params, const mixxynth::ModParams& mod)
 {
-    for (auto& s : slots)
-        if (s.voice.isActive())
-            s.voice.renderAdd (buffer, startSample, numSamples, params);
+    // Short sub-blocks keep modulation smooth without recomputing per sample.
+    int offset = 0;
+
+    while (offset < numSamples)
+    {
+        const int chunk = juce::jmin (modBlockSize, numSamples - offset);
+        std::array<float, mixxynth::kNumModSources> sources {};
+
+        for (auto& s : slots)
+        {
+            if (! s.voice.isActive())
+                continue;
+
+            mixxynth::computeSources (s.modState, mod, s.voice.getVelocity(),
+                                      s.voice.getCurrentNote(), chunk, sources);
+
+            auto vp = params; // base patch plus this voice's modulation
+            mixxynth::applyModulation (sources, mod, vp);
+            s.voice.renderAdd (buffer, startSample + offset, chunk, vp);
+        }
+
+        offset += chunk;
+    }
 }
 
 void MiXXVoiceManager::renderBlock (juce::AudioBuffer<float>& buffer,
                                     juce::MidiBuffer& midi,
                                     const MiXXFmVoice::VoiceParams& params,
+                                    const mixxynth::ModParams& mod,
                                     const PolyParams& poly)
 {
     buffer.clear();
@@ -141,20 +167,20 @@ void MiXXVoiceManager::renderBlock (juce::AudioBuffer<float>& buffer,
 
         if (t > pos)
         {
-            renderRange (buffer, pos, t - pos, params);
+            renderRange (buffer, pos, t - pos, params, mod);
             pos = t;
         }
 
         const auto msg = metadata.getMessage();
 
         if (msg.isNoteOn())
-            startNote (msg.getNoteNumber(), msg.getFloatVelocity(), poly);
+            startNote (msg.getNoteNumber(), msg.getFloatVelocity(), mod, poly);
         else if (msg.isNoteOff())
-            releaseNote (msg.getNoteNumber());
+            releaseNote (msg.getNoteNumber(), mod);
     }
 
     if (pos < numSamples)
-        renderRange (buffer, pos, numSamples - pos, params);
+        renderRange (buffer, pos, numSamples - pos, params, mod);
 
     // Interim output stage: voice-count compensation plus a soft clip, so a
     // dense chord cannot exceed full scale. The real limiter and EQ land with

@@ -87,6 +87,9 @@ int main()
 {
     bool ok = true;
 
+    mixxynth::ModParams mod; // default: all slots Off, so tests see the base patch
+    mod.sampleRate = sr;
+
     auto check = [] (bool cond, const char* name, double v)
     {
         std::printf ("%s %-34s (%.6f)\n", cond ? "PASS" : "FAIL", name, v);
@@ -195,7 +198,7 @@ int main()
         midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
         midi.addEvent (juce::MidiMessage::noteOn (1, 64, 1.0f), 0);
         midi.addEvent (juce::MidiMessage::noteOn (1, 67, 1.0f), 0);
-        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+        vm.renderBlock (buf, midi, paramsForAlgo (4), mod, poly);
 
         const double rms = rmsOf (buf, static_cast<int> (sr * 0.1), static_cast<int> (sr * 0.5));
         ok = check (vm.getActiveNoteCount() == 3, "poly: 3 notes held", vm.getActiveNoteCount()) && ok;
@@ -217,7 +220,7 @@ int main()
         juce::AudioBuffer<float> buf (2, blockLen);
         juce::MidiBuffer midi;
         midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
-        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+        vm.renderBlock (buf, midi, paramsForAlgo (4), mod, poly);
 
         // Channel energy difference proves the stereo spread is applied.
         double sumL = 0.0, sumR = 0.0;
@@ -251,7 +254,7 @@ int main()
         for (int n = 0; n < 4; ++n)
             midi.addEvent (juce::MidiMessage::noteOn (1, 60 + n, 1.0f), 0);
 
-        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+        vm.renderBlock (buf, midi, paramsForAlgo (4), mod, poly);
 
         ok = check (vm.getActiveNoteCount() == 2, "poly cap: 2 notes held", vm.getActiveNoteCount()) && ok;
     }
@@ -271,7 +274,7 @@ int main()
         for (int n = 0; n < 12; ++n)
             midi.addEvent (juce::MidiMessage::noteOn (1, 48 + n * 2, 1.0f), 0);
 
-        vm.renderBlock (buf, midi, paramsForAlgo (4), poly);
+        vm.renderBlock (buf, midi, paramsForAlgo (4), mod, poly);
 
         const int voices = vm.getActiveVoiceCount();
         ok = check (voices <= MiXXVoiceManager::maxVoices, "pool cap respected", voices) && ok;
@@ -298,7 +301,7 @@ int main()
         auto loud = paramsForAlgo (4);
         loud.master = 1.0f;
         loud.index = 10.0f;
-        vm.renderBlock (buf, midi, loud, poly);
+        vm.renderBlock (buf, midi, loud, mod, poly);
 
         float peak = 0.0f;
 
@@ -307,6 +310,132 @@ int main()
 
         ok = check (peak <= 1.0f, "dense poly bounded (<=1.0)", peak) && ok;
         ok = check (peak > 0.001f, "dense poly audible", peak) && ok;
+    }
+
+    // --- 10. Modulation identity: an Off source is a no-op ---
+    {
+        auto base = paramsForAlgo (4);
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto offSlot = mod;
+        offSlot.slots[0] = { mixxynth::srcOff, mixxynth::dstFmIndex, 1.0f };
+
+        juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
+        juce::MidiBuffer m1, m2;
+        m1.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        m2.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+        MiXXVoiceManager v1, v2;
+        v1.prepare (sr);
+        v2.prepare (sr);
+        v1.renderBlock (a, m1, base, mod, poly);
+        v2.renderBlock (b, m2, base, offSlot, poly);
+
+        float maxDiff = 0.0f;
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < blockLen; ++i)
+                maxDiff = juce::jmax (maxDiff, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+
+        ok = check (maxDiff < 1e-9f, "mod: Off source is a no-op", maxDiff) && ok;
+    }
+
+    // --- 11. LFO -> FM Index audibly changes the output ---
+    {
+        auto base = paramsForAlgo (4);
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto m = mod;
+        m.lfos[0].rateHz = 5.0f;
+        m.slots[0] = { mixxynth::srcLfo1, mixxynth::dstFmIndex, 1.0f };
+
+        juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
+        juce::MidiBuffer m1, m2;
+        m1.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        m2.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+        MiXXVoiceManager v1, v2;
+        v1.prepare (sr);
+        v2.prepare (sr);
+        v1.renderBlock (a, m1, base, mod, poly);
+        v2.renderBlock (b, m2, base, m, poly);
+
+        double diff = 0.0;
+
+        for (int i = 0; i < blockLen; ++i)
+            diff += std::abs (a.getSample (0, i) - b.getSample (0, i));
+
+        ok = check (diff > 1.0, "mod: LFO->FM Index changes output", diff) && ok;
+    }
+
+    // --- 12. Mod envelope -> master acts over time ---
+    {
+        auto base = paramsForAlgo (4);
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto m = mod;
+        m.envs[0].attack = 0.25f;
+        m.envs[0].sustain = 1.0f;
+        m.slots[0] = { mixxynth::srcEnv1, mixxynth::dstMaster, -0.8f };
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer mm;
+        mm.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+        MiXXVoiceManager v;
+        v.prepare (sr);
+        v.renderBlock (buf, mm, base, m, poly);
+
+        const double early = rmsOf (buf, 0, static_cast<int> (sr * 0.05));
+        const double late = rmsOf (buf, static_cast<int> (sr * 0.6), static_cast<int> (sr * 0.3));
+
+        ok = check (late < early, "mod: env lowers master over time", late - early) && ok;
+    }
+
+    // --- 13. Matrix-depth destination: modulating a routing depth works ---
+    {
+        MiXXFmVoice::VoiceParams base;
+        base.index = 6.0f;
+        base.master = 0.5f;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            base.ratio[i] = 1.0f;
+            base.level[i] = 0.5f;
+        }
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto m = mod;
+        m.macros[0] = 1.0f;
+        // Destination 0 past dstMtxFirst is the first off-diagonal cell: Op1 > Op2.
+        m.slots[0] = { mixxynth::srcMacro1, mixxynth::dstMtxFirst, 1.0f };
+
+        juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
+        juce::MidiBuffer m1, m2;
+        m1.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        m2.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+        MiXXVoiceManager v1, v2;
+        v1.prepare (sr);
+        v2.prepare (sr);
+        v1.renderBlock (a, m1, base, mod, poly);
+        v2.renderBlock (b, m2, base, m, poly);
+
+        double diff = 0.0;
+
+        for (int i = 0; i < blockLen; ++i)
+            diff += std::abs (a.getSample (0, i) - b.getSample (0, i));
+
+        ok = check (diff > 1.0, "mod: matrix-depth destination works", diff) && ok;
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

@@ -48,6 +48,8 @@ target_sources(MiXXynth PRIVATE
     Source/FmVoice.h
     Source/VoiceManager.cpp
     Source/VoiceManager.h
+    Source/ModMatrix.cpp
+    Source/ModMatrix.h
     Source/Algorithms.h
 )
 
@@ -81,6 +83,7 @@ add_executable(MiXXynthSmoke
     tests/Smoke.cpp
     Source/FmVoice.cpp
     Source/VoiceManager.cpp
+    Source/ModMatrix.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils

@@ -4,10 +4,13 @@
 
 #include "FmVoice.h"
 #include "VoiceManager.h"
+#include "ModMatrix.h"
 
-// M2b: polyphonic 6-op FM synth. Up to 32 simultaneous notes with unison
-// stacks up to 16 voices, 64-voice pool with oldest-note stealing.
-// VA/filter, mod matrix, FX, presets land in M3/M4.
+// M2b/M3a: polyphonic 6-op FM synth with per-voice modulation.
+// 32 simultaneous notes, unison stacks up to 16, 64-voice pool, and a 32-slot
+// drag-and-drop modulation matrix (4 LFOs, 3 mod envelopes, MSEG-lite, 4 macros,
+// velocity/mod-wheel/aftertouch/key-track).
+// VA/filter, FX tail, presets and randomize land in M3b/M4.
 class MiXXynthProcessor : public juce::AudioProcessor
 {
 public:
@@ -42,6 +45,9 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     MiXXVoiceManager voiceManager;
+    float currentSampleRate = 44100.0f;
+    float modWheel = 0.0f;
+    float aftertouch = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

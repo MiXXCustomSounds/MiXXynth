@@ -64,6 +64,7 @@ public:
 
     bool isActive() const;
     int getCurrentNote() const { return currentNote; }
+    float getVelocity() const { return velocity; }
 
 private:
     struct Op
