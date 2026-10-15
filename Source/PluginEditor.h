@@ -61,6 +61,10 @@ public:
     // the editor audit can drive the Matrix page's mode-switch logic directly.
     void runTabPolls();
 
+    // Rolls the FM tab's dice. Exposed so the audit can check the roll's
+    // invariants without driving a button.
+    void rollFmDice();
+
     // Signature of the last slot configuration, so refreshModRings() can skip
     // rebuilding every knob's assignment list when nothing has changed.
     juce::uint64 modSignature = 0;

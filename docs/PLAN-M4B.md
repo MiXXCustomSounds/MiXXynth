@@ -389,12 +389,56 @@ Every workstream lands with the same gates as the existing code:
 ## Status
 
 - [x] 3 Operators: on/off + wave shape
-- [ ] 2 FM tab: zeroed defaults + dice
+- [x] 2 FM tab: zeroed defaults + dice
 - [ ] 1 Dynamic LFO/ENV modules
 - [ ] 4 FX rack
 - [ ] 5 blueSky-style reverb
 
-### Workstream 3, as built
+### Workstream 2, as built
+
+**Decision taken: the init patch is ALL ZERO.** The synth therefore loads silent,
+by choice. Every range was opened down to 0 so each knob can genuinely sit there:
+
+| Param | Range before | Range now | Default |
+|---|---|---|---|
+| `fmIndex` | 0..12 | 0..12 | **0** |
+| `op{n}ratio` | 0.25..16 | **0..16** | **0** |
+| `op{n}level` | 0..1 | 0..1 | **0** |
+| `op{n}attack` | 0.001..2 | **0..2** | **0** |
+| `op{n}decay` | 0.005..4 | **0..4** | **0** |
+| `op{n}sustain` | 0..1 | 0..1 | **0** |
+| `op{n}release` | 0.005..8 | **0..8** | **0** |
+| `op{n}wave` | 0..1 | 0..1 | **0** |
+| `op{n}on` | bool | bool | true |
+
+Two things worth knowing about why it is silent, because both are load-bearing:
+
+- **Ratio 0 stops an operator entirely.** `op.phase += frequency * ratio /
+  sampleRate`, so with ratio 0 the phase never advances and every shape is 0 at
+  phase 0. That is why the ratio range had to open to 0.
+- **An all-zero ADSR is a one-sample spike**, not a sustain: attack 0 jumps to 1,
+  then decay 0 with sustain 0 drops straight back to 0.
+
+The modulation clamp for `dstOp1Ratio` was widened to match (0.25 -> 0).
+
+**Dice button**, next to the algorithm combo:
+
+- Randomises `fmIndex` and, per operator, `ratio`, `level`, `feedback`, `attack`,
+  `decay`, `sustain`, `release` and `wave`.
+- Constrained to musical ranges, not 0..max: ratios come from
+  {0.5, 1, 1.5, 2, 3, 4, 5, 7}, feedback tops out at 0.7, decay/release stay in
+  usable seconds.
+- **Guarantees audibility.** It reads the current algorithm, works out which
+  operators are carriers, and forces the first carrier to a real ratio, a real
+  level and a sustaining envelope. Without that a roll could land on silence from
+  the all-zero init patch and read as a bug.
+- Writes through the normal parameter API, so the host sees each change as an
+  undoable edit.
+- Exposed as `MiXXynthEditor::rollFmDice()` so the audit can test the invariants
+  without driving a button.
+
+Audit now asserts the init defaults are all zero, that a roll keeps every value in
+range, and that a roll is always audible.
 
 - `Source/OpWave.{h,cpp}`: band-limited tables, 4 shapes x 8 octave bands, 2048
   samples each, built in `prepareToPlay`. Morph is harmonic-domain, so it is

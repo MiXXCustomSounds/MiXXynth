@@ -223,7 +223,7 @@ void applyModulation (const std::array<float, kNumModSources>& sources,
         {
             const int i = slot.dest - dstOp1Ratio;
             vp.ratio[static_cast<size_t> (i)] =
-                juce::jlimit (0.25f, 16.0f, vp.ratio[static_cast<size_t> (i)] + amt * 16.0f);
+                juce::jlimit (0.0f, 16.0f, vp.ratio[static_cast<size_t> (i)] + amt * 16.0f);
         }
         else if (slot.dest >= dstOp1Level && slot.dest <= dstOp6Level)
         {

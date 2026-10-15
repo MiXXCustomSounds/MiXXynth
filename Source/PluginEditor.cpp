@@ -365,6 +365,11 @@ public:
         addAndMakeVisible (algo);
         addKnob (ranged (p, "fmIndex"), mixxynth::dstFmIndex, "FM Index");
 
+        diceButton.setButtonText ("Dice");
+        diceButton.setTooltip ("Randomise every knob on this page");
+        diceButton.onClick = [this] { rollDice(); };
+        addAndMakeVisible (diceButton);
+
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
             const juce::String n = juce::String (i + 1);
@@ -398,6 +403,93 @@ public:
         }
     }
 
+    // Randomises every knob on this page. The roll is constrained to musically
+    // usable ranges rather than 0..max, and at least one carrier is forced to be
+    // audible so a roll can never land on silence.
+    void rollDice()
+    {
+        auto& p = ed.processor();
+
+        auto set = [&p] (const juce::String& id, float realValue)
+        {
+            if (auto* param = ranged (p, id))
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (param->convertTo0to1 (realValue));
+                param->endChangeGesture();
+            }
+        };
+
+        auto read = [&p] (const juce::String& id)
+        {
+            if (auto* param = ranged (p, id))
+                return param->convertFrom0to1 (param->getValue());
+
+            return 0.0f;
+        };
+
+        // Which operators reach the output depends on the algorithm, so work the
+        // carriers out first and make sure one of them actually sounds.
+        std::array<bool, MiXXFmVoice::numOps> isCarrier {};
+        const int algoIndex = [&p]
+        {
+            auto* a = choice (p, "algorithm");
+            return a != nullptr ? a->getIndex() : 0;
+        }();
+
+        if (algoIndex >= 0 && algoIndex < mixxynth::kNumAlgorithms)
+        {
+            const auto& algo = mixxynth::algorithmTable()[static_cast<size_t> (algoIndex)];
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+                isCarrier[static_cast<size_t> (i)] = algo.carrier[static_cast<size_t> (i)];
+        }
+        else
+        {
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+                isCarrier[static_cast<size_t> (i)] =
+                    read ("carrier" + juce::String (i + 1)) > 0.5f;
+        }
+
+        // Ratio 0 stops an operator's phase advancing, so the roll picks from real
+        // musical ratios rather than the whole range.
+        static const float ratios[] = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f, 7.0f };
+
+        set ("fmIndex", rng.nextFloat() * 12.0f);
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            const juce::String n = juce::String (i + 1);
+
+            set ("op" + n + "ratio", ratios[rng.nextInt (8)]);
+            set ("op" + n + "level", 0.15f + rng.nextFloat() * 0.85f);
+            set ("op" + n + "feedback", rng.nextFloat() * 0.7f);
+            set ("op" + n + "attack", rng.nextFloat() * 0.5f);
+            set ("op" + n + "decay", 0.05f + rng.nextFloat() * 1.95f);
+            set ("op" + n + "sustain", rng.nextFloat());
+            set ("op" + n + "release", 0.05f + rng.nextFloat() * 2.95f);
+            set ("op" + n + "wave", rng.nextFloat());
+        }
+
+        // Guarantee audibility: give one carrier a real ratio, a real level and an
+        // envelope that sustains.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            if (! isCarrier[static_cast<size_t> (i)])
+                continue;
+
+            const juce::String n = juce::String (i + 1);
+
+            set ("op" + n + "ratio", ratios[rng.nextInt (8)]);
+            set ("op" + n + "level", 0.5f + rng.nextFloat() * 0.5f);
+            set ("op" + n + "sustain", 0.4f + rng.nextFloat() * 0.6f);
+            set ("op" + n + "decay", 0.1f + rng.nextFloat() * 1.5f);
+            break;
+        }
+
+        ed.setModStatus ("Dice rolled a new FM patch");
+    }
+
     void paint (juce::Graphics& g) override
     {
         g.setColour (juce::Colour (0xff8b98a5));
@@ -415,6 +507,8 @@ public:
         auto top = b.removeFromTop (24);
         algoLabel.setBounds (top.removeFromLeft (80));
         algo.setBounds (top.removeFromLeft (230));
+        top.removeFromLeft (10);
+        diceButton.setBounds (top.removeFromLeft (72).reduced (2, 0));
 
         b.removeFromTop (4);
 
@@ -462,6 +556,8 @@ private:
     MiXXynthEditor& ed;
     juce::Label algoLabel;
     juce::ComboBox algo;
+    juce::TextButton diceButton;
+    juce::Random rng;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs;
     juce::OwnedArray<juce::ToggleButton> opOnToggles;
@@ -1466,6 +1562,12 @@ void MiXXynthEditor::runTabPolls()
 
     if (vaPage != nullptr)
         vaPage->refreshHint();
+}
+
+void MiXXynthEditor::rollFmDice()
+{
+    if (fmPage != nullptr)
+        fmPage->rollDice();
 }
 
 void MiXXynthEditor::setModStatus (const juce::String& text)

@@ -12,28 +12,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     for (int i = 0; i < MiXXFmVoice::numOps; ++i)
     {
         const juce::String n = juce::String (i + 1);
+
+        // M4b: the init patch is ALL ZERO by spec, so the synth loads silent.
+        // Every range therefore opens down to 0 so each knob can genuinely sit
+        // there, and the dice button (or a preset, once there is a preset
+        // manager) is how you get sound.
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "ratio", "Op " + n + " Ratio",
-            juce::NormalisableRange<float> (0.25f, 16.0f, 0.001f, 0.4f), 1.0f));
+            juce::NormalisableRange<float> (0.0f, 16.0f, 0.001f, 0.4f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "level", "Op " + n + " Level",
-            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f),
-            (i < 2 ? 0.8f : 0.12f)));
+            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "feedback", "Op " + n + " Feedback",
             juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "attack", "Op " + n + " Attack",
-            juce::NormalisableRange<float> (0.001f, 2.0f, 0.001f, 0.4f), 0.01f));
+            juce::NormalisableRange<float> (0.0f, 2.0f, 0.001f, 0.4f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "decay", "Op " + n + " Decay",
-            juce::NormalisableRange<float> (0.005f, 4.0f, 0.001f, 0.4f), 0.10f));
+            juce::NormalisableRange<float> (0.0f, 4.0f, 0.001f, 0.4f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "sustain", "Op " + n + " Sustain",
-            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.90f));
+            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "release", "Op " + n + " Release",
-            juce::NormalisableRange<float> (0.005f, 8.0f, 0.001f, 0.4f), 0.20f));
+            juce::NormalisableRange<float> (0.0f, 8.0f, 0.001f, 0.4f), 0.0f));
 
         // M4b: per-operator enable and waveform.
         params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -45,7 +49,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "fmIndex", "FM Index",
-        juce::NormalisableRange<float> (0.0f, 12.0f, 0.001f), 3.0f));
+        juce::NormalisableRange<float> (0.0f, 12.0f, 0.001f), 0.0f));
 
     // M2a: DX7 algorithm selector (32 algos + "Free" matrix mode).
     juce::StringArray algoNames;

@@ -468,7 +468,92 @@ int main()
                juce::String (algoParam != nullptr ? algoParam->getIndex() : -1));
     }
 
-    // ---- 9. Layout: no visible control is left with zero bounds ----
+    // ---- 9. FM init patch is all zero, and the dice always produces sound ----
+    {
+        // Defaults, read through the parameter API rather than by constructing a
+        // second processor.
+        auto defReal = [&proc] (const juce::String& id)
+        {
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (proc.apvts.getParameter (id)))
+                return p->convertFrom0to1 (p->getDefaultValue());
+
+            return -999.0f;
+        };
+
+        bool allZero = std::abs (defReal ("fmIndex")) < 1.0e-6f;
+
+        for (int i = 1; i <= 6; ++i)
+        {
+            const auto n = juce::String (i);
+
+            for (const char* suffix : { "ratio", "level", "feedback", "attack", "decay", "sustain", "release", "wave" })
+                if (std::abs (defReal ("op" + n + suffix)) > 1.0e-6f)
+                    allZero = false;
+        }
+
+        check (allZero, "FM init patch is all zero",
+               juce::String (defReal ("fmIndex")) + " / " + juce::String (defReal ("op1level")));
+
+        auto readReal = [&proc] (const juce::String& id)
+        {
+            if (auto* r = proc.apvts.getRawParameterValue (id))
+                return r->load();
+
+            return 0.0f;
+        };
+
+        // The dice has to be able to make sound from that silent init patch.
+        auto* algoParam = dynamic_cast<juce::AudioParameterChoice*> (
+            proc.apvts.getParameter ("algorithm"));
+
+        if (algoParam != nullptr)
+        {
+            algoParam->beginChangeGesture();
+            algoParam->setValueNotifyingHost (algoParam->convertTo0to1 (0.0f));
+            algoParam->endChangeGesture();
+        }
+
+        miXXEditor->rollFmDice();
+
+        bool inRange = true;
+
+        for (int i = 1; i <= 6; ++i)
+        {
+            const auto n = juce::String (i);
+
+            inRange = inRange && readReal ("op" + n + "ratio") > 0.0f;
+            inRange = inRange && readReal ("op" + n + "level") > 0.0f;
+            inRange = inRange && readReal ("op" + n + "wave") >= 0.0f
+                                && readReal ("op" + n + "wave") <= 1.0f;
+            inRange = inRange && readReal ("op" + n + "feedback") <= 0.95f;
+        }
+
+        check (inRange, "dice: every op gets a usable ratio, level and wave",
+               inRange ? "ok" : "out of range");
+        check (readReal ("fmIndex") >= 0.0f && readReal ("fmIndex") <= 12.0f,
+               "dice: fm index stays in range", juce::String (readReal ("fmIndex")));
+
+        // At least one carrier must be able to sustain a note, or the roll reads
+        // as a bug.
+        bool audible = false;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            if (! mixxynth::algorithmTable()[0].carrier[static_cast<size_t> (i)])
+                continue;
+
+            const auto n = juce::String (i + 1);
+
+            if (readReal ("op" + n + "level") > 0.3f
+                  && readReal ("op" + n + "sustain") > 0.3f
+                  && readReal ("op" + n + "ratio") > 0.0f)
+                audible = true;
+        }
+
+        check (audible, "dice: the roll is always audible", audible ? "ok" : "silent");
+    }
+
+    // ---- 10. Layout: no visible control is left with zero bounds ----
     // This is the regression guard for the bug where setSize() ran before the
     // child arrays were populated, leaving controls at 0x0 and invisible.
     juce::StringArray zeroSized;
