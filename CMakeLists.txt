@@ -44,6 +44,10 @@ target_sources(MiXXynth PRIVATE
     Source/PluginProcessor.h
     Source/PluginEditor.cpp
     Source/PluginEditor.h
+    Source/ModKnob.cpp
+    Source/ModKnob.h
+    Source/ParamSources.h
+    Source/EditorTheme.h
     Source/FmVoice.cpp
     Source/FmVoice.h
     Source/VoiceManager.cpp
