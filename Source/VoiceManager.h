@@ -43,6 +43,10 @@ public:
     int getActiveNoteCount() const;
     int getActiveVoiceCount() const;
 
+    // Global pitch offset (semitones) applied on top of each voice's unison
+    // detune. MPE will extend this to per-note offsets.
+    void setPitchBendSemitones (float semitones);
+
 private:
     struct Slot
     {
@@ -51,6 +55,7 @@ private:
         int note = -1;
         juce::uint64 order = 0;
         bool held = false;
+        float unisonCents = 0.0f; // this voice's position in the unison stack
     };
 
     void startNote (int note, float velocity, const mixxynth::ModParams& mod, const PolyParams& poly);
@@ -63,4 +68,5 @@ private:
     double sampleRate = 44100.0;
     juce::uint64 counter = 0;
     float mixGain = 1.0f; // smoothed voice-count compensation
+    float pitchBendSemitones = 0.0f;
 };

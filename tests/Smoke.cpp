@@ -529,6 +529,71 @@ int main()
         ok = check (renderAndCheck (p, rms, peak), "resonant driven filter bounded", rms) && ok;
     }
 
+    // --- 18. Pitch bend actually changes pitch ---
+    {
+        auto p = paramsForAlgo (4);
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto renderWithBend = [&] (float semitones, juce::AudioBuffer<float>& buf)
+        {
+            MiXXVoiceManager vm;
+            vm.prepare (sr);
+            vm.setPitchBendSemitones (semitones);
+
+            juce::MidiBuffer mm;
+            mm.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+            vm.renderBlock (buf, mm, p, mod, poly);
+        };
+
+        juce::AudioBuffer<float> flat (2, blockLen), bent (2, blockLen);
+        renderWithBend (0.0f, flat);
+        renderWithBend (12.0f, bent);
+
+        // Count zero crossings: an octave up should cross roughly twice as often.
+        auto crossings = [] (const juce::AudioBuffer<float>& b)
+        {
+            int n = 0;
+            const auto* d = b.getReadPointer (0);
+
+            for (int i = 1; i < b.getNumSamples(); ++i)
+                if ((d[i - 1] < 0.0f) != (d[i] < 0.0f))
+                    ++n;
+
+            return n;
+        };
+
+        const int flatX = crossings (flat);
+        const int bentX = crossings (bent);
+        const double ratio = flatX > 0 ? static_cast<double> (bentX) / flatX : 0.0;
+
+        ok = check (ratio > 1.6 && ratio < 2.4, "pitch bend +12st doubles pitch",
+                    ratio) && ok;
+    }
+
+    // --- 19. Pitch bend is applied on top of unison detune, not instead of it ---
+    {
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+        vm.setPitchBendSemitones (5.0f);
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 4;
+        poly.unisonDetune = 20.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        juce::MidiBuffer mm;
+        mm.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        vm.renderBlock (buf, mm, paramsForAlgo (4), mod, poly);
+
+        double rms = 0.0;
+        float peak = 0.0f;
+        ok = check (renderAndCheck (paramsForAlgo (4), rms, peak) && vm.getActiveVoiceCount() == 4,
+                    "bend keeps unison voices alive", vm.getActiveVoiceCount()) && ok;
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }

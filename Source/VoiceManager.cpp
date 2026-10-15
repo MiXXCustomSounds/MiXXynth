@@ -111,7 +111,8 @@ void MiXXVoiceManager::startNote (int note, float velocity, const mixxynth::ModP
             pos = (2.0f * static_cast<float> (k) / static_cast<float> (uni - 1)) - 1.0f;
 
         s.voice.reset();
-        s.voice.setDetune (pos * poly.unisonDetune * 0.5f);
+        s.unisonCents = pos * poly.unisonDetune * 0.5f;
+        s.voice.setDetune (s.unisonCents + pitchBendSemitones * 100.0f);
         s.voice.setPan (pos * poly.unisonSpread);
         s.voice.noteOn (note, velocity);
         s.modState.reset();
@@ -204,6 +205,20 @@ void MiXXVoiceManager::renderBlock (juce::AudioBuffer<float>& buffer,
 int MiXXVoiceManager::getActiveNoteCount() const
 {
     return countHeldNotes();
+}
+
+void MiXXVoiceManager::setPitchBendSemitones (float semitones)
+{
+    if (juce::approximatelyEqual (semitones, pitchBendSemitones))
+        return;
+
+    pitchBendSemitones = semitones;
+
+    // Re-derive every sounding voice's detune from its unison position so the
+    // bend does not accumulate.
+    for (auto& s : slots)
+        if (s.voice.isActive())
+            s.voice.setDetune (s.unisonCents + pitchBendSemitones * 100.0f);
 }
 
 int MiXXVoiceManager::getActiveVoiceCount() const

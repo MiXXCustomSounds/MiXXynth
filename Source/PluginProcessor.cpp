@@ -84,6 +84,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "unisonSpread", "Unison Spread",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
 
+    // Pitch bend range in semitones, applied to the wheel and to incoming
+    // MIDI pitch bend.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "pitchBendRange", "Pitch Bend Range",
+        juce::NormalisableRange<float> (0.0f, 24.0f, 0.1f), 2.0f));
+
     // M3a: modulation matrix. 32 slots, each source -> destination with a
     // bipolar depth. Destination list mirrors mixxynth::ModDest exactly.
     juce::StringArray modSources { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4",
@@ -262,6 +268,11 @@ static float getParam (juce::AudioProcessorValueTreeState& apvts, const juce::St
 
 void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
+    // Keeps the editor's on-screen keyboard in sync with incoming notes, and
+    // injects its own note-ons/offs back into the stream so the on-screen keys
+    // are playable.
+    keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
+
     MiXXFmVoice::VoiceParams vp;
 
     for (int i = 0; i < MiXXFmVoice::numOps; ++i)
@@ -333,6 +344,8 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             modWheel = msg.getControllerValue() / 127.0f;
         else if (msg.isChannelPressure())
             aftertouch = msg.getChannelPressureValue() / 127.0f;
+        else if (msg.isPitchWheel())
+            pitchBend = (static_cast<float> (msg.getPitchWheelValue()) - 8192.0f) / 8192.0f;
     }
 
     mixxynth::ModParams mod;
@@ -393,6 +406,9 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     for (int i = 0; i < mixxynth::kNumMacros; ++i)
         mod.macros[static_cast<size_t> (i)] = getParam (apvts, "macro" + juce::String (i + 1));
+
+    // Pitch bend is a global offset for now; MPE will move this per voice.
+    voiceManager.setPitchBendSemitones (pitchBend * getParam (apvts, "pitchBendRange"));
 
     voiceManager.renderBlock (buffer, midi, vp, mod, poly);
 }

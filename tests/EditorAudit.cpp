@@ -326,6 +326,7 @@ int main()
     check (zeroSized.isEmpty(), "no visible control has zero bounds",
            zeroSized.joinIntoString (", "));
     std::printf ("     visible child components=%d\n", visited);
+    std::printf ("     %s\n", miXXEditor->perfBarDebug().toRawUTF8());
 
     // Every tab must exist and be populated.
     check (miXXEditor->getNumTabs() == 6, "six tabs", juce::String (miXXEditor->getNumTabs()));

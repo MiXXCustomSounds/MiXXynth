@@ -802,6 +802,7 @@ public:
         addKnob (ranged (p, "unison"), "Unison");
         addKnob (ranged (p, "unisonDetune"), "Unison Detune");
         addKnob (ranged (p, "unisonSpread"), "Unison Spread");
+        addKnob (ranged (p, "pitchBendRange"), "Bend Range");
     }
 
     void paint (juce::Graphics& g) override
@@ -822,7 +823,7 @@ public:
         auto row = b.removeFromTop (110);
 
         for (auto* k : knobs)
-            k->setBounds (row.removeFromLeft (juce::jmax (90, row.getWidth() / 4)).reduced (6));
+            k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 5)).reduced (6));
     }
 
 private:
@@ -918,6 +919,27 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     modKnobs.push_back (master);
     macroKnobs.add (master); // owned alongside the macros
 
+    // Performance bar: on-screen keyboard plus pitch and mod wheels. The
+    // keyboard both mirrors incoming notes and plays the synth when clicked;
+    // the wheels mirror MIDI and can be dragged to drive it.
+    addAndMakeVisible (perfBar);
+
+    keyboard = std::make_unique<juce::MidiKeyboardComponent> (
+        proc.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard);
+    keyboard->setAvailableRange (21, 108);
+    keyboard->setLowestVisibleKey (36);
+    keyboard->setKeyWidth (20.0f);
+    keyboard->setScrollButtonsVisible (true);
+    perfBar.addAndMakeVisible (*keyboard);
+
+    pitchWheel = std::make_unique<mixxynth::ui::WheelComponent> ("PITCH", true);
+    modWheel = std::make_unique<mixxynth::ui::WheelComponent> ("MOD", false);
+    perfBar.addAndMakeVisible (*pitchWheel);
+    perfBar.addAndMakeVisible (*modWheel);
+
+    pitchWheel->onValueChanged = [this] (float v) { proc.setPitchBendFromUI (v); };
+    modWheel->onValueChanged = [this] (float v) { proc.setModWheelFromUI (v); };
+
     fmPage = std::make_unique<FmPage> (*this);
     matrixPage = std::make_unique<MatrixPage> (*this);
     modPage = std::make_unique<ModPage> (*this);
@@ -935,7 +957,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     addAndMakeVisible (tabs);
 
     setSize (1440, 900);
-    startTimerHz (12);
+    startTimerHz (30);
 }
 
 MiXXynthEditor::~MiXXynthEditor() = default;
@@ -946,6 +968,7 @@ void MiXXynthEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff1b2027));
     g.fillRect (rail.getBounds());
     g.fillRect (bar.getBounds());
+    g.fillRect (perfBar.getBounds());
 }
 
 void MiXXynthEditor::resized()
@@ -956,6 +979,7 @@ void MiXXynthEditor::resized()
 
     rail.setBounds (b.removeFromLeft (140));
     bar.setBounds (b.removeFromBottom (86));
+    perfBar.setBounds (b.removeFromBottom (96));
 
     tabs.setBounds (b);
 
@@ -972,11 +996,36 @@ void MiXXynthEditor::resized()
 
     for (auto* k : macroKnobs)
         k->setBounds (barArea.removeFromLeft (knobW).reduced (2));
+
+    if (keyboard != nullptr)
+    {
+        auto pb = perfBar.getLocalBounds().reduced (6);
+
+        // Wheels sit to the left of the keys, as on a real synth. Putting them
+        // on the right pushed them off-screen in narrower host windows.
+        auto wheels = pb.removeFromLeft (96);
+
+        if (pitchWheel != nullptr)
+            pitchWheel->setBounds (wheels.removeFromLeft (46).reduced (1));
+
+        if (modWheel != nullptr)
+            modWheel->setBounds (wheels.removeFromLeft (46).reduced (1));
+
+        keyboard->setBounds (pb);
+    }
 }
 
 void MiXXynthEditor::timerCallback()
 {
     refreshModRings();
+
+    // The wheels follow incoming MIDI; the keyboard repaints itself from its
+    // MidiKeyboardState listener. A faster timer keeps the wheels looking live.
+    if (pitchWheel != nullptr)
+        pitchWheel->setValueFromMidi (proc.getPitchBendValue());
+
+    if (modWheel != nullptr)
+        modWheel->setValueFromMidi (proc.getModWheelValue());
 }
 
 void MiXXynthEditor::assignModSlot (int srcIndex, int destIndex)

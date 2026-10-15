@@ -41,6 +41,15 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // Shared with the editor's performance bar so the on-screen keyboard and
+    // wheels can show (and drive) live MIDI state.
+    juce::MidiKeyboardState keyboardState;
+    float getModWheelValue() const { return modWheel; }
+    float getAftertouchValue() const { return aftertouch; }
+    float getPitchBendValue() const { return pitchBend; }
+    void setPitchBendFromUI (float v) { pitchBend = juce::jlimit (-1.0f, 1.0f, v); }
+    void setModWheelFromUI (float v) { modWheel = juce::jlimit (0.0f, 1.0f, v); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -48,6 +57,7 @@ private:
     float currentSampleRate = 44100.0f;
     float modWheel = 0.0f;
     float aftertouch = 0.0f;
+    float pitchBend = 0.0f; // -1..+1, from the host or the on-screen wheel
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };

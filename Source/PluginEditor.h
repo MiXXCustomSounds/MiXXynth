@@ -4,9 +4,11 @@
 #include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "ModKnob.h"
+#include "WheelComponent.h"
 
 class MiXXynthProcessor;
 
@@ -46,6 +48,17 @@ public:
         return tabs.getTabContentComponent (index);
     }
 
+    // Geometry dump for the editor audit (performance bar layout).
+    juce::String perfBarDebug() const
+    {
+        juce::String s;
+        s << "perfBar=" << perfBar.getBounds().toString()
+          << " keyboard=" << (keyboard != nullptr ? keyboard->getBounds().toString() : juce::String ("null"))
+          << " pitch=" << (pitchWheel != nullptr ? pitchWheel->getBounds().toString() : juce::String ("null"))
+          << " mod=" << (modWheel != nullptr ? modWheel->getBounds().toString() : juce::String ("null"));
+        return s;
+    }
+
 private:
     class SourceChip;
     class FmPage;
@@ -66,6 +79,11 @@ private:
 
     juce::OwnedArray<SourceChip> chips;
     juce::OwnedArray<mixxynth::ui::ModKnob> macroKnobs;
+
+    // Performance bar: on-screen keyboard plus pitch and mod wheels.
+    juce::Component perfBar;
+    std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
+    std::unique_ptr<mixxynth::ui::WheelComponent> pitchWheel, modWheel;
     std::unique_ptr<FmPage> fmPage;
     std::unique_ptr<MatrixPage> matrixPage;
     std::unique_ptr<ModPage> modPage;

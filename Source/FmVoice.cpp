@@ -53,7 +53,8 @@ bool MiXXFmVoice::isActive() const
 
 void MiXXFmVoice::setDetune (float cents)
 {
-    detuneCents = juce::jlimit (-100.0f, 100.0f, cents);
+    // Range covers a 24-semitone pitch bend plus unison spread.
+    detuneCents = juce::jlimit (-2400.0f, 2400.0f, cents);
 
     if (currentNote >= 0)
         frequency = midiNoteToFreq (currentNote) * std::pow (2.0, static_cast<double> (detuneCents) / 1200.0);
