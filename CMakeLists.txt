@@ -35,6 +35,7 @@ target_sources(MiXXynth PRIVATE
     Source/PluginEditor.h
     Source/FmVoice.cpp
     Source/FmVoice.h
+    Source/Algorithms.h
 )
 
 target_compile_features(MiXXynth PRIVATE cxx_std_20)
@@ -61,10 +62,21 @@ add_custom_command(TARGET MiXXynth_VST3 POST_BUILD
     VERBATIM
 )
 
-# M1b: offline DSP smoke test (no host needed). TDD gate before pluginval.
+# M2a: offline DSP smoke test (no host needed). TDD gate before pluginval.
 add_executable(MiXXynthSmoke
     tests/Smoke.cpp
     Source/FmVoice.cpp
 )
-target_link_libraries(MiXXynthSmoke PRIVATE juce::juce_audio_basics)
+target_link_libraries(MiXXynthSmoke PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    PUBLIC juce::juce_recommended_config_flags
+           juce::juce_recommended_warning_flags
+)
 target_compile_features(MiXXynthSmoke PRIVATE cxx_std_20)
+target_compile_definitions(MiXXynthSmoke PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_STANDALONE_APPLICATION=0
+)

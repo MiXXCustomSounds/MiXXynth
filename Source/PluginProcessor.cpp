@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Algorithms.h"
 
 juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLayout()
 {
@@ -37,9 +38,43 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "fmIndex", "FM Index",
         juce::NormalisableRange<float> (0.0f, 12.0f, 0.001f), 3.0f));
+
+    // M2a: DX7 algorithm selector (32 algos + "Free" matrix mode).
+    juce::StringArray algoNames;
+
+    for (int i = 0; i < mixxynth::kNumAlgorithms; ++i)
+        algoNames.add (juce::String (i + 1));
+
+    algoNames.add ("Free (matrix)");
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "algorithm", "Algorithm", algoNames, 0));
+
+    // M2a: free-routing matrix, 30 off-diagonal depths (src modulates dst).
+    // Self cells are omitted: per-op feedback covers self-modulation.
+    for (int src = 0; src < mixxynth::kNumOps; ++src)
+    {
+        for (int dst = 0; dst < mixxynth::kNumOps; ++dst)
+        {
+            if (src == dst)
+                continue;
+
+            params.push_back (std::make_unique<juce::AudioParameterFloat> (
+                "mtx" + juce::String (src + 1) + juce::String (dst + 1),
+                "Mod " + juce::String (src + 1) + " > " + juce::String (dst + 1),
+                juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+        }
+    }
+
+    // M2a: carrier switches for free-routing mode.
+    for (int i = 0; i < mixxynth::kNumOps; ++i)
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            "carrier" + juce::String (i + 1),
+            "Op " + juce::String (i + 1) + " Carrier", true));
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "masterGain", "Master Gain",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.8f));
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
 
     return { params.begin(), params.end() };
 }
@@ -85,6 +120,33 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     vp.index    = getParam (apvts, "fmIndex");
     vp.master   = getParam (apvts, "masterGain");
+
+    const int algoIndex = static_cast<int> (getParam (apvts, "algorithm"));
+
+    if (algoIndex >= 0 && algoIndex < mixxynth::kNumAlgorithms)
+    {
+        // DX7 algorithm mode: routing comes from the table.
+        const auto& algo = mixxynth::algorithmTable()[static_cast<size_t> (algoIndex)];
+
+        for (int src = 0; src < MiXXFmVoice::numOps; ++src)
+            for (int dst = 0; dst < MiXXFmVoice::numOps; ++dst)
+                vp.mod[src][dst] = algo.mod[static_cast<size_t> (src)][static_cast<size_t> (dst)];
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            vp.carrier[i] = algo.carrier[static_cast<size_t> (i)];
+    }
+    else
+    {
+        // Free mode: routing comes from the 30 matrix depths + 6 carriers.
+        for (int src = 0; src < MiXXFmVoice::numOps; ++src)
+            for (int dst = 0; dst < MiXXFmVoice::numOps; ++dst)
+                vp.mod[src][dst] = (src == dst)
+                    ? 0.0f
+                    : getParam (apvts, "mtx" + juce::String (src + 1) + juce::String (dst + 1));
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            vp.carrier[i] = getParam (apvts, "carrier" + juce::String (i + 1)) > 0.5f;
+    }
 
     voice.renderBlock (buffer, midi, vp);
 }

@@ -42,7 +42,8 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel)
         op.env = 0.0f;
         op.stage = 1;
         op.releaseFrom = 0.0f;
-        op.lastOut = 0.0f;
+        op.prevOut = 0.0f;
+        op.curOut = 0.0f;
         op.fbSmooth = 0.0f;
     }
 }
@@ -105,34 +106,46 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 
     for (int n = 0; n < numSamples; ++n)
     {
-        // Op1 doubles as the FM modulator source (with its own self-feedback).
-        updateEnvelope (ops[0], p.attack[0], p.decay[0], p.sustain[0], p.release[0], sampleRate);
-        ops[0].fbSmooth += (p.feedback[0] - ops[0].fbSmooth) * 0.001f;
-        const double modPhase = twoPi * ops[0].phase + ops[0].fbSmooth * ops[0].lastOut;
-        const float modOut = std::sin (static_cast<float> (modPhase)) * ops[0].env;
-        ops[0].lastOut = modOut;
-
         float sum = 0.0f;
 
-        for (int i = 0; i < numOps; ++i)
+        // Descending order: every DX7 edge goes from a higher op number to a
+        // lower one, so those edges resolve within the current sample.
+        for (int dst = numOps - 1; dst >= 0; --dst)
         {
-            if (i != 0)
-                updateEnvelope (ops[i], p.attack[i], p.decay[i], p.sustain[i], p.release[i], sampleRate);
+            auto& op = ops[static_cast<size_t> (dst)];
 
-            ops[i].fbSmooth += (p.feedback[i] - ops[i].fbSmooth) * 0.001f;
+            updateEnvelope (op, p.attack[dst], p.decay[dst], p.sustain[dst], p.release[dst], sampleRate);
+            op.fbSmooth += (p.feedback[dst] - op.fbSmooth) * 0.001f;
 
-            double phase = ops[i].phase + ops[i].fbSmooth * ops[i].lastOut;
-            if (i == 1) // carrier: phase-modulated by Op1
-                phase += (static_cast<double> (p.index) * modOut) / twoPi;
+            double modSum = 0.0;
 
-            const float s = std::sin (static_cast<float> (twoPi * phase)) * ops[i].env;
-            ops[i].lastOut = s;
-            sum += s * p.level[i];
+            for (int src = 0; src < numOps; ++src)
+            {
+                const float depth = p.mod[src][dst];
 
-            ops[i].phase += frequency * p.ratio[i] / sampleRate;
-            if (ops[i].phase >= 1.0)
-                ops[i].phase -= std::floor (ops[i].phase);
+                if (depth == 0.0f)
+                    continue;
+
+                const auto& srcOp = ops[static_cast<size_t> (src)];
+                modSum += static_cast<double> (depth) * (src > dst ? srcOp.curOut : srcOp.prevOut);
+            }
+
+            // Self-feedback uses this op's own previous output.
+            modSum += static_cast<double> (op.fbSmooth) * op.prevOut;
+
+            const float s = std::sin (static_cast<float> (twoPi * op.phase + modSum * p.index)) * op.env;
+            op.curOut = s;
+
+            if (p.carrier[dst])
+                sum += s * p.level[dst];
+
+            op.phase += frequency * p.ratio[dst] / sampleRate;
+            if (op.phase >= 1.0)
+                op.phase -= std::floor (op.phase);
         }
+
+        for (auto& op : ops)
+            op.prevOut = op.curOut;
 
         const float out = juce::jlimit (-1.0f, 1.0f, sum * velocity * p.master);
 
