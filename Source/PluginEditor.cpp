@@ -444,7 +444,7 @@ public:
         // musical ratios rather than the whole range.
         static const float ratios[] = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f, 7.0f };
 
-        set ("fmIndex", rng.nextFloat() * 12.0f);
+        set ("fmIndex", 0.15f + rng.nextFloat() * 1.1f);
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {

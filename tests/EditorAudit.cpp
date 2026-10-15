@@ -530,8 +530,16 @@ int main()
 
         check (inRange, "dice: every op gets a usable ratio, level and wave",
                inRange ? "ok" : "out of range");
-        check (readReal ("fmIndex") >= 0.0f && readReal ("fmIndex") <= 12.0f,
-               "dice: fm index stays in range", juce::String (readReal ("fmIndex")));
+        // Read the parameter's own range rather than hard-coding it, so this
+        // check follows the range instead of silently passing.
+        float fmIndexMax = 0.0f;
+
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (proc.apvts.getParameter ("fmIndex")))
+            fmIndexMax = p->getNormalisableRange().end;
+
+        check (readReal ("fmIndex") > 0.0f && readReal ("fmIndex") <= fmIndexMax,
+               "dice: fm index stays in range",
+               juce::String (readReal ("fmIndex")) + " of " + juce::String (fmIndexMax));
 
         // At least one carrier must be able to sustain a note, or the roll reads
         // as a bug.
@@ -551,6 +559,27 @@ int main()
         }
 
         check (audible, "dice: the roll is always audible", audible ? "ok" : "silent");
+    }
+
+    // ---- 10. FM Index range guard ----
+    // FM Index is applied as a phase offset in CYCLES, so index 1.0 is already a
+    // modulation index of about 6.3 radians. The musical range is roughly 0..0.6
+    // and anything past ~2 is noise. The old 0..12 range put all the useful
+    // change in the bottom 5% of the knob; these checks stop that returning.
+    if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (proc.apvts.getParameter ("fmIndex")))
+    {
+        const auto& r = p->getNormalisableRange();
+
+        check (r.end <= 3.0f, "fm index max stays in the musical range",
+               juce::String (r.end));
+        check (r.convertFrom0to1 (0.5f) < 0.8f, "fm index midpoint is in the useful range",
+               juce::String (r.convertFrom0to1 (0.5f)));
+        check (r.convertFrom0to1 (0.25f) < 0.3f, "fm index quarter point is fine control",
+               juce::String (r.convertFrom0to1 (0.25f)));
+    }
+    else
+    {
+        check (false, "fmIndex is a ranged parameter", "");
     }
 
     // ---- 11. Operator waveform reaches the audio output end-to-end ----

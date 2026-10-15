@@ -217,7 +217,9 @@ void applyModulation (const std::array<float, kNumModSources>& sources,
 
         if (slot.dest == dstFmIndex)
         {
-            vp.index = juce::jlimit (0.0f, 12.0f, vp.index + amt * 12.0f);
+            // Matches the parameter's 0..2 range, so modulating FM Index cannot
+            // push it past the musical end of the knob.
+            vp.index = juce::jlimit (0.0f, 2.0f, vp.index + amt * 2.0f);
         }
         else if (slot.dest >= dstOp1Ratio && slot.dest <= dstOp6Ratio)
         {

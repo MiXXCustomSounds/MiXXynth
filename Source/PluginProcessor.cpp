@@ -47,9 +47,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
             juce::NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.0f));
     }
 
+    // FM Index is applied as a phase offset in CYCLES (see FmVoice::renderRange),
+    // so index 1.0 is already a modulation index of about 2*pi = 6.3 radians.
+    // The musical range is roughly 0..0.6 and anything past ~2 is noise, so the
+    // old 0..12 range wasted 95% of the knob. Squaring the response puts the
+    // useful region across the first half of the travel and keeps the bright end
+    // available for extreme sounds.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "fmIndex", "FM Index",
-        juce::NormalisableRange<float> (0.0f, 12.0f, 0.001f), 0.0f));
+        juce::NormalisableRange<float> (0.0f, 2.0f, 0.0001f, 0.5f), 0.0f));
 
     // M2a: DX7 algorithm selector (32 algos + "Free" matrix mode).
     juce::StringArray algoNames;
