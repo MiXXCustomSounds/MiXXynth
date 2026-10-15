@@ -32,3 +32,5 @@ reference/
 # Local tool binaries (re-downloadable)
 tools/pluginval_Windows.zip
 tools/pluginval/
+# Local screenshots
+screenshot*.png
