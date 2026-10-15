@@ -52,6 +52,7 @@ namespace mixxynth::ui
         float modDepth = 0.0f;
         bool dragOver = false;
         bool labelVisible = true;
+        static constexpr int labelHeight = 14;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModKnob)
     };

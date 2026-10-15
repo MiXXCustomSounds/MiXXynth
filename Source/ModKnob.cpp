@@ -38,9 +38,13 @@ void ModKnob::resized()
     auto b = getLocalBounds();
 
     if (labelVisible)
-        b.removeFromTop (14);
+        b.removeFromTop (labelHeight);
 
-    knob.setBounds (b);
+    // The dial is circular, so it needs a square area. Handing it a wide, short
+    // rect (as the page layouts naturally produce) makes the dial overflow the
+    // bottom and get clipped, so centre a square inside the cell instead.
+    const int size = juce::jmax (16, juce::jmin (b.getWidth(), b.getHeight()));
+    knob.setBounds (b.withSizeKeepingCentre (size, size));
 }
 
 void ModKnob::paint (juce::Graphics& g)
@@ -49,7 +53,8 @@ void ModKnob::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colour (0xffb9c2cc));
         g.setFont (11.0f);
-        g.drawFittedText (text, getLocalBounds().removeFromTop (14), juce::Justification::centred, 1);
+        g.drawFittedText (text, getLocalBounds().removeFromTop (labelHeight),
+                          juce::Justification::centred, 1);
     }
 
     if (dragOver)
@@ -58,16 +63,18 @@ void ModKnob::paint (juce::Graphics& g)
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 1.5f);
     }
 
-    // Modulation depth ring.
+    // Modulation depth ring, drawn around the same square the dial uses.
     if (std::abs (modDepth) > 0.001f)
     {
         auto area = getLocalBounds();
 
         if (labelVisible)
-            area.removeFromTop (14);
+            area.removeFromTop (labelHeight);
 
-        const auto centre = area.toFloat().getCentre();
-        const float radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f - 2.0f;
+        const int size = juce::jmax (16, juce::jmin (area.getWidth(), area.getHeight()));
+        const auto square = area.withSizeKeepingCentre (size, size).toFloat();
+        const auto centre = square.getCentre();
+        const float radius = size * 0.5f - 1.0f;
         const float sweep = juce::jlimit (-1.0f, 1.0f, modDepth) * juce::MathConstants<float>::pi;
 
         juce::Path p;
