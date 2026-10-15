@@ -553,7 +553,86 @@ int main()
         check (audible, "dice: the roll is always audible", audible ? "ok" : "silent");
     }
 
-    // ---- 10. Layout: no visible control is left with zero bounds ----
+    // ---- 11. Operator waveform reaches the audio output end-to-end ----
+    // This goes through the real processor, so it covers the parameter ->
+    // VoiceParams path as well as the DSP. The smoke test only drives the voice
+    // directly, so a wiring mistake between the parameter and the voice would
+    // slip past it.
+    {
+        proc.prepareToPlay (48000.0, 512);
+
+        auto setReal = [&proc] (const juce::String& id, float realValue)
+        {
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (proc.apvts.getParameter (id)))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 (realValue));
+                p->endChangeGesture();
+            }
+        };
+
+        // A patch that actually sounds. Algorithm 1 has Op1 as a carrier.
+        setReal ("algorithm", 0.0f);
+        setReal ("fmIndex", 0.0f);
+        setReal ("op1ratio", 1.0f);
+        setReal ("op1level", 0.8f);
+        setReal ("op1attack", 0.001f);
+        setReal ("op1decay", 0.5f);
+        setReal ("op1sustain", 1.0f);
+        setReal ("op1release", 0.1f);
+        setReal ("vaLevel", 0.0f); // VA off, so only the FM operator is heard
+        setReal ("masterGain", 0.8f);
+
+        auto render = [&proc, &setReal] (float wave)
+        {
+            setReal ("op1wave", wave);
+
+            juce::AudioBuffer<float> buf (2, 4096);
+            buf.clear();
+
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+            proc.processBlock (buf, midi);
+
+            return buf;
+        };
+
+        const auto sineBuf = render (0.0f);
+        const auto sawBuf = render (0.667f);
+        const auto squareBuf = render (1.0f);
+
+        auto diff = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+        {
+            double d = 0.0;
+
+            for (int i = 0; i < juce::jmin (a.getNumSamples(), b.getNumSamples()); ++i)
+                d += std::abs (a.getSample (0, i) - b.getSample (0, i));
+
+            return d;
+        };
+
+        auto rms = [] (const juce::AudioBuffer<float>& b)
+        {
+            double acc = 0.0;
+
+            for (int i = 0; i < b.getNumSamples(); ++i)
+                acc += static_cast<double> (b.getSample (0, i)) * b.getSample (0, i);
+
+            return std::sqrt (acc / juce::jmax (1, b.getNumSamples()));
+        };
+
+        const double sineRms = rms (sineBuf);
+        const double sineVsSaw = diff (sineBuf, sawBuf);
+        const double sawVsSquare = diff (sawBuf, squareBuf);
+
+        check (sineRms > 0.01, "end-to-end: the test patch is audible", juce::String (sineRms));
+        check (sineVsSaw > 1.0, "end-to-end: the wave knob changes the output",
+               juce::String (sineVsSaw));
+        check (sawVsSquare > 1.0, "end-to-end: saw and square differ",
+               juce::String (sawVsSquare));
+    }
+
+    // ---- 12. Layout: no visible control is left with zero bounds ----
     // This is the regression guard for the bug where setSize() ran before the
     // child arrays were populated, leaving controls at 0x0 and invisible.
     //

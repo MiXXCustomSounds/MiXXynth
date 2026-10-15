@@ -370,6 +370,10 @@ public:
         diceButton.onClick = [this] { rollDice(); };
         addAndMakeVisible (diceButton);
 
+        audibility.setJustificationType (juce::Justification::centredLeft);
+        audibility.setFont (juce::FontOptions (11.0f));
+        addAndMakeVisible (audibility);
+
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
             const juce::String n = juce::String (i + 1);
@@ -401,6 +405,8 @@ public:
             addKnob (ranged (p, "op" + n + "sustain"), mixxynth::dstOff, "Op" + n + " S");
             addKnob (ranged (p, "op" + n + "release"), mixxynth::dstOff, "Op" + n + " R");
         }
+
+        refreshAudibility();
     }
 
     // Randomises every knob on this page. The roll is constrained to musically
@@ -428,28 +434,11 @@ public:
             return 0.0f;
         };
 
+        juce::ignoreUnused (read);
+
         // Which operators reach the output depends on the algorithm, so work the
         // carriers out first and make sure one of them actually sounds.
-        std::array<bool, MiXXFmVoice::numOps> isCarrier {};
-        const int algoIndex = [&p]
-        {
-            auto* a = choice (p, "algorithm");
-            return a != nullptr ? a->getIndex() : 0;
-        }();
-
-        if (algoIndex >= 0 && algoIndex < mixxynth::kNumAlgorithms)
-        {
-            const auto& algo = mixxynth::algorithmTable()[static_cast<size_t> (algoIndex)];
-
-            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-                isCarrier[static_cast<size_t> (i)] = algo.carrier[static_cast<size_t> (i)];
-        }
-        else
-        {
-            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-                isCarrier[static_cast<size_t> (i)] =
-                    read ("carrier" + juce::String (i + 1)) > 0.5f;
-        }
+        const auto isCarrier = carrierMask();
 
         // Ratio 0 stops an operator's phase advancing, so the roll picks from real
         // musical ratios rather than the whole range.
@@ -513,6 +502,96 @@ public:
         }
     }
 
+    // Which operators reach the output, given the current algorithm (or the
+    // carrier switches in Free mode).
+    std::array<bool, MiXXFmVoice::numOps> carrierMask()
+    {
+        std::array<bool, MiXXFmVoice::numOps> mask {};
+        auto& p = ed.processor();
+
+        auto* a = choice (p, "algorithm");
+        const int algoIndex = a != nullptr ? a->getIndex() : 0;
+
+        if (algoIndex >= 0 && algoIndex < mixxynth::kNumAlgorithms)
+        {
+            const auto& algo = mixxynth::algorithmTable()[static_cast<size_t> (algoIndex)];
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+                mask[static_cast<size_t> (i)] = algo.carrier[static_cast<size_t> (i)];
+        }
+        else
+        {
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+                mask[static_cast<size_t> (i)] = readReal ("carrier" + juce::String (i + 1)) > 0.5f;
+        }
+
+        return mask;
+    }
+
+    float readReal (const juce::String& id)
+    {
+        if (auto* param = ranged (ed.processor(), id))
+            return param->convertFrom0to1 (param->getValue());
+
+        return 0.0f;
+    }
+
+    // With the all-zero init patch it is easy to sit on a patch that cannot make
+    // a sound at all, which reads as a broken knob. This says so, and says why.
+    void refreshAudibility()
+    {
+        const auto carriers = carrierMask();
+        bool fmAudible = false;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            if (! carriers[static_cast<size_t> (i)])
+                continue;
+
+            const auto n = juce::String (i + 1);
+
+            if (readReal ("op" + n + "on") < 0.5f)
+                continue;
+
+            if (readReal ("op" + n + "level") <= 0.001f)
+                continue;
+
+            // Ratio 0 stops the phase advancing, so the operator never moves off
+            // zero whatever its waveform is.
+            if (readReal ("op" + n + "ratio") <= 0.001f)
+                continue;
+
+            // An all-zero envelope is a one-sample spike, not a sustain.
+            if (readReal ("op" + n + "sustain") <= 0.001f
+                  && readReal ("op" + n + "decay") <= 0.001f)
+                continue;
+
+            fmAudible = true;
+        }
+
+        const float vaLevel = readReal ("vaLevel");
+
+        if (fmAudible)
+        {
+            audibility.setText ("FM audible", juce::dontSendNotification);
+            audibility.setColour (juce::Label::textColourId, juce::Colour (0xff4ade80));
+        }
+        else if (vaLevel > 0.001f)
+        {
+            audibility.setText ("FM is silent - you are hearing the VA oscillator. "
+                                "Give a carrier Level, Ratio and a sustaining envelope, or press Dice.",
+                                juce::dontSendNotification);
+            audibility.setColour (juce::Label::textColourId, juce::Colour (0xffffa63d));
+        }
+        else
+        {
+            audibility.setText ("Silent: no carrier has Level, Ratio and a sustaining envelope. "
+                                "Press Dice, or raise a carrier's Level and its A/D/S/R.",
+                                juce::dontSendNotification);
+            audibility.setColour (juce::Label::textColourId, juce::Colour (0xffef4444));
+        }
+    }
+
     void paint (juce::Graphics& g) override
     {
         g.setColour (juce::Colour (0xff8b98a5));
@@ -533,7 +612,9 @@ public:
         top.removeFromLeft (10);
         diceButton.setBounds (top.removeFromLeft (72).reduced (2, 0));
 
-        b.removeFromTop (6);
+        audibility.setBounds (b.removeFromTop (16));
+
+        b.removeFromTop (4);
 
         // FM Index gets its own narrow column; the operator grid takes the rest.
         auto indexColumn = b.removeFromLeft (116);
@@ -582,6 +663,7 @@ private:
     juce::Label algoLabel;
     juce::ComboBox algo;
     juce::TextButton diceButton;
+    juce::Label audibility;
     juce::Random rng;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs;
@@ -1601,7 +1683,10 @@ void MiXXynthEditor::runTabPolls()
         vaPage->refreshHint();
 
     if (fmPage != nullptr)
+    {
         fmPage->refreshWaveLabels();
+        fmPage->refreshAudibility();
+    }
 }
 
 void MiXXynthEditor::rollFmDice()
