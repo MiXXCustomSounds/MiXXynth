@@ -661,7 +661,45 @@ int main()
                juce::String (sawVsSquare));
     }
 
-    // ---- 12. Layout: no visible control is left with zero bounds ----
+    // ---- 12. External parameter changes notify the widget ----
+    // Backs the bug where pressing the dice randomised the values but the dials
+    // only redrew once you moused over them. Only setValueFromGUI and
+    // setValueFromModel used to notify, so any change from outside the widget -
+    // the dice, a preset load, host automation, undo - left it stale.
+    {
+        auto* param = dynamic_cast<juce::RangedAudioParameter*> (
+            proc.apvts.getParameter ("fmIndex"));
+
+        if (param == nullptr)
+        {
+            check (false, "fmIndex exists for the source test", "");
+        }
+        else
+        {
+            struct CountingListener : sst::jucegui::data::Continuous::DataListener
+            {
+                void dataChanged() override { ++count; }
+                void sourceVanished (sst::jucegui::data::Continuous*) override {}
+                int count = 0;
+            };
+
+            mixxynth::ui::ContinuousSource src (param);
+            CountingListener listener;
+            src.addGUIDataListener (&listener);
+
+            // Change the parameter the way anything outside the widget would.
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (param->convertTo0to1 (1.0f));
+            param->endChangeGesture();
+
+            check (listener.count > 0, "external parameter changes repaint the widget",
+                   juce::String (listener.count));
+
+            src.removeGUIDataListener (&listener);
+        }
+    }
+
+    // ---- 13. Layout: no visible control is left with zero bounds ----
     // This is the regression guard for the bug where setSize() ran before the
     // child arrays were populated, leaving controls at 0x0 and invisible.
     //

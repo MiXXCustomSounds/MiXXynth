@@ -9,9 +9,25 @@
 // All edits go through the parameter so host automation and undo behave.
 namespace mixxynth::ui
 {
-    struct ContinuousSource : public sst::jucegui::data::Continuous
+    struct ContinuousSource : public sst::jucegui::data::Continuous,
+                              private juce::AudioProcessorParameter::Listener,
+                              private juce::AsyncUpdater
     {
-        explicit ContinuousSource (juce::RangedAudioParameter* param) : p (param) {}
+        explicit ContinuousSource (juce::RangedAudioParameter* param) : p (param)
+        {
+            if (p != nullptr)
+                p->addListener (this);
+        }
+
+        ~ContinuousSource() override
+        {
+            // AsyncUpdater must not be left with a pending callback when the
+            // widget goes away.
+            cancelPendingUpdate();
+
+            if (p != nullptr)
+                p->removeListener (this);
+        }
 
         std::string getLabel() const override
         {
@@ -82,11 +98,42 @@ namespace mixxynth::ui
         }
 
         juce::RangedAudioParameter* p = nullptr;
+
+    private:
+        // Any change to the parameter - the dice, a preset load, host automation,
+        // undo - has to repaint the widget. Only setValueFromGUI/setValueFromModel
+        // used to notify, so a knob went stale whenever something else moved the
+        // parameter. Message-thread changes repaint at once; audio-thread changes
+        // (host automation) are deferred via AsyncUpdater, which coalesces them.
+        void parameterValueChanged (int, float) override
+        {
+            if (juce::MessageManager::getInstance()->isThisTheMessageThread())
+                notifyAll();
+            else
+                triggerAsyncUpdate();
+        }
+
+        void parameterGestureChanged (int, bool) override {}
+        void handleAsyncUpdate() override { notifyAll(); }
     };
 
-    struct DiscreteSource : public sst::jucegui::data::Discrete
+    struct DiscreteSource : public sst::jucegui::data::Discrete,
+                            private juce::AudioProcessorParameter::Listener,
+                            private juce::AsyncUpdater
     {
-        explicit DiscreteSource (juce::AudioParameterChoice* param) : p (param) {}
+        explicit DiscreteSource (juce::AudioParameterChoice* param) : p (param)
+        {
+            if (p != nullptr)
+                p->addListener (this);
+        }
+
+        ~DiscreteSource() override
+        {
+            cancelPendingUpdate();
+
+            if (p != nullptr)
+                p->removeListener (this);
+        }
 
         std::string getLabel() const override
         {
@@ -137,5 +184,17 @@ namespace mixxynth::ui
         }
 
         juce::AudioParameterChoice* p = nullptr;
+
+    private:
+        void parameterValueChanged (int, float) override
+        {
+            if (juce::MessageManager::getInstance()->isThisTheMessageThread())
+                notifyAll();
+            else
+                triggerAsyncUpdate();
+        }
+
+        void parameterGestureChanged (int, bool) override {}
+        void handleAsyncUpdate() override { notifyAll(); }
     };
 }
