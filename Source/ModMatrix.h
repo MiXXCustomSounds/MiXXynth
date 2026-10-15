@@ -19,7 +19,7 @@
 namespace mixxynth
 {
     constexpr int kNumModSources = 17;
-    constexpr int kNumModDests   = 45;
+    constexpr int kNumModDests   = 50;
     constexpr int kNumModSlots   = 32;
     constexpr int kNumLfos       = 4;
     constexpr int kNumModEnvs    = 3;
@@ -43,6 +43,8 @@ namespace mixxynth
         dstOp1Ratio, dstOp2Ratio, dstOp3Ratio, dstOp4Ratio, dstOp5Ratio, dstOp6Ratio,
         dstOp1Level, dstOp2Level, dstOp3Level, dstOp4Level, dstOp5Level, dstOp6Level,
         dstMaster,
+        // M3b: VA layer and filter.
+        dstVaLevel, dstVaDetune, dstFilterCutoff, dstFilterReso, dstFilterDrive,
         dstMtxFirst // 30 matrix depths follow
     };
 

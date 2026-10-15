@@ -43,6 +43,7 @@ private:
     class FmPage;
     class MatrixPage;
     class ModPage;
+    class VaPage;
     class FxPage;
 
     MiXXynthProcessor& proc;
@@ -59,6 +60,7 @@ private:
     std::unique_ptr<FmPage> fmPage;
     std::unique_ptr<MatrixPage> matrixPage;
     std::unique_ptr<ModPage> modPage;
+    std::unique_ptr<VaPage> vaPage;
     std::unique_ptr<FxPage> fxPage;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthEditor)

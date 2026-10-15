@@ -100,6 +100,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         modDests.add ("Op" + juce::String (i + 1) + " Level");
 
     modDests.add ("Master");
+    modDests.add ("VA Level");
+    modDests.add ("VA Detune");
+    modDests.add ("Filter Cutoff");
+    modDests.add ("Filter Reso");
+    modDests.add ("Filter Drive");
 
     for (int s = 0; s < MiXXFmVoice::numOps; ++s)
         for (int d = 0; d < MiXXFmVoice::numOps; ++d)
@@ -185,6 +190,45 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
             "macro" + juce::String (i + 1), "Macro " + juce::String (i + 1),
             juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
+    // M3b: VA oscillator and multimode filter.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaLevel", "VA Level",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "vaWave", "VA Wave",
+        juce::StringArray { "Saw", "Square", "Sub", "Noise" }, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "vaOctave", "VA Octave", -2, 2, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaDetune", "VA Detune",
+        juce::NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaPulseWidth", "VA Pulse Width",
+        juce::NormalisableRange<float> (0.05f, 0.95f, 0.001f), 0.5f));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "filterOn", "Filter On", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "filterType", "Filter Type",
+        juce::StringArray { "Low Pass", "High Pass", "Band Pass" }, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "filterCutoff", "Filter Cutoff",
+        juce::NormalisableRange<float> (20.0f, 20000.0f, 0.1f, 0.25f), 12000.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "filterReso", "Filter Resonance",
+        juce::NormalisableRange<float> (0.0f, 0.98f, 0.001f), 0.2f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "filterDrive", "Filter Drive",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "masterGain", "Master Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
@@ -234,6 +278,18 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     vp.index    = getParam (apvts, "fmIndex");
     vp.master   = getParam (apvts, "masterGain");
+
+    // M3b: VA layer and filter.
+    vp.vaLevel      = getParam (apvts, "vaLevel");
+    vp.vaWave       = static_cast<int> (getParam (apvts, "vaWave"));
+    vp.vaOctave     = static_cast<int> (getParam (apvts, "vaOctave"));
+    vp.vaDetune     = getParam (apvts, "vaDetune");
+    vp.vaPulseWidth = getParam (apvts, "vaPulseWidth");
+    vp.filterOn     = getParam (apvts, "filterOn") > 0.5f;
+    vp.filterType   = static_cast<int> (getParam (apvts, "filterType"));
+    vp.cutoff       = getParam (apvts, "filterCutoff");
+    vp.resonance    = getParam (apvts, "filterReso");
+    vp.drive        = getParam (apvts, "filterDrive");
 
     const int algoIndex = static_cast<int> (getParam (apvts, "algorithm"));
 

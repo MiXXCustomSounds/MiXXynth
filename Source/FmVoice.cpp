@@ -8,6 +8,28 @@ namespace
     {
         return 440.0f * std::pow (2.0f, static_cast<float> (note - 69) / 12.0f);
     }
+
+    // PolyBLEP correction: removes most of the aliasing from the saw/square
+    // discontinuities without a wavetable.
+    inline float polyBlep (double t, double dt)
+    {
+        if (dt <= 0.0)
+            return 0.0f;
+
+        if (t < dt)
+        {
+            const double x = t / dt;
+            return static_cast<float> (x + x - x * x - 1.0);
+        }
+
+        if (t > 1.0 - dt)
+        {
+            const double x = (t - 1.0) / dt;
+            return static_cast<float> (x * x + x + x + 1.0);
+        }
+
+        return 0.0f;
+    }
 }
 
 MiXXFmVoice::MiXXFmVoice() = default;
@@ -51,6 +73,11 @@ void MiXXFmVoice::reset()
     gate = false;
     frequency = 440.0;
     velocity = 0.0f;
+    vaPhase = 0.0;
+    vaSubPhase = 0.0;
+    noiseState = 0x2545f491u;
+    svfIc1 = 0.0f;
+    svfIc2 = 0.0f;
 
     for (auto& op : ops)
     {
@@ -70,6 +97,10 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel)
     frequency = midiNoteToFreq (noteNumber) * std::pow (2.0, static_cast<double> (detuneCents) / 1200.0);
     velocity = juce::jlimit (0.0f, 1.0f, vel);
     gate = true;
+    vaPhase = 0.0;
+    vaSubPhase = 0.0;
+    svfIc1 = 0.0f;
+    svfIc2 = 0.0f;
 
     for (auto& op : ops)
     {
@@ -182,7 +213,92 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         for (auto& op : ops)
             op.prevOut = op.curOut;
 
-        const float out = juce::jlimit (-1.0f, 1.0f, sum * velocity * p.master);
+        // --- M3b: VA layer, blended against the FM stack ---
+        float va = 0.0f;
+
+        if (p.vaLevel > 0.0f)
+        {
+            const double vaFreq = frequency * std::pow (2.0, static_cast<double> (p.vaOctave))
+                                  * std::pow (2.0, static_cast<double> (p.vaDetune) / 1200.0);
+            const double inc = juce::jlimit (0.0, 0.49, vaFreq / sampleRate);
+
+            vaPhase += inc;
+
+            if (vaPhase >= 1.0)
+                vaPhase -= std::floor (vaPhase);
+
+            switch (p.vaWave)
+            {
+                case 1: // square with pulse width
+                {
+                    const double duty = juce::jlimit (0.05, 0.95, static_cast<double> (p.vaPulseWidth));
+                    float s = vaPhase < duty ? 1.0f : -1.0f;
+                    s -= polyBlep (vaPhase, inc);
+                    s += polyBlep (std::fmod (vaPhase + (1.0 - duty), 1.0), inc);
+                    va = s;
+                    break;
+                }
+                case 2: // sub square, one octave down
+                {
+                    const double subInc = inc * 0.5;
+                    vaSubPhase += subInc;
+
+                    if (vaSubPhase >= 1.0)
+                        vaSubPhase -= std::floor (vaSubPhase);
+
+                    float s = vaSubPhase < 0.5 ? 1.0f : -1.0f;
+                    s -= polyBlep (vaSubPhase, subInc);
+                    va = s;
+                    break;
+                }
+                case 3: // white noise
+                {
+                    noiseState = noiseState * 1664525u + 1013904223u;
+                    va = static_cast<float> ((noiseState >> 8) & 0xffffu) / 32768.0f - 1.0f;
+                    break;
+                }
+                default: // saw
+                {
+                    float s = static_cast<float> (2.0 * vaPhase - 1.0);
+                    s -= polyBlep (vaPhase, inc);
+                    va = s;
+                    break;
+                }
+            }
+        }
+
+        const float mixed = sum * (1.0f - p.vaLevel) + va * p.vaLevel;
+
+        // --- M3b: per-voice TPT state-variable filter ---
+        float filtered = mixed;
+
+        if (p.filterOn)
+        {
+            float in = mixed;
+
+            if (p.drive > 0.0f)
+                in = std::tanh (in * (1.0f + p.drive * 8.0f));
+
+            const float sr = static_cast<float> (sampleRate);
+            const float fc = juce::jlimit (20.0f, sr * 0.45f, p.cutoff);
+            const float g = std::tan (juce::MathConstants<float>::pi * fc / sr);
+            const float k = 2.0f - 2.0f * juce::jlimit (0.0f, 0.98f, p.resonance);
+            const float a1 = 1.0f / (1.0f + g * (g + k));
+            const float a2 = g * a1;
+            const float a3 = g * a2;
+
+            const float v3 = in - svfIc2;
+            const float v1 = a1 * svfIc1 + a2 * v3;
+            const float v2 = svfIc2 + a2 * svfIc1 + a3 * v3;
+            svfIc1 = 2.0f * v1 - svfIc1;
+            svfIc2 = 2.0f * v2 - svfIc2;
+
+            if (p.filterType == 1)       filtered = in - k * v1 - v2; // high pass
+            else if (p.filterType == 2)  filtered = v1;               // band pass
+            else                         filtered = v2;               // low pass
+        }
+
+        const float out = juce::jlimit (-1.0f, 1.0f, filtered * velocity * p.master);
 
         if (numCh >= 2)
         {

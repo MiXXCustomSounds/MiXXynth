@@ -572,6 +572,153 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// VA / Filter page (M3b)
+// ---------------------------------------------------------------------------
+class MiXXynthEditor::VaPage : public juce::Component
+{
+public:
+    explicit VaPage (MiXXynthEditor& e) : ed (e)
+    {
+        auto& p = e.processor();
+
+        addKnob (ranged (p, "vaLevel"), mixxynth::dstVaLevel, "VA Level");
+        addKnob (ranged (p, "vaDetune"), mixxynth::dstVaDetune, "VA Detune");
+        addKnob (ranged (p, "vaPulseWidth"), mixxynth::dstOff, "Pulse Width");
+        addKnob (ranged (p, "filterCutoff"), mixxynth::dstFilterCutoff, "Cutoff");
+        addKnob (ranged (p, "filterReso"), mixxynth::dstFilterReso, "Resonance");
+        addKnob (ranged (p, "filterDrive"), mixxynth::dstFilterDrive, "Drive");
+
+        addChoice (p, "vaWave", "Wave", wave);
+        addChoice (p, "filterType", "Filter", filterType);
+
+        filterOn = addToggle (p, "filterOn", "Filter On");
+
+        octave = new juce::Slider (juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft);
+        octave->setRange (-2.0, 2.0, 1.0);
+        addAndMakeVisible (octave);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterInt*> (ranged (p, "vaOctave")))
+        {
+            octave->setValue (param->get(), juce::dontSendNotification);
+            octave->onValueChange = [this, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (
+                    param->convertTo0to1 (static_cast<float> (octave->getValue())));
+                param->endChangeGesture();
+            };
+        }
+
+        octaveLabel.setText ("Octave", juce::dontSendNotification);
+        addAndMakeVisible (octaveLabel);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colour (0xff8b98a5));
+        g.setFont (11.5f);
+        g.drawFittedText ("VA oscillator blends with the FM stack; the filter is per voice. "
+                          "All of these are modulation destinations.",
+                          getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (10);
+        b.removeFromTop (18);
+
+        auto row = b.removeFromTop (96);
+
+        for (auto* k : knobs)
+            k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 4)).reduced (4));
+
+        row = b.removeFromTop (96);
+
+        for (auto* k : knobs2)
+            k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 4)).reduced (4));
+
+        b.removeFromTop (10);
+        auto controls = b.removeFromTop (26);
+        octaveLabel.setBounds (controls.removeFromLeft (56));
+        octave->setBounds (controls.removeFromLeft (120).reduced (2, 0));
+        controls.removeFromLeft (16);
+        wave.setBounds (controls.removeFromLeft (130).reduced (2, 0));
+        controls.removeFromLeft (16);
+        filterType.setBounds (controls.removeFromLeft (130).reduced (2, 0));
+        controls.removeFromLeft (16);
+
+        if (filterOn != nullptr)
+            filterOn->setBounds (controls.removeFromLeft (100).reduced (2, 0));
+    }
+
+private:
+    void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
+    {
+        auto* k = new ModKnob (label, param, dest, true);
+        k->onSourceDropped = [this] (int s, int d) { ed.assignModSlot (s, d); };
+        k->onClearRequested = [this] (int d) { ed.clearModDest (d); };
+        addAndMakeVisible (k);
+        ed.modKnobs.push_back (k);
+        owned.add (k);
+
+        if (knobs.size() < 4)
+            knobs.add (k);
+        else
+            knobs2.add (k);
+    }
+
+    void addChoice (MiXXynthProcessor& p, const juce::String& id, const juce::String&,
+                    juce::ComboBox& box)
+    {
+        addAndMakeVisible (box);
+
+        if (auto* param = choice (p, id))
+        {
+            for (int i = 0; i < param->choices.size(); ++i)
+                box.addItem (param->choices[i], i + 1);
+
+            box.setSelectedId (param->getIndex() + 1, juce::dontSendNotification);
+            box.onChange = [&box, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (
+                    param->convertTo0to1 (static_cast<float> (box.getSelectedId() - 1)));
+                param->endChangeGesture();
+            };
+        }
+    }
+
+    juce::ToggleButton* addToggle (MiXXynthProcessor& p, const juce::String& id, const juce::String& text)
+    {
+        auto* t = new juce::ToggleButton (text);
+        toggles.add (t);
+        addAndMakeVisible (t);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, id)))
+        {
+            t->setToggleState (param->get(), juce::dontSendNotification);
+            t->onClick = [t, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (t->getToggleState() ? 1.0f : 0.0f);
+                param->endChangeGesture();
+            };
+        }
+
+        return t;
+    }
+
+    MiXXynthEditor& ed;
+    juce::OwnedArray<ModKnob> owned;
+    juce::Array<ModKnob*> knobs, knobs2;
+    juce::ComboBox wave, filterType;
+    juce::ToggleButton* filterOn = nullptr;
+    juce::Slider* octave = nullptr;
+    juce::Label octaveLabel;
+    juce::OwnedArray<juce::ToggleButton> toggles;
+};
+
+// ---------------------------------------------------------------------------
 // FX page: the fixed FX tail arrives in M4
 // ---------------------------------------------------------------------------
 class MiXXynthEditor::FxPage : public juce::Component
@@ -646,11 +793,13 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     fmPage = std::make_unique<FmPage> (*this);
     matrixPage = std::make_unique<MatrixPage> (*this);
     modPage = std::make_unique<ModPage> (*this);
+    vaPage = std::make_unique<VaPage> (*this);
     fxPage = std::make_unique<FxPage> (*this);
 
     tabs.setOutline (0);
     tabs.addTab ("FM", juce::Colour (0xff14181d), fmPage.get(), false);
     tabs.addTab ("Matrix", juce::Colour (0xff14181d), matrixPage.get(), false);
+    tabs.addTab ("VA/Filt", juce::Colour (0xff14181d), vaPage.get(), false);
     tabs.addTab ("Mod", juce::Colour (0xff14181d), modPage.get(), false);
     tabs.addTab ("FX", juce::Colour (0xff14181d), fxPage.get(), false);
     addAndMakeVisible (tabs);

@@ -438,6 +438,97 @@ int main()
         ok = check (diff > 1.0, "mod: matrix-depth destination works", diff) && ok;
     }
 
+    // --- 14. VA layer: every waveform renders finite, audible and bounded ---
+    {
+        for (int w = 0; w < 4; ++w)
+        {
+            auto p = paramsForAlgo (4);
+            p.vaLevel = 1.0f; // VA only
+            p.vaWave = w;
+            p.vaOctave = 0;
+            p.index = 0.0f;
+
+            double rms = 0.0;
+            float peak = 0.0f;
+            const bool good = renderAndCheck (p, rms, peak);
+
+            if (! good)
+                std::printf ("FAIL VA wave %d  rms=%.6f peak=%.6f\n", w, rms, peak);
+
+            ok = check (good, w == 0 ? "VA saw sane" : (w == 1 ? "VA square sane"
+                             : (w == 2 ? "VA sub sane" : "VA noise sane")), rms) && ok;
+        }
+    }
+
+    // --- 15. VA + FM blend produces a different signal to FM alone ---
+    {
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto fmOnly = paramsForAlgo (4);
+        auto blended = paramsForAlgo (4);
+        blended.vaLevel = 0.5f;
+        blended.vaWave = 0;
+
+        juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
+        juce::MidiBuffer m1, m2;
+        m1.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        m2.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+        MiXXVoiceManager v1, v2;
+        v1.prepare (sr);
+        v2.prepare (sr);
+        v1.renderBlock (a, m1, fmOnly, mod, poly);
+        v2.renderBlock (b, m2, blended, mod, poly);
+
+        double diff = 0.0;
+
+        for (int i = 0; i < blockLen; ++i)
+            diff += std::abs (a.getSample (0, i) - b.getSample (0, i));
+
+        ok = check (diff > 1.0, "VA blends with FM", diff) && ok;
+    }
+
+    // --- 16. Filter: low pass reduces energy of a bright source ---
+    {
+        auto open = paramsForAlgo (4);
+        open.vaLevel = 1.0f;
+        open.vaWave = 0; // saw: bright
+        open.index = 0.0f;
+        open.filterOn = true;
+        open.filterType = 0; // LP
+        open.cutoff = 18000.0f;
+
+        auto closed = open;
+        closed.cutoff = 200.0f;
+
+        double rmsOpen = 0.0, rmsClosed = 0.0;
+        float peakOpen = 0.0f, peakClosed = 0.0f;
+        const bool okOpen = renderAndCheck (open, rmsOpen, peakOpen);
+        const bool okClosed = renderAndCheck (closed, rmsClosed, peakClosed);
+
+        ok = check (okOpen && okClosed, "filter stable (open+closed)", rmsClosed) && ok;
+        ok = check (rmsClosed < rmsOpen, "low pass reduces energy", rmsClosed - rmsOpen) && ok;
+    }
+
+    // --- 17. Filter: high resonance and drive stay bounded ---
+    {
+        auto p = paramsForAlgo (4);
+        p.vaLevel = 1.0f;
+        p.vaWave = 1;
+        p.index = 0.0f;
+        p.filterOn = true;
+        p.filterType = 2; // band pass
+        p.cutoff = 800.0f;
+        p.resonance = 0.98f;
+        p.drive = 1.0f;
+
+        double rms = 0.0;
+        float peak = 0.0f;
+        ok = check (renderAndCheck (p, rms, peak), "resonant driven filter bounded", rms) && ok;
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }

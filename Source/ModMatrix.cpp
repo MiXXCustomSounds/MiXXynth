@@ -265,6 +265,29 @@ void applyModulation (const std::array<float, kNumModSources>& sources,
         {
             vp.master = juce::jlimit (0.0f, 1.0f, vp.master + amt);
         }
+        else if (slot.dest == dstVaLevel)
+        {
+            vp.vaLevel = juce::jlimit (0.0f, 1.0f, vp.vaLevel + amt);
+        }
+        else if (slot.dest == dstVaDetune)
+        {
+            vp.vaDetune = juce::jlimit (-100.0f, 100.0f, vp.vaDetune + amt * 50.0f);
+        }
+        else if (slot.dest == dstFilterCutoff)
+        {
+            // Modulating cutoff by ear needs an exponential sweep, so the depth
+            // is applied in octaves rather than hertz.
+            vp.cutoff = juce::jlimit (20.0f, 20000.0f,
+                                      vp.cutoff * std::pow (2.0f, amt * 5.0f));
+        }
+        else if (slot.dest == dstFilterReso)
+        {
+            vp.resonance = juce::jlimit (0.0f, 0.98f, vp.resonance + amt);
+        }
+        else if (slot.dest == dstFilterDrive)
+        {
+            vp.drive = juce::jlimit (0.0f, 1.0f, vp.drive + amt);
+        }
         else
         {
             int s = 0, d = 1;

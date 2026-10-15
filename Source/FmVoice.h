@@ -31,6 +31,19 @@ public:
         float index    = 3.0f;
         float master   = 0.8f;
 
+        // M3b: VA layer (blended with the FM stack) and a per-voice filter.
+        float vaLevel     = 0.0f;    // 0 = FM only, 1 = VA only
+        float vaDetune    = 0.0f;    // cents
+        int   vaOctave    = 0;       // -2..+2
+        int   vaWave      = 0;       // 0 saw, 1 square, 2 sub, 3 noise
+        float vaPulseWidth = 0.5f;   // square duty (0.05..0.95)
+
+        bool  filterOn    = false;
+        int   filterType  = 0;       // 0 LP, 1 HP, 2 BP
+        float cutoff      = 12000.0f;
+        float resonance   = 0.2f;
+        float drive       = 0.0f;
+
         VoiceParams()
         {
             for (int i = 0; i < numOps; ++i)
@@ -82,6 +95,14 @@ private:
     static float updateEnvelope (Op& op, float a, float d, float s, float r, double sampleRate);
 
     std::array<Op, numOps> ops;
+
+    // M3b: VA oscillator and filter state (per voice).
+    double vaPhase = 0.0;
+    double vaSubPhase = 0.0;
+    juce::uint32 noiseState = 0x2545f491u;
+    float svfIc1 = 0.0f;
+    float svfIc2 = 0.0f;
+
     double sampleRate = 44100.0;
     double frequency = 440.0;
     float velocity = 0.0f;
