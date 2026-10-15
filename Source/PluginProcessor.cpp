@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Algorithms.h"
+#include "OpWave.h"
 
 juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLayout()
 {
@@ -33,6 +34,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "release", "Op " + n + " Release",
             juce::NormalisableRange<float> (0.005f, 8.0f, 0.001f, 0.4f), 0.20f));
+
+        // M4b: per-operator enable and waveform.
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            "op" + n + "on", "Op " + n + " On", true));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "wave", "Op " + n + " Wave",
+            juce::NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.0f));
     }
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -240,6 +248,10 @@ void MiXXynthProcessor::prepareToPlay (double sampleRate, int)
 {
     currentSampleRate = static_cast<float> (sampleRate);
     voiceManager.prepare (sampleRate);
+
+    // Band-limited operator waveform tables. Built here, never on the audio
+    // thread, and shared by every voice.
+    waveTables.prepare (sampleRate);
 }
 
 void MiXXynthProcessor::releaseResources() {}
@@ -270,7 +282,11 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         vp.decay[i]     = getParam (apvts, "op" + n + "decay");
         vp.sustain[i]   = getParam (apvts, "op" + n + "sustain");
         vp.release[i]   = getParam (apvts, "op" + n + "release");
+        vp.opOn[i]      = getParam (apvts, "op" + n + "on") > 0.5f;
+        vp.opWave[i]    = getParam (apvts, "op" + n + "wave");
     }
+
+    vp.waveTables = &waveTables;
 
     vp.index    = getParam (apvts, "fmIndex");
     vp.master   = getParam (apvts, "masterGain");

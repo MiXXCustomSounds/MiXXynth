@@ -369,6 +369,25 @@ public:
         {
             const juce::String n = juce::String (i + 1);
 
+            // Per-operator enable. A disabled operator outputs silence, which
+            // also stops it modulating anything downstream.
+            auto* t = new juce::ToggleButton ("Op" + n);
+            opOnToggles.add (t);
+            addAndMakeVisible (t);
+
+            if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, "op" + n + "on")))
+            {
+                t->setToggleState (param->get(), juce::dontSendNotification);
+                t->onClick = [t, param]
+                {
+                    param->beginChangeGesture();
+                    param->setValueNotifyingHost (t->getToggleState() ? 1.0f : 0.0f);
+                    param->endChangeGesture();
+                };
+            }
+
+            // Wave first, so the column reads: shape, then its settings.
+            addKnob (ranged (p, "op" + n + "wave"), mixxynth::dstOff, "Op" + n + " Wave");
             addKnob (ranged (p, "op" + n + "ratio"), mixxynth::dstOp1Ratio + i, "Op" + n + " Ratio");
             addKnob (ranged (p, "op" + n + "level"), mixxynth::dstOp1Level + i, "Op" + n + " Level");
             addKnob (ranged (p, "op" + n + "feedback"), mixxynth::dstOff, "Op" + n + " Fb");
@@ -383,7 +402,8 @@ public:
     {
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("Drag a source chip onto any knob to modulate it; right-click a knob to clear its modulation.",
+        g.drawFittedText ("Op toggles enable or silence an operator. Wave sweeps sine > triangle > saw > square. "
+                          "Drag a source chip onto any knob to modulate it; right-click a knob for its modulation.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
@@ -409,7 +429,11 @@ public:
         for (int i = 0; i < opCount; ++i)
         {
             auto col = b.removeFromLeft (colW).reduced (1);
-            const int rows = 7;
+
+            if (i < opOnToggles.size())
+                opOnToggles[i]->setBounds (col.removeFromTop (20).reduced (2, 0));
+
+            const int rows = 8;
 
             for (int k = 0; k < rows; ++k)
             {
@@ -440,6 +464,7 @@ private:
     juce::ComboBox algo;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs;
+    juce::OwnedArray<juce::ToggleButton> opOnToggles;
 };
 
 // ---------------------------------------------------------------------------

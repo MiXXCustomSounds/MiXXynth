@@ -4,6 +4,8 @@
 
 #include <array>
 
+#include "OpWave.h"
+
 // M2a: mono 6-op FM voice driven by a routing matrix.
 //   mod[src][dst]  modulation depth (src modulates dst), 0..1
 //   carrier[op]    whether the op goes to the output
@@ -30,6 +32,14 @@ public:
         bool carrier[numOps] = { true, true, true, true, true, true };
         float index    = 3.0f;
         float master   = 0.8f;
+
+        // M4b: per-operator enable and waveform. `wave` is 0..1 sweeping
+        // sine -> triangle -> saw -> square (see OpWave.h).
+        bool  opOn[numOps]   = { true, true, true, true, true, true };
+        float opWave[numOps] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
+        // Shared, owned by the processor. Null falls back to a plain sine.
+        const mixxynth::OpWaveTables* waveTables = nullptr;
 
         // M3b: VA layer (blended with the FM stack) and a per-voice filter.
         float vaLevel     = 0.0f;    // 0 = FM only, 1 = VA only

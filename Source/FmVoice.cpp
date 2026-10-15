@@ -173,6 +173,17 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 {
     const int numCh = buffer.getNumChannels();
 
+    // Resolve each operator's mip band and morph pair once per block. Doing this
+    // per sample would put a log2 and a table pick in the hot loop; the operator
+    // frequencies are constant for the whole range.
+    std::array<mixxynth::OpWaveTables::Cursor, numOps> cursors;
+
+    for (int i = 0; i < numOps; ++i)
+        if (p.waveTables != nullptr)
+            cursors[static_cast<size_t> (i)] =
+                p.waveTables->makeCursor (p.opWave[i],
+                                          frequency * static_cast<double> (p.ratio[i]));
+
     for (int n = 0; n < numSamples; ++n)
     {
         float sum = 0.0f;
@@ -202,7 +213,17 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             // Self-feedback uses this op's own previous output.
             modSum += static_cast<double> (op.fbSmooth) * op.prevOut;
 
-            const float s = std::sin (static_cast<float> (twoPi * op.phase + modSum * p.index)) * op.env;
+            // FM modulation is a phase offset, so the waveform is evaluated at
+            // the modulated phase. A disabled operator outputs silence, which
+            // also stops it modulating anything downstream.
+            const double modulated = op.phase + modSum * p.index;
+            const float ph01 = static_cast<float> (modulated - std::floor (modulated));
+
+            const float raw = p.opOn[dst]
+                                ? mixxynth::OpWaveTables::read (cursors[static_cast<size_t> (dst)], ph01)
+                                : 0.0f;
+
+            const float s = raw * op.env;
             op.curOut = s;
 
             if (p.carrier[dst])

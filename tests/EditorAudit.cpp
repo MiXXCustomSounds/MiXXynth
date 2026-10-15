@@ -77,6 +77,10 @@ namespace
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
             s.insert ("carrier" + juce::String (i + 1));
 
+        // Per-operator enable is a toggle, not a knob.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            s.insert ("op" + juce::String (i + 1) + "on");
+
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)
         {
             const juce::String id = juce::String (n + 1);

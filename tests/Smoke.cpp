@@ -595,6 +595,168 @@ int main()
 
 
 
+    // --- Operator waveforms: band-limited, bounded, continuously morphing ---
+    {
+        using namespace mixxynth;
+
+        OpWaveTables tables;
+        tables.prepare (sr);
+        ok = check (tables.isPrepared(), "opwave: tables build", 1) && ok;
+
+        float worstPeak = 0.0f;
+        float lowestPeak = 1.0e9f;
+        bool allFinite = true;
+
+        for (int s = 0; s < 16; ++s)
+        {
+            const float wave = static_cast<float> (s) / 15.0f;
+            float peak = 0.0f;
+
+            for (int i = 0; i < 512; ++i)
+            {
+                const float v = tables.sample (static_cast<float> (i) / 512.0f, wave, 220.0);
+
+                if (! std::isfinite (v))
+                    allFinite = false;
+
+                peak = juce::jmax (peak, std::abs (v));
+            }
+
+            worstPeak = juce::jmax (worstPeak, peak);
+            lowestPeak = juce::jmin (lowestPeak, peak);
+        }
+
+        ok = check (allFinite, "opwave: every shape is finite", allFinite ? 1.0 : 0.0) && ok;
+        // The upper bound allows the usual Gibbs overshoot on a truncated saw
+        // and square.
+        ok = check (worstPeak < 1.5f, "opwave: every shape is bounded", worstPeak) && ok;
+        ok = check (lowestPeak > 0.5f, "opwave: every shape is audible", lowestPeak) && ok;
+
+        // Wave 0 really is a sine.
+        {
+            double err = 0.0;
+
+            for (int i = 0; i < 256; ++i)
+            {
+                const float ph = static_cast<float> (i) / 256.0f;
+                err += std::abs (tables.sample (ph, 0.0f, 220.0)
+                                   - std::sin (6.28318530717958647692 * static_cast<double> (ph)));
+            }
+
+            ok = check (err < 0.05, "opwave: wave 0 is a sine", err) && ok;
+        }
+
+        // Morphing is continuous: a tiny knob move must not jump the output.
+        {
+            float worstJump = 0.0f;
+
+            for (int s = 0; s < 30; ++s)
+            {
+                const float a = static_cast<float> (s) / 30.0f;
+                const float b = a + 0.001f;
+
+                for (int i = 0; i < 128; ++i)
+                {
+                    const float ph = static_cast<float> (i) / 128.0f;
+                    worstJump = juce::jmax (worstJump,
+                                            std::abs (tables.sample (ph, a, 220.0)
+                                                        - tables.sample (ph, b, 220.0)));
+                }
+            }
+
+            ok = check (worstJump < 0.02f, "opwave: morph is continuous", worstJump) && ok;
+        }
+
+        // The four stops are actually different from one another.
+        {
+            double sineVsSaw = 0.0, sawVsSquare = 0.0;
+
+            for (int i = 0; i < 256; ++i)
+            {
+                const float ph = static_cast<float> (i) / 256.0f;
+                sineVsSaw += std::abs (tables.sample (ph, 0.0f, 220.0)
+                                         - tables.sample (ph, 0.667f, 220.0));
+                sawVsSquare += std::abs (tables.sample (ph, 0.667f, 220.0)
+                                           - tables.sample (ph, 1.0f, 220.0));
+            }
+
+            ok = check (sineVsSaw > 20.0, "opwave: saw differs from sine", sineVsSaw) && ok;
+            ok = check (sawVsSquare > 5.0, "opwave: square differs from saw", sawVsSquare) && ok;
+        }
+    }
+
+    // --- Operator enable and waveform reach the audio path ---
+    {
+        using namespace mixxynth;
+
+        OpWaveTables tables;
+        tables.prepare (sr);
+
+        auto base = paramsForAlgo (4);
+        base.master = 1.0f;
+        base.waveTables = &tables;
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+
+        auto render = [&] (const MiXXFmVoice::VoiceParams& p, juce::AudioBuffer<float>& buf)
+        {
+            juce::MidiBuffer m;
+            m.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+            MiXXVoiceManager v;
+            v.prepare (sr);
+            v.renderBlock (buf, m, p, mod, poly);
+        };
+
+        juce::AudioBuffer<float> sineBuf (2, blockLen), squareBuf (2, blockLen);
+        render (base, sineBuf);
+
+        auto square = base;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            square.opWave[i] = 1.0f;
+
+        render (square, squareBuf);
+
+        double waveDiff = 0.0;
+
+        for (int i = 0; i < blockLen; ++i)
+            waveDiff += std::abs (sineBuf.getSample (0, i) - squareBuf.getSample (0, i));
+
+        ok = check (waveDiff > 1.0, "op: waveform changes the sound", waveDiff) && ok;
+        ok = check (rmsOf (squareBuf, 0, blockLen) > 0.0,
+                    "op: square operators stay finite", rmsOf (squareBuf, 0, blockLen)) && ok;
+
+        // Every operator off must be silent.
+        auto off = base;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            off.opOn[i] = false;
+
+        juce::AudioBuffer<float> offBuf (2, blockLen);
+        render (off, offBuf);
+
+        const double offRms = rmsOf (offBuf, 0, blockLen);
+        ok = check (offRms >= 0.0 && offRms < 1.0e-6, "op: all operators off is silent", offRms) && ok;
+        ok = check (rmsOf (sineBuf, 0, blockLen) > 0.001,
+                    "op: the same patch with ops on is audible",
+                    rmsOf (sineBuf, 0, blockLen)) && ok;
+
+        // Turning off the modulators must change the sound without silencing it.
+        auto oneOff = base;
+
+        for (int i = 1; i < MiXXFmVoice::numOps; ++i)
+            oneOff.opOn[i] = false;
+
+        juce::AudioBuffer<float> oneOffBuf (2, blockLen);
+        render (oneOff, oneOffBuf);
+
+        const double oneOffRms = rmsOf (oneOffBuf, 0, blockLen);
+        ok = check (oneOffRms > 0.0001, "op: carriers stay audible with modulators off",
+                    oneOffRms) && ok;
+    }
+
     // --- 14. VA layer: every waveform renders finite, audible and bounded ---
     {
         for (int w = 0; w < 4; ++w)

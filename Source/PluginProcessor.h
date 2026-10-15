@@ -113,5 +113,9 @@ private:
     std::array<std::atomic<float>, mixxynth::kNumShapes> shapePhases {};
     std::atomic<int> stateLoadCount { 0 };
 
+    // Shared band-limited operator waveform tables (M4b). One copy for the whole
+    // plugin; the voices hold a pointer to it.
+    mixxynth::OpWaveTables waveTables;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthProcessor)
 };
