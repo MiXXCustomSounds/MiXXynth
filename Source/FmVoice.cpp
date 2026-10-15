@@ -76,6 +76,7 @@ void MiXXFmVoice::reset()
     velocity = 0.0f;
     vaPhase = 0.0;
     vaSubPhase = 0.0;
+    vaEnv = 0.0f;
     noiseState = 0x2545f491u;
     svfIc1 = 0.0f;
     svfIc2 = 0.0f;
@@ -237,7 +238,12 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         for (auto& op : ops)
             op.prevOut = op.curOut;
 
-        // --- M3b: VA layer, blended against the FM stack ---
+        // --- M3b: VA layer, ADDED to the FM stack ---
+        // The envelope runs whether or not VA is in use, so raising VA Level
+        // mid-note does not start with a silent ramp-in.
+        const float vaCoef = gate ? 0.0025f : 0.0004f; // ~8 ms attack, ~50 ms release
+        vaEnv += ((gate ? 1.0f : 0.0f) - vaEnv) * vaCoef;
+
         float va = 0.0f;
 
         if (p.vaLevel > 0.0f)
@@ -291,7 +297,9 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             }
         }
 
-        const float mixed = sum * (1.0f - p.vaLevel) + va * p.vaLevel;
+        // Additive, not a crossfade: turning VA Level up must not duck the FM
+        // patch, which is what the old (1 - vaLevel) blend did.
+        const float mixed = sum + va * p.vaLevel * vaEnv;
 
         // --- M3b: per-voice TPT state-variable filter ---
         float filtered = mixed;

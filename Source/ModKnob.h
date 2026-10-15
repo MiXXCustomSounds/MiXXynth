@@ -59,6 +59,15 @@ namespace mixxynth::ui
         }
         const juce::String& getLabelText() const { return text; }
 
+        void setLabelText (const juce::String& t)
+        {
+            if (text != t)
+            {
+                text = t;
+                repaint();
+            }
+        }
+
         // Total signed modulation depth currently aimed at this knob.
         void setModDepth (float d);
         float getModDepth() const { return modDepth; }
@@ -92,6 +101,13 @@ namespace mixxynth::ui
         void handleMenuResult (int result);
         juce::Rectangle<float> dialArea() const;
         bool isOverRing (juce::Point<int> pos) const;
+
+        // The ring has to stay grabbable without eating the dial on small knobs,
+        // so it scales with the cell rather than being a fixed width.
+        static int ringWidthFor (int shortSide)
+        {
+            return juce::jlimit (5, 13, shortSide / 7);
+        }
 
         sst::jucegui::components::Knob knob;
         ContinuousSource source;

@@ -181,11 +181,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "filterType", "Filter Type",
         juce::StringArray { "Low Pass", "High Pass", "Band Pass" }, 0));
 
+    // Cutoff uses a TRUE logarithmic mapping rather than JUCE's power-curve skew.
+    // The old range (skew 0.25, i.e. value = 20 + 19980 * v^4) was very uneven:
+    // the bottom third of the knob covered 20-180 Hz while a tenth of a turn in
+    // the middle jumped 531 Hz to 1269 Hz. A log map puts equal octaves under
+    // equal knob travel, which is what a frequency control needs.
+    juce::NormalisableRange<float> cutoffRange (
+        20.0f, 20000.0f,
+        [] (float start, float end, float normalised)
+        {
+            return start * std::pow (end / start, juce::jlimit (0.0f, 1.0f, normalised));
+        },
+        [] (float start, float end, float value)
+        {
+            return std::log (juce::jlimit (start, end, value) / start) / std::log (end / start);
+        });
+
     // Wide open by default, so the filter is transparent until you move Cutoff
     // but is immediately audible the moment you do.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        "filterCutoff", "Filter Cutoff",
-        juce::NormalisableRange<float> (20.0f, 20000.0f, 0.1f, 0.25f), 20000.0f));
+        "filterCutoff", "Filter Cutoff", cutoffRange, 20000.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "filterReso", "Filter Resonance",

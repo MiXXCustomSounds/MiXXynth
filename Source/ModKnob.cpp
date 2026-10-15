@@ -70,9 +70,10 @@ void ModKnob::setModAssignments (std::vector<Assignment> a)
 
 // The dial is circular, so it needs a square area. Handing it a wide, short rect
 // (as the page layouts naturally produce) makes the dial overflow and get
-// clipped, so centre a square inside the cell instead. The square is inset by
-// ringWidth on every side to leave the modulation ring outside the dial, where
-// it is visible and can be dragged.
+// clipped, so centre a square inside the cell instead. The square is inset by the
+// ring width on every side to leave the modulation ring outside the dial, where
+// it is visible and can be dragged. That inset scales with the cell, so a small
+// knob keeps a usable dial instead of losing 26 px to a fixed ring.
 juce::Rectangle<float> ModKnob::dialArea() const
 {
     auto b = getLocalBounds();
@@ -80,7 +81,8 @@ juce::Rectangle<float> ModKnob::dialArea() const
     if (labelVisible)
         b.removeFromTop (labelHeight);
 
-    const int size = juce::jmax (16, juce::jmin (b.getWidth(), b.getHeight()) - 2 * ringWidth);
+    const int shortSide = juce::jmin (b.getWidth(), b.getHeight());
+    const int size = juce::jmax (12, shortSide - 2 * ringWidthFor (shortSide));
     return b.withSizeKeepingCentre (size, size).toFloat();
 }
 
@@ -90,7 +92,7 @@ bool ModKnob::isOverRing (juce::Point<int> pos) const
     const float radius = sq.getWidth() * 0.5f;
     const float d = pos.toFloat().getDistanceFrom (sq.getCentre());
 
-    return d > radius - 3.0f && d <= radius + static_cast<float> (ringWidth);
+    return d > radius - 3.0f && d <= radius + static_cast<float> (ringWidthFor (getWidth()));
 }
 
 void ModKnob::resized()

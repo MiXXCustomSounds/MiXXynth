@@ -683,6 +683,47 @@ int main()
             ok = check (sineVsSaw > 20.0, "opwave: saw differs from sine", sineVsSaw) && ok;
             ok = check (sawVsSquare > 5.0, "opwave: square differs from saw", sawVsSquare) && ok;
         }
+
+        // Prove all four stops are genuinely distinct using harmonic energy above
+        // the 6th harmonic, which is a perceptual stand-in for brightness. This is
+        // the check that would catch a morph collapsing to two shapes.
+        {
+            auto highEnergy = [&tables] (float wave)
+            {
+                constexpr int N = 512;
+                double total = 0.0;
+
+                for (int h = 7; h <= 60; ++h)
+                {
+                    double re = 0.0, im = 0.0;
+
+                    for (int i = 0; i < N; ++i)
+                    {
+                        const double ph = static_cast<double> (i) / N;
+                        const double v = tables.sample (static_cast<float> (ph), wave, 220.0);
+                        const double a = 6.28318530717958647692 * h * ph;
+                        re += v * std::cos (a);
+                        im += v * std::sin (a);
+                    }
+
+                    total += (re * re + im * im) / (N * N);
+                }
+
+                return total;
+            };
+
+            const double eSine = highEnergy (0.0f);
+            const double eTri = highEnergy (1.0f / 3.0f);
+            const double eSaw = highEnergy (2.0f / 3.0f);
+            const double eSqr = highEnergy (1.0f);
+
+            ok = check (eSine < 1.0e-9, "opwave: sine has no upper harmonics", eSine) && ok;
+            ok = check (eTri > 1.0e-6, "opwave: triangle adds upper harmonics", eTri) && ok;
+            ok = check (eSaw > eTri * 5.0, "opwave: saw is far richer than triangle",
+                        eSaw / eTri) && ok;
+            ok = check (eSqr > eTri * 5.0 && std::abs (eSqr - eSaw) > 1.0e-4,
+                        "opwave: square differs from both", eSqr / eTri) && ok;
+        }
     }
 
     // --- Operator enable and waveform reach the audio path ---

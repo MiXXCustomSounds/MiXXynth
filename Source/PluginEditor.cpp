@@ -490,12 +490,35 @@ public:
         ed.setModStatus ("Dice rolled a new FM patch");
     }
 
+    // Keeps each Wave knob's label showing the shape it is currently at, so the
+    // morph is readable instead of a mystery dial.
+    void refreshWaveLabels()
+    {
+        constexpr int knobsPerOp = 8;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            const int idx = 1 + i * knobsPerOp;
+
+            if (idx >= knobs.size())
+                break;
+
+            float wave = 0.0f;
+
+            if (auto* p = ranged (ed.processor(), "op" + juce::String (i + 1) + "wave"))
+                wave = p->convertFrom0to1 (p->getValue());
+
+            knobs[idx]->setLabelText ("Op" + juce::String (i + 1) + " "
+                                        + mixxynth::OpWaveTables::shapeName (wave));
+        }
+    }
+
     void paint (juce::Graphics& g) override
     {
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("Op toggles enable or silence an operator. Wave sweeps sine > triangle > saw > square. "
-                          "Drag a source chip onto any knob to modulate it; right-click a knob for its modulation.",
+        g.drawFittedText ("Op toggles enable or silence an operator. Wave sweeps sine > triangle > saw > square; "
+                          "the knob label shows where you are. Drag a source chip onto any knob to modulate it.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
@@ -510,34 +533,36 @@ public:
         top.removeFromLeft (10);
         diceButton.setBounds (top.removeFromLeft (72).reduced (2, 0));
 
-        b.removeFromTop (4);
+        b.removeFromTop (6);
 
-        auto indexRow = b.removeFromTop (76);
+        // FM Index gets its own narrow column; the operator grid takes the rest.
+        auto indexColumn = b.removeFromLeft (116);
 
         if (! knobs.isEmpty())
-            knobs[0]->setBounds (indexRow.removeFromLeft (92));
+            knobs[0]->setBounds (indexColumn.removeFromTop (juce::jmin (indexColumn.getWidth(), 120)));
 
-        const int opCount = MiXXFmVoice::numOps;
-        const int colW = juce::jmax (56, b.getWidth() / opCount);
+        // One operator per row with its eight knobs across, rather than eight rows
+        // per operator. The earlier six-column layout left each dial about 31 px,
+        // which is what made them unusable.
+        const int rows = 8;
+        const int rowH = juce::jmax (64, b.getHeight() / MiXXFmVoice::numOps);
+        const int labelW = 60;
 
-        for (int i = 0; i < opCount; ++i)
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
-            auto col = b.removeFromLeft (colW).reduced (1);
+            auto row = b.removeFromTop (rowH);
 
             if (i < opOnToggles.size())
-                opOnToggles[i]->setBounds (col.removeFromTop (20).reduced (2, 0));
+                opOnToggles[i]->setBounds (row.removeFromLeft (labelW).reduced (4, 2));
 
-            const int rows = 8;
+            const int colW = juce::jmax (48, row.getWidth() / rows);
 
             for (int k = 0; k < rows; ++k)
             {
                 const int idx = 1 + i * rows + k;
 
                 if (idx < knobs.size())
-                {
-                    auto cell = col.removeFromTop (juce::jmax (44, col.getHeight() / (rows - k)));
-                    knobs[idx]->setBounds (cell.reduced (2));
-                }
+                    knobs[idx]->setBounds (row.removeFromLeft (colW).reduced (2));
             }
         }
     }
@@ -1106,8 +1131,9 @@ public:
     {
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("VA Level crossfades the VA oscillator against the FM stack (0 = FM only). "
-                          "The filter is per voice and all six knobs are modulation destinations.",
+        g.drawFittedText ("VA Level ADDS the VA oscillator on top of the FM stack (0 = FM only). "
+                          "The VA has its own gate envelope. The filter is per voice and all six knobs are "
+                          "modulation destinations.",
                           getLocalBounds().removeFromTop (32), juce::Justification::centredLeft, 2);
     }
 
@@ -1573,6 +1599,9 @@ void MiXXynthEditor::runTabPolls()
 
     if (vaPage != nullptr)
         vaPage->refreshHint();
+
+    if (fmPage != nullptr)
+        fmPage->refreshWaveLabels();
 }
 
 void MiXXynthEditor::rollFmDice()

@@ -109,6 +109,9 @@ private:
     // M3b: VA oscillator and filter state (per voice).
     double vaPhase = 0.0;
     double vaSubPhase = 0.0;
+    // Gate-driven AR envelope for the VA oscillator. Without it the VA was an
+    // envelopeless tone that ran for as long as the voice existed.
+    float vaEnv = 0.0f;
     juce::uint32 noiseState = 0x2545f491u;
     float svfIc1 = 0.0f;
     float svfIc2 = 0.0f;
