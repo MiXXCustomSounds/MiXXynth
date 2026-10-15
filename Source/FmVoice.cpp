@@ -109,6 +109,11 @@ void MiXXFmVoice::noteOn (int noteNumber, float velocity, float phaseOffset01)
     const double startPhase = static_cast<double> (phaseOffset01)
                                 - std::floor (static_cast<double> (phaseOffset01));
 
+    // The VA oscillator is scattered too, so a patch that uses it does not stay
+    // phase-aligned while the FM operators decorrelate.
+    vaPhase = startPhase;
+    vaSubPhase = startPhase;
+
     for (auto& op : ops)
     {
         op.phase = startPhase;

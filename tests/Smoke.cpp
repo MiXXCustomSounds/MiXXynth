@@ -851,6 +851,60 @@ int main()
                     "phase rand stays audible and bounded", randRms) && ok;
     }
 
+    // --- Phase randomisation decorrelates the unison stack ---
+    // The point of the control: with the voices aligned they add coherently and
+    // the stack starts with a big transient then combs (the "lasery" sound);
+    // with them scattered the sum is far lower from the first sample.
+    {
+        auto p = paramsForAlgo (4);
+
+        // Very quiet on purpose. The interim output stage is tanh(bus * mixGain),
+        // so anything approaching full scale saturates and the two cases collapse
+        // to the same peak - which is exactly what hid this the first time.
+        p.master = 0.01f;
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 8;
+        poly.unisonDetune = 20.0f;
+        poly.unisonSpread = 0.0f; // mono, so the measured sum is the stack
+
+        auto peakOf = [&] (float phaseRand)
+        {
+            auto pp = poly;
+            pp.phaseRand = phaseRand;
+
+            juce::AudioBuffer<float> buf (2, 2048);
+            juce::MidiBuffer m;
+            m.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+
+            MiXXVoiceManager v;
+            v.prepare (sr);
+            v.renderBlock (buf, m, p, mod, pp);
+
+            float peak = 0.0f;
+
+            for (int i = 0; i < 512; ++i)
+                peak = juce::jmax (peak, std::abs (buf.getSample (0, i)));
+
+            return peak;
+        };
+
+        // Averaged over several draws: a single roll of eight phases can be
+        // clustered by chance, and the ratio swings with it.
+        float alignedTotal = 0.0f, scatteredTotal = 0.0f;
+
+        for (int pass = 0; pass < 6; ++pass)
+        {
+            alignedTotal += peakOf (0.0f);
+            scatteredTotal += peakOf (1.0f);
+        }
+
+        ok = check (alignedTotal > scatteredTotal * 1.3f,
+                    "phase rand scatters the unison stack",
+                    alignedTotal / juce::jmax (1.0e-6f, scatteredTotal)) && ok;
+    }
+
     // --- 14. VA layer: every waveform renders finite, audible and bounded ---
     {
         for (int w = 0; w < 4; ++w)
