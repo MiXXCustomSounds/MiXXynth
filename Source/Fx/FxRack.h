@@ -54,6 +54,10 @@ namespace mixxynth
                       const bool* bypass,
                       const float* params);
 
+        // Audio thread. Forwards the host tempo to every module that exists, so one
+        // with a sync control can follow it. Modules that do not care ignore it.
+        void setTempo (double bpm);
+
         static FxDescriptor descriptorFor (int type);
 
         // Number of instances created so far (tests).

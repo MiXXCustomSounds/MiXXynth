@@ -3,6 +3,8 @@
 #include "WeirdVerbFx.h"
 #include "ConvolutionFx.h"
 #include "JunoChorusFx.h"
+#include "DistortionFx.h"
+#include "PingPongDelayFx.h"
 
 namespace mixxynth
 {
@@ -14,6 +16,8 @@ namespace mixxynth
             case fxWeirdVerb:   return "WeirdVerb";
             case fxConvolution: return "Convolution";
             case fxJunoChorus:  return "Juno Chorus";
+            case fxDistortion:  return "Distortion";
+            case fxPingPongDelay: return "Ping-Pong Delay";
             default:            break;
         }
 
@@ -27,6 +31,8 @@ namespace mixxynth
             case fxWeirdVerb:   return WeirdVerbFx::descriptor();
             case fxConvolution: return ConvolutionFx::descriptor();
             case fxJunoChorus:  return JunoChorusFx::descriptor();
+            case fxDistortion:  return DistortionFx::descriptor();
+            case fxPingPongDelay: return PingPongDelayFx::descriptor();
             default:            break;
         }
 
@@ -63,6 +69,8 @@ namespace mixxynth
                 case fxWeirdVerb:   module = std::make_unique<WeirdVerbFx>(); break;
                 case fxConvolution: module = std::make_unique<ConvolutionFx>(); break;
                 case fxJunoChorus:  module = std::make_unique<JunoChorusFx>(); break;
+                case fxDistortion:  module = std::make_unique<DistortionFx>(); break;
+                case fxPingPongDelay: module = std::make_unique<PingPongDelayFx>(); break;
                 default:            return nullptr;
             }
 
@@ -142,6 +150,16 @@ namespace mixxynth
                 ++n;
 
         return n;
+    }
+
+    void FxRack::setTempo (double bpm)
+    {
+        // Every instance that exists, not just the active ones: a module that is not
+        // currently selected still has to be current the moment it is, and the set is
+        // small and fixed.
+        for (auto& module : owned)
+            if (module != nullptr)
+                module->setTempo (bpm);
     }
 
     void FxRack::process (juce::AudioBuffer<float>& buffer,

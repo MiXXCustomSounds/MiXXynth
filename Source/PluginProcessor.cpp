@@ -876,6 +876,10 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
                 shape.rateHz = static_cast<float> (bpm / 60.0
                                  * mixxynth::syncDivisionCyclesPerBeat (shape.syncIndex));
         }
+
+        // The same tempo goes to the FX rack, so a module with a sync control follows
+        // the host rather than needing a tempo of its own.
+        rack.setTempo (bpm);
     }
 
     for (int i = 0; i < mixxynth::kNumMacros; ++i)

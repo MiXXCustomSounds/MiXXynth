@@ -8,6 +8,8 @@
 #include "../Source/Fx/WeirdVerbFx.h"
 #include "../Source/Fx/ConvolutionFx.h"
 #include "../Source/Fx/JunoChorusFx.h"
+#include "../Source/Fx/DistortionFx.h"
+#include "../Source/Fx/PingPongDelayFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -2697,6 +2699,344 @@ int main()
         // slope of about 0.037, so anything near full scale is a hard cut, not a fade.
         ok = check (worstJump < 0.05f, "a long VA release fades instead of cutting",
                     worstJump) && ok;
+    }
+
+    // --- 36. Distortion: the curves are what make it warm, and Bias is why ---
+    //
+    // The warmth claim rests on four things, and each is checked rather than asserted:
+    // the curves are smooth, they pass through the origin, Bias really does add even
+    // harmonics, and Drive really does add harmonics at all.
+    {
+        using Dist = mixxynth::DistortionFx;
+
+        // Smooth through the origin, and finite. A curve that steps at zero, or that
+        // leaves the linear region at a corner, is what makes distortion sound cheap.
+        // Crush is the deliberate exception - a quantiser is a staircase by definition.
+        {
+            float worstJump = 0.0f;
+
+            for (int mode = 0; mode < Dist::kNumModes; ++mode)
+            {
+                if (mode == Dist::modeCrush)
+                    continue;
+
+                // The largest change in slope anywhere in the curve.
+                for (int i = 0; i < 400; ++i)
+                {
+                    const float x = -2.0f + 4.0f * static_cast<float> (i) / 400.0f;
+                    constexpr float h = 0.002f;
+
+                    const float d1 = (Dist::shape (mode, x + h, 0.0f)
+                                        - Dist::shape (mode, x, 0.0f)) / h;
+                    const float d2 = (Dist::shape (mode, x + 2.0f * h, 0.0f)
+                                        - Dist::shape (mode, x + h, 0.0f)) / h;
+
+                    worstJump = juce::jmax (worstJump, std::abs (d2 - d1));
+                }
+            }
+
+            // A true corner would be a slope change of order 1 over one step; these
+            // curves stay far below that.
+            ok = check (worstJump < 0.1f, "every smooth distortion mode has a smooth curve",
+                        worstJump) && ok;
+
+            // And every mode passes through the origin, which is what stops the effect
+            // changing the level as well as the character.
+            float worstZero = 0.0f;
+
+            for (int mode = 0; mode < Dist::kNumModes; ++mode)
+                worstZero = juce::jmax (worstZero,
+                                        std::abs (Dist::shape (mode, 0.0f, 0.3f)));
+
+            ok = check (worstZero < 1.0e-6f, "every distortion mode passes through zero",
+                        worstZero) && ok;
+        }
+
+        // Bias is the whole difference between warm and buzzy, so it is measured
+        // directly: a curve with even harmonics is not odd-symmetric, i.e.
+        // f(x) != -f(-x). With bias at zero it must be symmetric; with bias up it must
+        // not be.
+        {
+            auto asymmetry = [] (int mode, float bias)
+            {
+                float worst = 0.0f;
+
+                for (int i = 1; i <= 20; ++i)
+                {
+                    const float x = 0.1f * static_cast<float> (i);
+                    worst = juce::jmax (worst, std::abs (Dist::shape (mode, x, bias)
+                                                           + Dist::shape (mode, -x, bias)));
+                }
+
+                return worst;
+            };
+
+            const float symmetric = asymmetry (Dist::modeTube, 0.0f);
+            const float biased = asymmetry (Dist::modeTube, 0.3f);
+
+            ok = check (symmetric < 1.0e-5f && biased > 0.05f,
+                        "Bias adds even harmonics, and zero Bias does not",
+                        biased - symmetric) && ok;
+        }
+    }
+
+    // --- 36b. Distortion: it is bounded, audible, and does not leak DC ---
+    {
+        using Dist = mixxynth::DistortionFx;
+
+        // Every mode at every oversampling setting.
+        {
+            int bad = 0;
+            float worstPeak = 0.0f;
+
+            for (int mode = 0; mode < Dist::kNumModes; ++mode)
+            {
+                for (int ov = 0; ov < 4; ++ov)
+                {
+                    mixxynth::DistortionFx dist;
+                    dist.prepare (sr, 512, 2);
+
+                    float p[mixxynth::kMaxFxParams] {};
+                    p[Dist::pMode] = static_cast<float> (mode)
+                                       / static_cast<float> (Dist::kNumModes - 1);
+                    p[Dist::pDrive] = 0.45f;
+                    p[Dist::pBias] = 0.4f;
+                    p[Dist::pTone] = 0.5f;
+                    p[Dist::pLowCut] = 0.15f;
+                    p[Dist::pOutput] = 0.5f;
+                    p[Dist::pOversample] = static_cast<float> (ov) / 3.0f;
+                    p[Dist::pMix] = 1.0f;
+
+                    juce::AudioBuffer<float> buf (2, 512);
+                    float peak = 0.0f;
+
+                    for (int b = 0; b < 8; ++b)
+                    {
+                        for (int i = 0; i < 512; ++i)
+                        {
+                            const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                               * 330.0f * static_cast<float> (i)
+                                                               / static_cast<float> (sr));
+                            buf.setSample (0, i, v);
+                            buf.setSample (1, i, v);
+                        }
+
+                        dist.process (buf, p);
+
+                        for (int ch = 0; ch < 2; ++ch)
+                            peak = juce::jmax (peak, buf.getMagnitude (ch, 0, 512));
+                    }
+
+                    if (! std::isfinite (peak) || peak <= 0.01f || peak > 1.5f)
+                        ++bad;
+
+                    worstPeak = juce::jmax (worstPeak, peak);
+                }
+            }
+
+            ok = check (bad == 0, "every distortion mode and oversampling setting is sane",
+                        worstPeak) && ok;
+        }
+
+        // The DC blocker. An asymmetric curve makes DC, and DC downstream is worse than
+        // the distortion it came from.
+        {
+            mixxynth::DistortionFx dist;
+            dist.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Dist::pMode] = 0.0f;
+            p[Dist::pDrive] = 0.8f;
+            p[Dist::pBias] = 1.0f;   // as asymmetric as it gets
+            p[Dist::pTone] = 0.5f;
+            p[Dist::pLowCut] = 0.0f;
+            p[Dist::pOutput] = 0.5f;
+            p[Dist::pOversample] = 2.0f / 3.0f;
+            p[Dist::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+            double sum = 0.0;
+
+            for (int b = 0; b < 24; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * 330.0f * static_cast<float> (i)
+                                                       / static_cast<float> (sr));
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                dist.process (buf, p);
+
+                if (b >= 22)
+                    for (int i = 0; i < 512; ++i)
+                        sum += static_cast<double> (buf.getSample (0, i));
+            }
+
+            const double mean = sum / 1024.0;
+
+            ok = check (std::abs (mean) < 0.01, "an asymmetric curve does not leak DC", mean) && ok;
+        }
+    }
+
+    // --- 37. Ping-pong delay: the cross-feedback actually bounces ---
+    //
+    // The routing is the whole point of the module, so it is measured rather than
+    // assumed. An impulse into the left channel should come back on the LEFT at one
+    // delay time - the first echo is always on the side it went in - and on the RIGHT
+    // at two, then back to the left at three. With the cross at zero nothing should
+    // ever reach the right at all.
+    {
+        using Delay = mixxynth::PingPongDelayFx;
+
+        auto echoEnergy = [&] (float cross, float atSeconds, int channel)
+        {
+            mixxynth::PingPongDelayFx delay;
+            delay.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Delay::pSync] = 0.0f;                 // free time
+            p[Delay::pTimeL] = 0.5f;                // 200 ms
+            p[Delay::pTimeR] = 0.5f;
+            p[Delay::pFeedback] = 0.7f;
+            p[Delay::pPingPong] = cross;
+            p[Delay::pDamping] = 0.0f;
+            p[Delay::pMod] = 0.0f;
+            p[Delay::pDrift] = 0.0f;
+            p[Delay::pWidth] = 0.5f;
+            p[Delay::pMix] = 1.0f;                  // wet only
+
+            juce::AudioBuffer<float> buf (2, 512);
+
+            // An impulse into the left only, then enough blocks to cover three echoes.
+            const int totalBlocks = 60;
+            const int blockOfInterest = static_cast<int> (atSeconds * static_cast<float> (sr)
+                                                           / 512.0f);
+
+            float peak = 0.0f;
+
+            for (int b = 0; b < totalBlocks; ++b)
+            {
+                buf.clear();
+
+                if (b == 0)
+                    buf.setSample (0, 0, 1.0f);
+
+                delay.process (buf, p);
+
+                // One block either side of the expected arrival, so a small time error
+                // does not make the test lie.
+                if (std::abs (b - blockOfInterest) <= 1)
+                    for (int i = 0; i < 512; ++i)
+                        peak = juce::jmax (peak, std::abs (buf.getSample (channel, i)));
+            }
+
+            return peak;
+        };
+
+        constexpr float delaySeconds = 0.2f;
+
+        // First echo: left, where it went in.
+        const float left1 = echoEnergy (1.0f, delaySeconds, 0);
+        const float right1 = echoEnergy (1.0f, delaySeconds, 1);
+
+        // Second echo: the other side.
+        const float left2 = echoEnergy (1.0f, 2.0f * delaySeconds, 0);
+        const float right2 = echoEnergy (1.0f, 2.0f * delaySeconds, 1);
+
+        ok = check (left1 > 0.2f && right1 < 0.02f,
+                    "the first echo comes back on the side it went in", left1) && ok;
+
+        ok = check (right2 > 0.05f && right2 > left2 * 3.0f,
+                    "the second echo has bounced to the other side", right2) && ok;
+
+        // Cross at zero: two independent delays, so the right never hears the left.
+        const float right1None = echoEnergy (0.0f, delaySeconds, 1);
+        const float right2None = echoEnergy (0.0f, 2.0f * delaySeconds, 1);
+
+        ok = check (right1None < 0.02f && right2None < 0.02f,
+                    "with ping-pong at zero the channels stay independent", right2None) && ok;
+    }
+
+    // --- 37b. Ping-pong delay: Drift makes the echoes wander in pitch ---
+    //
+    // The feature the module exists for. Drift moves each channel's delay time slowly
+    // and INDEPENDENTLY, so a repeat comes back very slightly sharp or flat and the two
+    // sides pull apart - tape wow and flutter.
+    //
+    // Two earlier versions of this test tried to measure the pitch directly, as the
+    // variance of the wet signal's zero crossings. Both were abandoned: the movement is
+    // about 10 cents, which on a 1 kHz tone is a quarter of one sample per cycle, and
+    // below the floor of the measurement - so the test was reading its own noise and
+    // reported the same number with drift on and off.
+    //
+    // This measures the independence instead, which has a floor of exactly zero. With
+    // drift off both channels have the same delay and the same input, so they are
+    // bit-identical; with drift on they cannot be.
+    {
+        using Delay = mixxynth::PingPongDelayFx;
+
+        auto channelDivergence = [&] (float drift)
+        {
+            mixxynth::PingPongDelayFx delay;
+            delay.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Delay::pSync] = 0.0f;
+            p[Delay::pTimeL] = 0.55f;
+            p[Delay::pTimeR] = 0.55f;
+            p[Delay::pFeedback] = 0.3f;
+            p[Delay::pPingPong] = 0.0f;   // independent, so any difference is the drift
+            p[Delay::pDamping] = 0.0f;
+            p[Delay::pMod] = 0.0f;        // the LFO must not be the thing that moves it
+            p[Delay::pDrift] = drift;
+            p[Delay::pWidth] = 0.5f;
+            p[Delay::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+            double worst = 0.0;
+
+            double phase = 0.0;
+            const double phaseInc = 300.0 / sr;
+
+            // Long enough for the walk to pick several new targets.
+            for (int b = 0; b < 200; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * static_cast<float> (phase));
+
+                    phase += phaseInc;
+
+                    if (phase >= 1.0)
+                        phase -= 1.0;
+
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                delay.process (buf, p);
+
+                // Past the first echo, so the lines are full.
+                if (b > 60)
+                    for (int i = 0; i < 512; ++i)
+                        worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                               - buf.getSample (1, i)));
+            }
+
+            return worst;
+        };
+
+        const double steady = channelDivergence (0.0f);
+        const double drifting = channelDivergence (1.0f);
+
+        ok = check (steady < 1.0e-6, "with Drift off the two channels stay identical",
+                    steady) && ok;
+
+        ok = check (drifting > 0.01, "Drift makes the echoes wander apart", drifting) && ok;
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

@@ -39,6 +39,8 @@ namespace mixxynth
         fxWeirdVerb,
         fxConvolution,
         fxJunoChorus,
+        fxDistortion,
+        fxPingPongDelay,
         kNumFxTypes
     };
 
@@ -123,5 +125,15 @@ namespace mixxynth
 
         // Audio thread. Must not allocate.
         virtual void process (juce::AudioBuffer<float>& buffer, const float* params) = 0;
+
+        // The host's tempo, so a module with a sync control can follow it. Called once
+        // per block on the audio thread, and it must not allocate either.
+        //
+        // A default no-op rather than pure virtual: most modules have no use for it,
+        // and making every one implement an empty method to say so would be noise.
+        virtual void setTempo (double bpm)
+        {
+            juce::ignoreUnused (bpm);
+        }
     };
 }

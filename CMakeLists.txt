@@ -77,6 +77,10 @@ target_sources(MiXXynth PRIVATE
     Source/Fx/ConvolutionFx.h
     Source/Fx/JunoChorusFx.cpp
     Source/Fx/JunoChorusFx.h
+    Source/Fx/DistortionFx.cpp
+    Source/Fx/DistortionFx.h
+    Source/Fx/PingPongDelayFx.cpp
+    Source/Fx/PingPongDelayFx.h
     Source/Algorithms.h
 )
 
@@ -117,6 +121,8 @@ add_executable(MiXXynthSmoke
     Source/Fx/WeirdVerbFx.cpp
     Source/Fx/ConvolutionFx.cpp
     Source/Fx/JunoChorusFx.cpp
+    Source/Fx/DistortionFx.cpp
+    Source/Fx/PingPongDelayFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -162,6 +168,8 @@ add_executable(MiXXynthEditorAudit
     Source/Fx/WeirdVerbFx.cpp
     Source/Fx/ConvolutionFx.cpp
     Source/Fx/JunoChorusFx.cpp
+    Source/Fx/DistortionFx.cpp
+    Source/Fx/PingPongDelayFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils
