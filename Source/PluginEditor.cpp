@@ -960,29 +960,38 @@ public:
         constexpr int numRows = MiXXFmVoice::numOps + 1;  // header row + one per operator
         constexpr int gap = 3;
 
-        // The two views differ only in their columns, and both are built from squares
-        // of the same size, so switching views never reflows the rows. That is the
-        // point of sharing an axis.
+        // The geometry is computed ONCE, from the wider of the two views, and both are
+        // laid out from that same origin. That is what makes the views align: the
+        // operator column and the first five value columns sit at identical x in both,
+        // so switching views moves nothing. Sizing each view to its own content instead
+        // made them different widths, so centring put their left edges in different
+        // places and the shared operator cells jumped sideways on every switch.
         //
         //   values:  operator, shape, ratio, level, fdbk, envelope (three squares wide)
         //   routing: operator, then one column per target operator
-        const int numCols = routing ? 7 : 6;
-        const int totalSquares = routing ? 7 : 8;   // the envelope counts as three
+        //
+        // The routing view is one square narrower, so it leaves a square of unused
+        // space on the right rather than re-centring.
+        constexpr int valueCols = 6;
+        constexpr int valueSquares = 8;   // the envelope counts as three
+        constexpr int routingCols = 7;
+
+        const int numCols = routing ? routingCols : valueCols;
 
         // Squares are sized by whichever constraint binds first: the room there is, or
-        // the room the squares need. That is what lets the grid scale with the window
-        // without ever distorting, and it is why the minimum window size has to be
-        // large enough for the squares to stay legible.
+        // the room the squares need. The values view is the wider of the two, so it is
+        // always the binding one. This is what lets the grid scale with the window
+        // without ever distorting, and why the minimum window size has to be large
+        // enough for the squares to stay legible.
         const int rowH = (b.getHeight() - gap * (numRows - 1)) / numRows;
 
         const int square = juce::jmax (22, juce::jmin (rowH,
-                                      (b.getWidth() - gap * (numCols - 1)) / totalSquares));
+                                      (b.getWidth() - gap * (valueCols - 1)) / valueSquares));
 
-        // The envelope column is deliberately rectangular: an envelope wants width far
-        // more than height. It is the only column that is not a square.
-        const int tailW = routing ? 0 : square * 3;
+        const int tailW = square * 3;   // the envelope column, values view only
 
-        const int gridW = (routing ? 7 * square : 5 * square + tailW) + gap * (numCols - 1);
+        // The footprint is the values view's, whichever view is showing.
+        const int gridW = 5 * square + tailW + gap * (valueCols - 1);
         const int gridH = numRows * square + (numRows - 1) * gap;
 
         const int originX = b.getX() + juce::jmax (0, (b.getWidth() - gridW) / 2);
@@ -994,48 +1003,46 @@ public:
         // from the grid and pushed the whole thing off centre.
         auto cellAt = [&] (int row, int col)
         {
-            const int w = (tailW > 0 && col == numCols - 1) ? tailW : square;
+            const int w = (! routing && col == valueCols - 1) ? tailW : square;
 
             return juce::Rectangle<int> (originX + col * (square + gap),
                                          originY + row * (square + gap), w, square);
         };
 
-        if (routing)
+        // Both views are laid out every time, not just the visible one. They share the
+        // operator column, and laying both out means their bounds are always valid
+        // whichever view is showing - so a view switch before the first resize cannot
+        // leave one of them unsized, and the audit can check the alignment without
+        // having to drive the switch.
+        //
+        // ---- routing view ----
+        routingFrom.setBounds (cellAt (0, 0));
+
+        for (int c = 0; c < routingHeaders.size(); ++c)
+            routingHeaders[c]->setBounds (cellAt (0, 1 + c));
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
-            // Header row: the row axis name, then one column per target operator.
-            routingFrom.setBounds (cellAt (0, 0));
+            const int row = i + 1;
 
-            for (int c = 0; c < routingHeaders.size(); ++c)
-                routingHeaders[c]->setBounds (cellAt (0, 1 + c));
-
-            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            for (int d = 0; d < MiXXFmVoice::numOps; ++d)
             {
-                const int row = i + 1;
+                const auto cell = cellAt (row, 1 + d);
 
-                if (i < opOnToggles.size())
-                    opOnToggles[i]->setBounds (cellAt (row, 0));
-
-                for (int d = 0; d < MiXXFmVoice::numOps; ++d)
+                if (d == i)
                 {
-                    const auto cell = cellAt (row, 1 + d);
+                    // The diagonal, wherever this row's lands: the carrier switch.
+                    if (i < outCells.size())
+                        outCells[i]->setBounds (cell);
+                }
+                else
+                {
+                    auto* c = routingCell[static_cast<size_t> (i * MiXXFmVoice::numOps + d)];
 
-                    if (d == i)
-                    {
-                        // The diagonal, wherever this row's it lands: the carrier switch.
-                        if (i < outCells.size())
-                            outCells[i]->setBounds (cell);
-                    }
-                    else
-                    {
-                        auto* c = routingCell[static_cast<size_t> (i * MiXXFmVoice::numOps + d)];
-
-                        if (c != nullptr)
-                            c->setBounds (cell);
-                    }
+                    if (c != nullptr)
+                        c->setBounds (cell);
                 }
             }
-
-            return;
         }
 
         // ---- values view ----
@@ -1045,7 +1052,7 @@ public:
         for (int c = 0; c < headerIcons.size(); ++c)
             headerIcons[c]->setBounds (cellAt (0, 1 + c).reduced (square / 5));
 
-        adsrHeader.setBounds (cellAt (0, numCols - 1));
+        adsrHeader.setBounds (cellAt (0, valueCols - 1));
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
@@ -1066,7 +1073,7 @@ public:
 
             // The envelope takes the whole rectangular cell.
             if (i < adsrEditors.size())
-                adsrEditors[i]->setBounds (cellAt (row, numCols - 1).reduced (1));
+                adsrEditors[i]->setBounds (cellAt (row, valueCols - 1).reduced (1));
         }
     }
 
@@ -1090,6 +1097,11 @@ private:
                                 const juce::String& label)
     {
         auto* c = new SquareCell (label, param, dest, true);
+
+        // A routing depth of zero is "no connection here", and a black cell already
+        // says that unambiguously, so the number is dropped at both ends of the range.
+        c->setHideTextAtExtremes (true);
+
         ed.wireModTarget (*c);
         addChildComponent (c);          // the values view is the one that starts visible
         ed.modTargets.push_back (c);

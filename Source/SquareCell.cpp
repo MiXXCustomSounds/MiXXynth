@@ -70,6 +70,17 @@ void SquareCell::setValueTextFunction (std::function<juce::String (float)> f)
 
 juce::String SquareCell::valueTextForTest() const
 {
+    // At the ends of the range the fill says everything the number would, so an
+    // opt-in cell drops the text entirely. Only the routing depths opt in: see the
+    // note on setHideTextAtExtremes for why a level must keep reporting its zero.
+    if (hideAtExtremes)
+    {
+        const float v = value01();
+
+        if (v <= 0.0005f || v >= 0.9995f)
+            return {};
+    }
+
     if (valueTextFunction != nullptr)
         return valueTextFunction (value01());
 

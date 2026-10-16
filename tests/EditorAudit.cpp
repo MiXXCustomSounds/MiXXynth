@@ -1365,6 +1365,7 @@ int main()
     // shape column still says which shape it is at.
     {
         std::vector<SquareCell*> fmCells;
+        std::vector<SquareCell*> allCells;
         int routingCount = 0;
 
         for (auto* k : miXXEditor->modTargets)
@@ -1373,6 +1374,8 @@ int main()
 
             if (c == nullptr)
                 continue;
+
+            allCells.push_back (c);
 
             // The routing view's cells are SquareCells too, so they have to be told
             // apart by their parameter: an mtxxy id is a routing depth, everything else
@@ -1460,20 +1463,75 @@ int main()
             setWave (0.0f);
         }
 
-        // The columns have to be contiguous. The first version of this layout gave the
-        // ADSR column an extra offset on top of the one its position already implied,
-        // so it floated away from the rest of the grid and pushed the whole thing off
-        // centre. "Every cell is square" did not catch that, because every cell still
-        // was; the gap between two columns is the thing that was wrong.
-        auto cellFor = [&fmCells] (const juce::String& id) -> SquareCell*
+        auto cellFor = [&allCells] (const juce::String& id) -> SquareCell*
         {
-            for (auto* c : fmCells)
+            for (auto* c : allCells)
                 if (c->getParamID() == id)
                     return c;
 
             return nullptr;
         };
 
+        // The two views have to share a column grid. Sizing each to its own content
+        // made them different widths, so centring put their left edges in different
+        // places and the shared operator column jumped sideways on every switch. Both
+        // are laid out from one origin now, so corresponding columns share an x.
+        auto* op1RatioCell = cellFor ("op1ratio");
+        auto* route12 = cellFor ("mtx12");   // Op1 -> Op2, and both land in column 2
+
+        if (op1RatioCell != nullptr && route12 != nullptr)
+            check (op1RatioCell->getX() == route12->getX(),
+                   "the value and routing views share a column grid",
+                   juce::String (op1RatioCell->getX()) + " vs " + juce::String (route12->getX()));
+
+        // A routing depth drops its text at both ends of the range, where the fill
+        // already says what the number would: black means no connection, full means
+        // everything. A level must NOT do this - level 0 is silent, and that is the
+        // state the audibility warning exists to explain.
+        auto* route = cellFor ("mtx12");
+        auto* level = cellFor ("op1level");
+
+        if (route != nullptr && level != nullptr)
+        {
+            auto setParam = [&proc] (const juce::String& id, float normalised)
+            {
+                if (auto* p = proc.apvts.getParameter (id))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (normalised);
+                    p->endChangeGesture();
+                }
+            };
+
+            setParam ("mtx12", 0.0f);
+            const bool quietAtZero = route->valueTextForTest().isEmpty();
+
+            setParam ("mtx12", 1.0f);
+            const bool quietAtMax = route->valueTextForTest().isEmpty();
+
+            setParam ("mtx12", 0.5f);
+            const bool speaksInMiddle = route->valueTextForTest().isNotEmpty();
+
+            check (quietAtZero, "a routing cell at zero drops its number");
+            check (quietAtMax, "a routing cell at maximum drops its number too");
+            check (speaksInMiddle, "a routing cell in the middle still shows its value",
+                   route->valueTextForTest());
+
+            setParam ("op1level", 0.0f);
+
+            check (level->valueTextForTest().isNotEmpty(),
+                   "a level at zero still reports it, because silent is a state",
+                   level->valueTextForTest());
+
+            setParam ("mtx12", 0.0f);
+            setParam ("op1level", 0.0f);
+        }
+
+        // The columns also have to be contiguous: an earlier version gave the envelope
+        // column an extra offset on top of the one its position already implied, so it
+        // floated away from the rest of the grid and pushed the whole thing off centre.
+        // "Every cell is square" did not catch that, because every cell still was; the
+        // gap between two columns is the thing that was wrong.
         auto* op1Shape = cellFor ("op1wave");
         auto* op1Ratio = cellFor ("op1ratio");
         auto* op1Fbk   = cellFor ("op1feedback");

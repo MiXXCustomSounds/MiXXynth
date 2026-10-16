@@ -56,6 +56,20 @@ public:
     // a mystery number.
     void setValueTextFunction (std::function<juce::String (float)> f);
 
+    // Suppresses the value text at the ends of the range, where the fill already says
+    // what the number would - black means nothing, full means everything.
+    //
+    // This is deliberately opt-in rather than the default. It is right for a routing
+    // depth, whose zero means "no connection here" and is unambiguously readable as a
+    // black cell. It is wrong for a level or a ratio, whose zero is a state you need to
+    // see: an operator with level 0 is silent, and that is exactly the confusion the
+    // audibility warning exists to explain.
+    void setHideTextAtExtremes (bool shouldHide)
+    {
+        hideAtExtremes = shouldHide;
+        repaint();
+    }
+
     // The text the cell would draw right now. Lets the audit check that a shape
     // cell names its shape rather than showing a bare number.
     juce::String valueTextForTest() const;
@@ -91,6 +105,7 @@ private:
     juce::String text;
     bool showValue = true;
     float liveValue01 = -1.0f;
+    bool hideAtExtremes = false;
     std::function<juce::String (float)> valueTextFunction;
 
     bool draggingValue = false;
