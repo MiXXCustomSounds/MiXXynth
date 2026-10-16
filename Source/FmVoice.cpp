@@ -29,6 +29,10 @@ namespace
     // disappearing past what the ear can follow.
     constexpr float kFilterEnvOctaves = 4.0f;
 
+    // How long the VA layer levels take to reach a new value. A few milliseconds: long enough
+    // that no level can step between blocks, short enough to be inaudible as a slew.
+    constexpr float kVaLevelSlewSeconds = 0.003f;
+
     double centsToRatio (double cents)
     {
         return std::pow (2.0, cents / 1200.0);
@@ -173,6 +177,14 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel, float phaseOffset01)
     vaPhase = startPhase;
     vaSubPhase = startPhase;
 
+    // The layer levels start at silence and slew up to the block's targets. The envelope is
+    // also starting from zero, so this costs nothing audible, and it means a note that begins
+    // with the sub already up does not begin with a step - which is the same click, arriving
+    // at note-on instead of at the knob.
+    vaLevelSm = 0.0f;
+    vaSubLevelSm = 0.0f;
+    vaNoiseLevelSm = 0.0f;
+
     for (auto& op : ops)
     {
         op.phase = startPhase;
@@ -297,6 +309,11 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
                                               * kMaxDriftCents);
     const double vaInc = juce::jlimit (0.0, 0.49, vaFreq / sampleRate);
     const double vaSubInc = juce::jlimit (0.0, 0.49, vaFreq * 0.5 / sampleRate);
+
+    // One-pole coefficient for the VA layer levels, about 3 ms. Short enough that a knob still
+    // feels immediate, long enough that a square's amplitude cannot step between blocks.
+    const float levelSmooth = 1.0f - std::exp (-1.0f / (kVaLevelSlewSeconds
+                                                        * static_cast<float> (sampleRate)));
 
     mixxynth::OpWaveTables::Cursor vaCursor, vaSubCursor;
 
@@ -460,10 +477,18 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         vaEnv = updateEnvelope (vaEnvState, p.vaAttack, p.vaDecay, p.vaSustain, p.vaRelease,
                                 sampleRate);
 
+        // Slew the three layer levels towards this block's targets before anything uses them.
+        // This is the fix for the Sub clicking as it is turned up: the level reaches the mix
+        // one sample at a time instead of in one jump per block, so the square's amplitude is
+        // continuous even though the square itself is not.
+        vaLevelSm      += (p.vaLevel - vaLevelSm) * levelSmooth;
+        vaSubLevelSm   += (p.vaSubLevel - vaSubLevelSm) * levelSmooth;
+        vaNoiseLevelSm += (p.vaNoiseLevel - vaNoiseLevelSm) * levelSmooth;
+
         float va = 0.0f;        // the morphed oscillator, scaled by the FM/VA blend
         float vaExtras = 0.0f;  // sub and noise, which carry their own levels
 
-        if (p.vaLevel > 0.0f || p.vaSubLevel > 0.0f || p.vaNoiseLevel > 0.0f)
+        if (vaLevelSm > 0.0f || vaSubLevelSm > 0.0f || vaNoiseLevelSm > 0.0f)
         {
             vaPhase += vaInc;
 
@@ -476,7 +501,7 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             // high pitch rather than only mostly clean.
             va = mixxynth::OpWaveTables::read (vaCursor, static_cast<float> (vaPhase));
 
-            if (p.vaSubLevel > 0.0f)
+            if (vaSubLevelSm > 0.0f)
             {
                 vaSubPhase += vaSubInc;
 
@@ -485,15 +510,15 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 
                 vaExtras += mixxynth::OpWaveTables::read (vaSubCursor,
                                                           static_cast<float> (vaSubPhase))
-                              * p.vaSubLevel;
+                              * vaSubLevelSm;
             }
 
             // Noise, from the same LCG the old Noise entry used.
-            if (p.vaNoiseLevel > 0.0f)
+            if (vaNoiseLevelSm > 0.0f)
             {
                 noiseState = noiseState * 1664525u + 1013904223u;
                 vaExtras += (static_cast<float> ((noiseState >> 8) & 0xffffu) / 32768.0f - 1.0f)
-                              * p.vaNoiseLevel;
+                              * vaNoiseLevelSm;
             }
         }
 
@@ -503,7 +528,7 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         // Sub and noise deliberately bypass the blend. They are their own levels, so a
         // patch with the FM stack in charge can still add a sub, which is the whole point
         // of taking them out of the shape list.
-        const float mixed = sum + (va * p.vaLevel + vaExtras) * vaEnv;
+        const float mixed = sum + (va * vaLevelSm + vaExtras) * vaEnv;
 
         // --- M3b: per-voice TPT state-variable filter ---
         float filtered = mixed;

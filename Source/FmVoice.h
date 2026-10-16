@@ -214,6 +214,15 @@ private:
     EnvState vaEnvState;
     bool vaGateLast = false;
     float vaEnv = 0.0f;
+
+    // The three VA layer levels arrive once per block, straight from the parameters, so a knob
+    // move or a modulation step lands as a jump. On the morph oscillator a jump reads as a
+    // level change; on the sub, which is a square, it reads as a CLICK, because a square whose
+    // amplitude steps is a discontinuity and the square has no ramp to hide it in. These are
+    // the per-sample values the mix actually uses, slewed towards the block's targets.
+    float vaLevelSm = 0.0f;
+    float vaSubLevelSm = 0.0f;
+    float vaNoiseLevelSm = 0.0f;
     juce::uint32 noiseState = 0x2545f491u;
 
     // Drift state for the VA, kept separate from the operators so the VA wanders on
