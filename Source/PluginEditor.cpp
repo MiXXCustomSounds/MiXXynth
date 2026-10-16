@@ -503,6 +503,74 @@ namespace
             g.drawFittedText (getButtonText(), getLocalBounds(), juce::Justification::centred, 1);
         }
     };
+
+    // A two-segment switch for choosing which reading of the grid you are looking
+    // at. Drawn rather than built from TextButtons, so it sits in the same visual
+    // language as the cells it switches between.
+    class ViewSwitch : public juce::Component
+    {
+    public:
+        ViewSwitch (const juce::String& first, const juce::String& second)
+        {
+            names[0] = first;
+            names[1] = second;
+        }
+
+        void setSelected (int index, juce::NotificationType n = juce::sendNotificationSync)
+        {
+            index = juce::jlimit (0, 1, index);
+
+            if (selected == index)
+                return;
+
+            selected = index;
+            repaint();
+
+            if (n != juce::dontSendNotification && onChange != nullptr)
+                onChange (selected);
+        }
+
+        int getSelected() const noexcept { return selected; }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            setSelected (e.getPosition().x < getWidth() / 2 ? 0 : 1);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto b = getLocalBounds().toFloat();
+
+            g.setColour (juce::Colour (0xff161c22));
+            g.fillRoundedRectangle (b, 4.0f);
+
+            for (int i = 0; i < 2; ++i)
+            {
+                const auto seg = getLocalBounds().withWidth (getWidth() / 2)
+                                                  .withX (i * (getWidth() / 2));
+
+                if (i == selected)
+                {
+                    g.setColour (juce::Colour (0xffffa53d));
+                    g.fillRoundedRectangle (seg.toFloat().reduced (1.5f), 3.0f);
+                }
+
+                g.setColour (i == selected ? juce::Colour (0xff101418)
+                                           : juce::Colour (0xff8b98a5));
+                g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+                g.drawFittedText (names[i], seg, juce::Justification::centred, 1);
+            }
+
+            g.setColour (juce::Colour (0xff39434f));
+            g.drawRoundedRectangle (b.reduced (0.5f), 4.0f, 1.0f);
+        }
+
+        std::function<void (int)> onChange;
+
+    private:
+        juce::String names[2];
+        int selected = 0;
+    };
 }
 
 // FM page: algorithm + FM index + per-op ratio/level/feedback/ADSR
@@ -615,6 +683,70 @@ public:
             adsrEditors.add (env);
             addAndMakeVisible (env);
         }
+
+        // ---- the routing view ----
+        // The header row's first cell names the row axis, because this grid reads as
+        // "row sends into column" and that is not obvious from the cells themselves.
+        routingFrom.setText ("FROM", juce::dontSendNotification);
+        routingFrom.setJustificationType (juce::Justification::centred);
+        routingFrom.setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
+        routingFrom.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        addChildComponent (routingFrom);
+
+        for (int d = 0; d < MiXXFmVoice::numOps; ++d)
+        {
+            auto* h = new juce::Label();
+            h->setText ("OP" + juce::String (d + 1), juce::dontSendNotification);
+            h->setJustificationType (juce::Justification::centred);
+            h->setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
+            h->setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            routingHeaders.add (h);
+            addChildComponent (h);
+        }
+
+        for (int s = 0; s < MiXXFmVoice::numOps; ++s)
+        {
+            const juce::String sn = juce::String (s + 1);
+
+            for (int d = 0; d < MiXXFmVoice::numOps; ++d)
+            {
+                const juce::String dn = juce::String (d + 1);
+
+                if (s == d)
+                {
+                    // The diagonal is this operator's own output, not a self-send. A
+                    // self-send would be feedback, and feedback already has a column
+                    // in the values view - which is exactly why this cell is free.
+                    auto* t = new OperatorCell ("OUT");
+                    t->setTooltip ("Whether Op" + sn + " reaches the output on its own");
+                    outCells.add (t);
+                    addChildComponent (t);
+
+                    if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, "carrier" + sn)))
+                    {
+                        t->setToggleState (param->get(), juce::dontSendNotification);
+                        t->onClick = [t, param]
+                        {
+                            param->beginChangeGesture();
+                            param->setValueNotifyingHost (t->getToggleState() ? 1.0f : 0.0f);
+                            param->endChangeGesture();
+                        };
+                    }
+
+                    continue;
+                }
+
+                routingCell[static_cast<size_t> (s * MiXXFmVoice::numOps + d)]
+                    = addRoutingCell (ranged (p, "mtx" + sn + dn), matrixDestFor (s, d),
+                                      "Op" + sn + " to Op" + dn);
+            }
+        }
+
+        viewSwitch.onChange = [this] (int v) { applyView (v); };
+        addAndMakeVisible (viewSwitch);
+
+        // Both views are built up front; only one is shown at a time.
+        applyView (viewSwitch.getSelected());
 
         refreshAudibility();
     }
@@ -792,13 +924,19 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        // The operator cells carry their own labels now and the column headers are
-        // glyphs, so the hint only has to explain the gestures, which are the one
-        // thing a grid cannot show you.
+        // The hint swaps with the view, and that matters for one specific reason: the
+        // values view's Fb column and the routing view's diagonal both sit in the "self"
+        // position and they do NOT mean the same thing. Rather than hoping nobody
+        // conflates them, the text says which is which.
+        const bool routing = viewSwitch.getSelected() == 1;
+
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("Drag a cell up or down to set its value. Drop a modulation source onto one to modulate it, "
-                          "then drag the white line to set how far the modulation reaches.",
+        g.drawFittedText (routing
+                            ? "Each cell sends its row's operator into its column's operator. The diagonal is that "
+                              "operator's own output, not feedback - feedback is the Fb column back in Values."
+                            : "Drag a cell up or down to set its value. Drop a modulation source onto one to modulate it, "
+                              "then drag the white line to set how far the modulation reaches.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
@@ -807,57 +945,107 @@ public:
         auto b = getLocalBounds().reduced (8);
         b.removeFromTop (18);   // the hint line, drawn in paint()
 
-        // Toolbar: the die, then the audibility warning beside it.
+        // Toolbar: the die, the view switch, then the audibility warning.
         auto toolbar = b.removeFromTop (30);
         diceButton.setBounds (toolbar.removeFromLeft (30).reduced (2));
+        toolbar.removeFromLeft (8);
+        viewSwitch.setBounds (toolbar.removeFromLeft (150).reduced (0, 2));
         toolbar.removeFromLeft (8);
         audibility.setBounds (toolbar);
 
         b.removeFromTop (6);
 
+        const bool routing = viewSwitch.getSelected() == 1;
+
         constexpr int numRows = MiXXFmVoice::numOps + 1;  // header row + one per operator
-        constexpr int numSquareCols = 5;                  // operator, shape, ratio, level, fdbk
         constexpr int gap = 3;
 
-        // Every cell is square, so the geometry is whichever constraint binds first:
-        // the room there is, or the room the squares need. That is what lets the grid
-        // scale with the window without ever distorting, and it is also why the
-        // minimum window size has to be big enough for the squares to stay legible.
+        // The two views differ only in their columns, and both are built from squares
+        // of the same size, so switching views never reflows the rows. That is the
+        // point of sharing an axis.
+        //
+        //   values:  operator, shape, ratio, level, fdbk, envelope (three squares wide)
+        //   routing: operator, then one column per target operator
+        const int numCols = routing ? 7 : 6;
+        const int totalSquares = routing ? 7 : 8;   // the envelope counts as three
+
+        // Squares are sized by whichever constraint binds first: the room there is, or
+        // the room the squares need. That is what lets the grid scale with the window
+        // without ever distorting, and it is why the minimum window size has to be
+        // large enough for the squares to stay legible.
         const int rowH = (b.getHeight() - gap * (numRows - 1)) / numRows;
 
-        // The ADSR column is deliberately rectangular - an envelope wants width more
-        // than height - so it counts as three squares when working out whether the
-        // grid fits across.
         const int square = juce::jmax (22, juce::jmin (rowH,
-                                      (b.getWidth() - gap * (numSquareCols + 2))
-                                        / (numSquareCols + 3)));
-        const int adsrW = square * 3;
+                                      (b.getWidth() - gap * (numCols - 1)) / totalSquares));
 
-        const int gridW = numSquareCols * square + (numSquareCols + 1) * gap + adsrW;
+        // The envelope column is deliberately rectangular: an envelope wants width far
+        // more than height. It is the only column that is not a square.
+        const int tailW = routing ? 0 : square * 3;
+
+        const int gridW = (routing ? 7 * square : 5 * square + tailW) + gap * (numCols - 1);
         const int gridH = numRows * square + (numRows - 1) * gap;
 
         const int originX = b.getX() + juce::jmax (0, (b.getWidth() - gridW) / 2);
         const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
 
-        // Columns are contiguous: each one starts a gap after the previous one ends.
-        // The ADSR column is simply wider, which is already accounted for by its
-        // position, so it must NOT be given an extra offset as well.
+        // Columns are contiguous: each starts one gap after the previous one ends. The
+        // wider last column's position already accounts for its width, so it must NOT
+        // be given an extra offset as well - that bug floated the envelope column away
+        // from the grid and pushed the whole thing off centre.
         auto cellAt = [&] (int row, int col)
         {
-            const int w = (col == numSquareCols) ? adsrW : square;
+            const int w = (tailW > 0 && col == numCols - 1) ? tailW : square;
 
             return juce::Rectangle<int> (originX + col * (square + gap),
                                          originY + row * (square + gap), w, square);
         };
 
-        // Header row: FM Index in the first cell, then one glyph per value column.
+        if (routing)
+        {
+            // Header row: the row axis name, then one column per target operator.
+            routingFrom.setBounds (cellAt (0, 0));
+
+            for (int c = 0; c < routingHeaders.size(); ++c)
+                routingHeaders[c]->setBounds (cellAt (0, 1 + c));
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                const int row = i + 1;
+
+                if (i < opOnToggles.size())
+                    opOnToggles[i]->setBounds (cellAt (row, 0));
+
+                for (int d = 0; d < MiXXFmVoice::numOps; ++d)
+                {
+                    const auto cell = cellAt (row, 1 + d);
+
+                    if (d == i)
+                    {
+                        // The diagonal, wherever this row's it lands: the carrier switch.
+                        if (i < outCells.size())
+                            outCells[i]->setBounds (cell);
+                    }
+                    else
+                    {
+                        auto* c = routingCell[static_cast<size_t> (i * MiXXFmVoice::numOps + d)];
+
+                        if (c != nullptr)
+                            c->setBounds (cell);
+                    }
+                }
+            }
+
+            return;
+        }
+
+        // ---- values view ----
         if (indexCell != nullptr)
             indexCell->setBounds (cellAt (0, 0));
 
         for (int c = 0; c < headerIcons.size(); ++c)
             headerIcons[c]->setBounds (cellAt (0, 1 + c).reduced (square / 5));
 
-        adsrHeader.setBounds (cellAt (0, numSquareCols));
+        adsrHeader.setBounds (cellAt (0, numCols - 1));
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
@@ -876,10 +1064,9 @@ public:
                     cells[idx]->setBounds (cellAt (row, 1 + c));
             }
 
-            // The envelope takes the whole rectangular cell. It wants width far more
-            // than height, which is the reason this column is three squares wide.
+            // The envelope takes the whole rectangular cell.
             if (i < adsrEditors.size())
-                adsrEditors[i]->setBounds (cellAt (row, numSquareCols).reduced (1));
+                adsrEditors[i]->setBounds (cellAt (row, numCols - 1).reduced (1));
         }
     }
 
@@ -897,8 +1084,57 @@ private:
         return c;
     }
 
+    // A routing depth cell. Registered for modulation exactly like a value cell is,
+    // but kept in its own list so the values layout never sees it.
+    SquareCell* addRoutingCell (juce::RangedAudioParameter* param, int dest,
+                                const juce::String& label)
+    {
+        auto* c = new SquareCell (label, param, dest, true);
+        ed.wireModTarget (*c);
+        addChildComponent (c);          // the values view is the one that starts visible
+        ed.modTargets.push_back (c);
+        routingOwned.add (c);
+        return c;
+    }
+
+    // Shows one view's contents and hides the other's. The operator cells and the
+    // toolbar are shared, because both views have the same six rows: row 3 is Op3
+    // whether you are reading values or routing, and that shared axis is the whole
+    // reason the two grids belong in one place.
+    void applyView (int v)
+    {
+        const bool routing = (v == 1);
+
+        for (auto* t : outCells)
+            t->setVisible (routing);
+
+        for (auto* c : routingOwned)
+            c->setVisible (routing);
+
+        for (auto* h : routingHeaders)
+            h->setVisible (routing);
+
+        routingFrom.setVisible (routing);
+
+        // indexCell is cells[0], so this covers it.
+        for (auto* c : cells)
+            c->setVisible (! routing);
+
+        for (auto* icon : headerIcons)
+            icon->setVisible (! routing);
+
+        adsrHeader.setVisible (! routing);
+
+        for (auto* e : adsrEditors)
+            e->setVisible (! routing);
+
+        resized();
+        repaint();
+    }
+
     MiXXynthEditor& ed;
     DiceButton diceButton;
+    ViewSwitch viewSwitch { "Values", "Routing" };
     juce::Label audibility;
     juce::Label adsrHeader;
     juce::OwnedArray<GridIcon> headerIcons;
@@ -909,312 +1145,26 @@ private:
     // One envelope per operator, in operator order.
     juce::OwnedArray<AdsrEditor> adsrEditors;
 
+    // ---- the routing view -------------------------------------------------
+    // One cell per ordered operator pair, so the grid is 6x6 with no holes: the 30
+    // off-diagonal cells are routing depths and the 6 diagonal cells are the carrier
+    // switches. Self-modulation is the per-operator feedback parameter rather than
+    // mtxNN, which is exactly why the diagonal is free to mean something else.
+    //
+    // The diagonal cells are switches, not depth sliders, so they cannot be mistaken
+    // for the 30 cells around them even before their label is read.
+    juce::Label routingFrom;
+    juce::OwnedArray<juce::Label> routingHeaders;
+    juce::OwnedArray<OperatorCell> outCells;
+    juce::OwnedArray<SquareCell> routingOwned;
+    std::array<SquareCell*, MiXXFmVoice::numOps * MiXXFmVoice::numOps> routingCell {};
+
     juce::Random rng;
     juce::OwnedArray<SquareCell> ownedCells;
     juce::Array<SquareCell*> cells;
     juce::OwnedArray<OperatorCell> opOnToggles;
 };
 
-// ---------------------------------------------------------------------------
-// Matrix page: the 30 off-diagonal routing depths + 6 carrier switches
-// ---------------------------------------------------------------------------
-class MiXXynthEditor::MatrixPage : public juce::Component
-{
-public:
-    explicit MatrixPage (MiXXynthEditor& e) : ed (e)
-    {
-        auto& p = e.processor();
-
-        for (int s = 0; s < MiXXFmVoice::numOps; ++s)
-        {
-            for (int d = 0; d < MiXXFmVoice::numOps; ++d)
-            {
-                if (s == d)
-                    continue;
-
-                const juce::String label = "Op" + juce::String (s + 1) + " > " + juce::String (d + 1);
-                const juce::String id = "mtx" + juce::String (s + 1) + juce::String (d + 1);
-
-                auto* k = new ModKnob (label, ranged (p, id), matrixDestFor (s, d), true);
-                ed.wireModTarget (*k);
-                addAndMakeVisible (k);
-                ed.modTargets.push_back (k);
-                owned.add (k);
-                knobs.add (k);
-                mtxIds.add (id);
-            }
-        }
-
-        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-        {
-            const juce::String n = juce::String (i + 1);
-            carrierIds.add ("carrier" + n);
-
-            auto* t = new juce::ToggleButton ("Op" + n + " carrier");
-            carrierToggles.add (t);
-            addAndMakeVisible (t);
-
-            if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, "carrier" + n)))
-            {
-                t->setToggleState (param->get(), juce::dontSendNotification);
-                t->onClick = [t, param]
-                {
-                    param->beginChangeGesture();
-                    param->setValueNotifyingHost (t->getToggleState() ? 1.0f : 0.0f);
-                    param->endChangeGesture();
-                };
-            }
-        }
-
-        copyButton.setButtonText ("Copy algorithm to matrix");
-        copyButton.onClick = [this]
-        {
-            copyAlgorithmToMatrix (algorithmIndex());
-            setAlgorithmFree();
-            refreshSnapshots();
-            refreshMode();
-            ed.setModStatus ("Algorithm copied into the matrix; routing is now Free");
-        };
-        addAndMakeVisible (copyButton);
-
-        freeButton.setButtonText ("Free mode");
-        freeButton.onClick = [this] { setAlgorithmFree(); refreshMode(); };
-        addAndMakeVisible (freeButton);
-
-        modeLabel.setJustificationType (juce::Justification::centredLeft);
-        modeLabel.setFont (juce::FontOptions (11.5f));
-        addAndMakeVisible (modeLabel);
-
-        refreshSnapshots();
-        refreshMode();
-    }
-
-    // Driven from the editor's timer. The routing knobs used to be dead whenever
-    // an algorithm preset was selected, because the processor overwrites the
-    // matrix from the algorithm table. Now editing a routing knob (or a carrier
-    // switch) while an algorithm is in charge seeds the matrix from that
-    // algorithm, re-applies the edit on top, and switches to Free mode.
-    void poll()
-    {
-        const int algo = algorithmIndex();
-
-        // A preset or project load replaces every parameter at once. Resync the
-        // snapshots instead of reading that as a routing edit and switching the
-        // patch into Free mode behind the user's back.
-        if (ed.processor().getStateLoadCount() != lastStateLoad)
-        {
-            lastStateLoad = ed.processor().getStateLoadCount();
-            refreshSnapshots();
-            refreshMode();
-            return;
-        }
-
-        if (algo != lastAlgo)
-        {
-            // Leaving an algorithm for Free mode would otherwise drop to silence,
-            // so seed the matrix from the algorithm we are leaving.
-            if (algo >= mixxynth::kNumAlgorithms && lastAlgo < mixxynth::kNumAlgorithms
-                  && matrixIsSilent())
-                copyAlgorithmToMatrix (lastAlgo);
-
-            lastAlgo = algo;
-            refreshSnapshots();
-            refreshMode();
-            return;
-        }
-
-        if (algo >= mixxynth::kNumAlgorithms)
-            return; // already Free: edits are live, nothing to migrate
-
-        int changedMtx = -1;
-        float changedMtxValue = 0.0f;
-        int changedCarrier = -1;
-        bool changedCarrierValue = false;
-
-        for (int i = 0; i < mtxIds.size(); ++i)
-        {
-            const float v = readParam (mtxIds[i]);
-
-            if (! juce::approximatelyEqual (v, lastMtx[static_cast<size_t> (i)]))
-            {
-                changedMtx = i;
-                changedMtxValue = v;
-            }
-        }
-
-        for (int i = 0; i < carrierIds.size(); ++i)
-        {
-            const float v = readParam (carrierIds[i]);
-
-            if (! juce::approximatelyEqual (v, lastCarrier[static_cast<size_t> (i)]))
-            {
-                changedCarrier = i;
-                changedCarrierValue = v > 0.5f;
-            }
-        }
-
-        if (changedMtx < 0 && changedCarrier < 0)
-            return;
-
-        copyAlgorithmToMatrix (algo);
-        setAlgorithmFree();
-
-        // Re-apply the edit that triggered the switch, on top of the copy.
-        if (changedMtx >= 0)
-            writeParam (mtxIds[changedMtx], changedMtxValue);
-
-        if (changedCarrier >= 0)
-            writeParam (carrierIds[changedCarrier], changedCarrierValue ? 1.0f : 0.0f);
-
-        refreshSnapshots();
-        refreshMode();
-
-        ed.setModStatus ("Routing edit switched the algorithm to Free mode");
-    }
-
-    void resized() override
-    {
-        auto b = getLocalBounds().reduced (8);
-
-        auto banner = b.removeFromTop (26);
-        copyButton.setBounds (banner.removeFromRight (176).reduced (2, 0));
-        freeButton.setBounds (banner.removeFromRight (86).reduced (2, 0));
-        modeLabel.setBounds (banner.reduced (2, 0));
-
-        b.removeFromTop (4);
-
-        auto carriers = b.removeFromBottom (26);
-
-        for (auto* t : carrierToggles)
-            t->setBounds (carriers.removeFromLeft (juce::jmax (70, carriers.getWidth() / 6)).reduced (2));
-
-        const int colW = juce::jmax (60, b.getWidth() / MiXXFmVoice::numOps);
-        const int rowH = juce::jmax (50, b.getHeight() / MiXXFmVoice::numOps);
-
-        int k = 0;
-
-        for (int s = 0; s < MiXXFmVoice::numOps; ++s)
-        {
-            for (int d = 0; d < MiXXFmVoice::numOps; ++d)
-            {
-                if (s == d)
-                    continue;
-
-                if (k < knobs.size())
-                    knobs[k]->setBounds (juce::Rectangle<int> (b.getX() + d * colW, b.getY() + s * rowH,
-                                                               colW, rowH).reduced (3));
-
-                ++k;
-            }
-        }
-    }
-
-private:
-    static constexpr int numMtx = MiXXFmVoice::numOps * (MiXXFmVoice::numOps - 1);
-
-    int algorithmIndex()
-    {
-        if (auto* a = choice (ed.processor(), "algorithm"))
-            return a->getIndex();
-
-        return 0;
-    }
-
-    float readParam (const juce::String& id)
-    {
-        if (auto* p = ranged (ed.processor(), id))
-            return p->convertFrom0to1 (p->getValue());
-
-        return 0.0f;
-    }
-
-    void writeParam (const juce::String& id, float realValue)
-    {
-        if (auto* p = ranged (ed.processor(), id))
-        {
-            p->beginChangeGesture();
-            p->setValueNotifyingHost (p->convertTo0to1 (realValue));
-            p->endChangeGesture();
-        }
-    }
-
-    void setAlgorithmFree()
-    {
-        if (auto* a = choice (ed.processor(), "algorithm"))
-        {
-            a->beginChangeGesture();
-            a->setValueNotifyingHost (a->convertTo0to1 (static_cast<float> (mixxynth::kNumAlgorithms)));
-            a->endChangeGesture();
-        }
-    }
-
-    void copyAlgorithmToMatrix (int algoIndex)
-    {
-        if (algoIndex < 0 || algoIndex >= mixxynth::kNumAlgorithms)
-            return;
-
-        const auto& algo = mixxynth::algorithmTable()[static_cast<size_t> (algoIndex)];
-
-        for (int s = 0; s < MiXXFmVoice::numOps; ++s)
-            for (int d = 0; d < MiXXFmVoice::numOps; ++d)
-                if (s != d)
-                    writeParam ("mtx" + juce::String (s + 1) + juce::String (d + 1),
-                                algo.mod[static_cast<size_t> (s)][static_cast<size_t> (d)]);
-
-        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-            writeParam ("carrier" + juce::String (i + 1),
-                        algo.carrier[static_cast<size_t> (i)] ? 1.0f : 0.0f);
-    }
-
-    bool matrixIsSilent()
-    {
-        for (const auto& id : mtxIds)
-            if (readParam (id) > 0.0001f)
-                return false;
-
-        return true;
-    }
-
-    void refreshSnapshots()
-    {
-        for (int i = 0; i < mtxIds.size(); ++i)
-            lastMtx[static_cast<size_t> (i)] = readParam (mtxIds[i]);
-
-        for (int i = 0; i < carrierIds.size(); ++i)
-            lastCarrier[static_cast<size_t> (i)] = readParam (carrierIds[i]);
-
-        lastAlgo = algorithmIndex();
-    }
-
-    void refreshMode()
-    {
-        const int algo = algorithmIndex();
-        const bool free = algo >= mixxynth::kNumAlgorithms;
-
-        modeLabel.setText (free
-                             ? "Free (matrix) routing: these depths and switches define the patch."
-                             : "Algorithm " + juce::String (algo + 1)
-                                 + " defines the routing. Move a knob or switch to copy it here and go Free.",
-                           juce::dontSendNotification);
-
-        modeLabel.setColour (juce::Label::textColourId,
-                             free ? juce::Colour (0xff4ade80) : juce::Colour (0xffffa63d));
-
-        copyButton.setEnabled (! free);
-    }
-
-    MiXXynthEditor& ed;
-    juce::OwnedArray<ModKnob> owned;
-    juce::Array<ModKnob*> knobs;
-    juce::OwnedArray<juce::ToggleButton> carrierToggles;
-    juce::StringArray mtxIds, carrierIds;
-    juce::Label modeLabel;
-    juce::TextButton copyButton, freeButton;
-    std::array<float, numMtx> lastMtx {};
-    std::array<float, MiXXFmVoice::numOps> lastCarrier {};
-    int lastAlgo = 0;
-    int lastStateLoad = 0;
-};
 // ---------------------------------------------------------------------------
 // One modulation slot: source, destination, bipolar depth, clear
 // ---------------------------------------------------------------------------
@@ -2447,8 +2397,9 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     pitchWheel->onValueChanged = [this] (float v) { proc.setPitchBendFromUI (v); };
     modWheel->onValueChanged = [this] (float v) { proc.setModWheelFromUI (v); };
 
+    // The FM routing matrix is a second view of the FM grid now rather than a tab of
+    // its own, so the FM page is the only thing that has to be built for it.
     fmPage = std::make_unique<FmPage> (*this);
-    matrixPage = std::make_unique<MatrixPage> (*this);
     modPage = std::make_unique<ModPage> (*this);
     vaPage = std::make_unique<VaPage> (*this);
     voicePage = std::make_unique<VoicePage> (*this);
@@ -2456,7 +2407,6 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
 
     tabs.setOutline (0);
     tabs.addTab ("FM", juce::Colour (0xff14181d), fmPage.get(), false);
-    tabs.addTab ("Matrix", juce::Colour (0xff14181d), matrixPage.get(), false);
     tabs.addTab ("VA/Filt", juce::Colour (0xff14181d), vaPage.get(), false);
     tabs.addTab ("Voice", juce::Colour (0xff14181d), voicePage.get(), false);
     tabs.addTab ("Mod", juce::Colour (0xff14181d), modPage.get(), false);
@@ -2755,11 +2705,7 @@ juce::String MiXXynthEditor::modDebug (int slot) const
 
 void MiXXynthEditor::runTabPolls()
 {
-    // The matrix page watches for routing edits that need to switch the patch
-    // into Free mode, and the VA page keeps its state readout current.
-    if (matrixPage != nullptr)
-        matrixPage->poll();
-
+    // The VA page keeps its state readout current.
     if (vaPage != nullptr)
         vaPage->refreshHint();
 

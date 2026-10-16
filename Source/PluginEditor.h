@@ -147,7 +147,6 @@ private:
     class SourceChip;
     class ShapeStrip;
     class FmPage;
-    class MatrixPage;
     class ModPage;
     class VaPage;
     class VoicePage;
@@ -176,7 +175,6 @@ private:
     std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
     std::unique_ptr<mixxynth::ui::WheelComponent> pitchWheel, modWheel;
     std::unique_ptr<FmPage> fmPage;
-    std::unique_ptr<MatrixPage> matrixPage;
     std::unique_ptr<ModPage> modPage;
     std::unique_ptr<VaPage> vaPage;
     std::unique_ptr<VoicePage> voicePage;

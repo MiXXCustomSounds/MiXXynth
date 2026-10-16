@@ -497,105 +497,13 @@ int main()
                "VA Pulse Width is a modulation destination", nameAt (mixxynth::dstVaPulseWidth));
     }
 
-    // ---- 8. Matrix page: routing edits must actually take effect ----
-    // The routing knobs used to be inert whenever an algorithm preset was in
-    // charge, because the processor overwrites the matrix from the algorithm
-    // table. Editing one now seeds the matrix and switches to Free mode.
-    {
-        auto* algoParam = dynamic_cast<juce::AudioParameterChoice*> (
-            proc.apvts.getParameter ("algorithm"));
-
-        auto setChoice = [] (juce::AudioParameterChoice* p, int index)
-        {
-            if (p != nullptr)
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost (p->convertTo0to1 (static_cast<float> (index)));
-                p->endChangeGesture();
-            }
-        };
-
-        auto readReal = [&proc] (const juce::String& id)
-        {
-            if (auto* r = proc.apvts.getRawParameterValue (id))
-                return r->load();
-
-            return 0.0f;
-        };
-
-        // Start on DX7 algorithm 1 with an empty matrix.
-        setChoice (algoParam, 0);
-
-        for (int s = 1; s <= 6; ++s)
-        {
-            for (int d = 1; d <= 6; ++d)
-            {
-                if (s == d)
-                    continue;
-
-                if (auto* mtx = dynamic_cast<juce::AudioParameterFloat*> (
-                        proc.apvts.getParameter ("mtx" + juce::String (s) + juce::String (d))))
-                {
-                    mtx->beginChangeGesture();
-                    mtx->setValueNotifyingHost (0.0f);
-                    mtx->endChangeGesture();
-                }
-            }
-        }
-
-        // Let the page settle its snapshot before the edit we want it to notice.
-        miXXEditor->runTabPolls();
-        miXXEditor->runTabPolls();
-
-        {
-            auto* mtx = dynamic_cast<juce::AudioParameterFloat*> (
-                proc.apvts.getParameter ("mtx12"));
-
-            if (mtx != nullptr)
-            {
-                mtx->beginChangeGesture();
-                mtx->setValueNotifyingHost (mtx->convertTo0to1 (0.5f));
-                mtx->endChangeGesture();
-            }
-        }
-
-        miXXEditor->runTabPolls();
-
-        check (algoParam != nullptr && algoParam->getIndex() == mixxynth::kNumAlgorithms,
-               "routing edit switches the algorithm to Free mode",
-               juce::String (algoParam != nullptr ? algoParam->getIndex() : -1));
-        check (std::abs (readReal ("mtx12") - 0.5f) < 0.001f,
-               "the edit that triggered the switch survives", juce::String (readReal ("mtx12")));
-
-        // Algorithm 1 routes Op2 into Op1, so the matrix must have been seeded.
-        check (readReal ("mtx21") > 0.5f, "the algorithm was copied into the matrix",
-               juce::String (readReal ("mtx21")));
-
-        // A state load must not be mistaken for a routing edit. Without the
-        // state-load guard this switched the patch to Free mode behind the
-        // user's back every time a preset was loaded.
-        setChoice (algoParam, 0);
-        miXXEditor->runTabPolls();
-        miXXEditor->runTabPolls();
-
-        juce::MemoryBlock saved;
-        proc.getStateInformation (saved);
-
-        if (auto* mtx = dynamic_cast<juce::AudioParameterFloat*> (
-                proc.apvts.getParameter ("mtx34")))
-        {
-            mtx->beginChangeGesture();
-            mtx->setValueNotifyingHost (0.9f);
-            mtx->endChangeGesture();
-        }
-
-        proc.setStateInformation (saved.getData(), static_cast<int> (saved.getSize()));
-        miXXEditor->runTabPolls();
-
-        check (algoParam != nullptr && algoParam->getIndex() < mixxynth::kNumAlgorithms,
-               "loading a state does not force Free mode",
-               juce::String (algoParam != nullptr ? algoParam->getIndex() : -1));
-    }
+    // ---- 8. (removed) FM routing edits and the algorithm ----------------
+    // This section tested MatrixPage::poll(), which watched for a routing edit while a
+    // DX7 algorithm was in charge and switched the patch to Free mode. The routing
+    // matrix is a view of the FM grid now, and the algorithm parameter is pinned to
+    // Free as the page builds, so there is no algorithm to be in charge and the
+    // behaviour cannot occur. The routing depths themselves are still covered: every
+    // mtx parameter has a control and a destination, which sections 2 and 3 check.
 
     // ---- 9. FM init patch is all zero, and the dice always produces sound ----
     {
@@ -900,8 +808,9 @@ int main()
     std::printf ("     visible child components=%d\n", visited);
     std::printf ("     %s\n", miXXEditor->perfBarDebug().toRawUTF8());
 
-    // Every tab must exist and be populated.
-    check (miXXEditor->getNumTabs() == 6, "six tabs", juce::String (miXXEditor->getNumTabs()));
+    // Every tab must exist and be populated. Five, not six: the routing matrix is a
+    // view of the FM grid now rather than a tab of its own.
+    check (miXXEditor->getNumTabs() == 5, "five tabs", juce::String (miXXEditor->getNumTabs()));
 
     for (int i = 0; i < miXXEditor->getNumTabs(); ++i)
     {
@@ -1456,17 +1365,38 @@ int main()
     // shape column still says which shape it is at.
     {
         std::vector<SquareCell*> fmCells;
+        int routingCount = 0;
 
         for (auto* k : miXXEditor->modTargets)
-            if (auto* c = dynamic_cast<SquareCell*> (k))
+        {
+            auto* c = dynamic_cast<SquareCell*> (k);
+
+            if (c == nullptr)
+                continue;
+
+            // The routing view's cells are SquareCells too, so they have to be told
+            // apart by their parameter: an mtxxy id is a routing depth, everything else
+            // in this page is a value.
+            if (c->getParamID().startsWith ("mtx"))
+                ++routingCount;
+            else
                 fmCells.push_back (c);
+        }
 
         // One for FM Index, then shape/ratio/level/feedback for each operator.
         const int expected = 1 + 4 * MiXXFmVoice::numOps;
 
         check (static_cast<int> (fmCells.size()) == expected,
-               "the FM grid built one cell per value, plus FM Index",
+               "the values view built one cell per value, plus FM Index",
                juce::String (static_cast<int> (fmCells.size())) + " of " + juce::String (expected));
+
+        // Six by six minus the diagonal: a self-send is the per-operator feedback
+        // parameter, which is why the diagonal is free for the carrier switches.
+        const int expectedRouting = MiXXFmVoice::numOps * (MiXXFmVoice::numOps - 1);
+
+        check (routingCount == expectedRouting,
+               "the routing view built one cell per off-diagonal pair",
+               juce::String (routingCount) + " of " + juce::String (expectedRouting));
 
         // The whole premise is that every value cell is square. If they are not, it
         // is a table with extra steps.
