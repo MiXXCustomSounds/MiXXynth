@@ -857,7 +857,14 @@ public:
 
         // FM Index is one value for the whole stack rather than a per-operator one,
         // so it sits in the header row's first cell, out of the operator rows' way.
+        // FM Index is one value for the whole stack rather than a per-operator one,
+        // so it sits in the header row's first cell, out of the operator rows' way.
         indexCell = addCell (ranged (p, "fmIndex"), mixxynth::dstFmIndex, "FM Index");
+
+        // It is its own column heading. Every other grid cell has an icon above it and does not
+        // need to say what it is; this one has nothing above it, so without this it is a bare
+        // number in the corner with no way to tell what it controls.
+        indexCell->setShowLabel (true);
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {

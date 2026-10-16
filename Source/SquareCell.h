@@ -106,6 +106,10 @@ public:
     // True when the cell draws its value as a waveform rather than as text. The audit
     // cannot see pixels, so it checks the mode is on and leaves the drawing to the eye.
     bool isShowingWaveform() const noexcept { return waveTables != nullptr; }
+
+    // True when the cell draws its own name. The audit checks the FM Index cell does: it is
+    // its own column heading, so a bare number there says nothing about what it controls.
+    bool isShowingLabel() const noexcept { return showLabel; }
     juce::Colour fillColour() const;
     juce::Rectangle<float> fillRect() const;
     float yForValue01 (float v01) const;

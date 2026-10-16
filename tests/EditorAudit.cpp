@@ -966,6 +966,22 @@ int main()
                    juce::String (vaShape->getRight()) + " <= " + juce::String (indexCell->getX()));
     }
 
+    // FM Index is its own column heading, so it has to name itself. Every other grid cell is
+    // named by the icon above it, which is why the label is opt-in - and why this one being
+    // left out was invisible in every check that looked at values rather than at words.
+    {
+        mixxynth::ui::SquareCell* index = nullptr;
+
+        for (auto* k : miXXEditor->modTargets)
+            if (auto* c = dynamic_cast<mixxynth::ui::SquareCell*> (k))
+                if (c->getParamID() == "fmIndex")
+                    index = c;
+
+        check (index != nullptr && index->isShowingLabel(),
+               "the FM Index cell names itself",
+               juce::String (index != nullptr ? 1 : 0));
+    }
+
     // Step 4: the shape cells draw the shape instead of naming it. Seven of them - one per
     // operator plus the VA's, which is the same morph and should read as the same thing.
     {
