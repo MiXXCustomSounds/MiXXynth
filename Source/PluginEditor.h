@@ -188,6 +188,14 @@ private:
     class ScopeComponent;
     std::unique_ptr<ScopeComponent> scope;
 
+public:
+    // The audit's only way to reach it. It sits outside the tabs, so walking the pages
+    // cannot find it - and that is exactly why it needs a way in. Declared here and defined
+    // in the .cpp, because ScopeComponent is only forward-declared at this point and the
+    // compiler cannot see that it is a Component.
+    juce::Component* getScopeComponent() const;
+
+private:
     // The output limiter's controls, which live in the bar beside Master because that is
     // where they sit in the signal path: last.
     class LimiterMeter;

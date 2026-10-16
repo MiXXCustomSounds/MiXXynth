@@ -1973,6 +1973,22 @@ int main()
     }
 
 
+    // ---- 16c. The oscilloscope is on screen, whatever tab is showing ----
+    //
+    // It lives outside the tabs by design, so it is the one control that cannot be found by
+    // walking the pages - which means nothing else in this audit would notice if it were
+    // never given bounds.
+    {
+        auto* scopeComponent = miXXEditor->getScopeComponent();
+
+        check (scopeComponent != nullptr && scopeComponent->isVisible()
+                 && scopeComponent->getWidth() > 100 && scopeComponent->getHeight() > 20,
+               "the oscilloscope is laid out and visible",
+               scopeComponent != nullptr ? juce::String (scopeComponent->getWidth()) + "x"
+                                             + juce::String (scopeComponent->getHeight())
+                                         : juce::String ("missing"));
+    }
+
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);
     return failures == 0 ? 0 : 1;
 }

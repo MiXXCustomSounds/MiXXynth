@@ -2801,6 +2801,11 @@ private:
     bool hasSignal = false;
 };
 
+juce::Component* MiXXynthEditor::getScopeComponent() const
+{
+    return scope.get();
+}
+
 //
 // It exists because a safety limiter is only trustworthy if you can see that it is NOT
 // working. A meter that sits at zero confirms the threshold is doing nothing on ordinary
