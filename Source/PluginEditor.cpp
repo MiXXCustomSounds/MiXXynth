@@ -2696,7 +2696,111 @@ private:
 // ---------------------------------------------------------------------------
 // Editor
 // ---------------------------------------------------------------------------
-// The limiter's gain-reduction meter.
+// The output oscilloscope.
+//
+// TRIGGERED, which is the difference between a scope and a blur. Without a trigger the
+// waveform is redrawn from an arbitrary point each frame, so a steady tone looks like it is
+// sliding sideways and anything with a slow envelope looks like noise. It waits for the
+// signal to cross zero going up and starts the trace there, so a steady note stands still.
+//
+// FIXED SCALE, not auto-gain. An auto-scaled scope always looks the same, which is exactly
+// the thing you do not want from a scope on a synth: the whole reason to have one is to see
+// that a patch is quiet, or that it is hitting the limiter. The +/-1 lines are drawn so
+// full scale is a visible landmark rather than an assumption.
+class MiXXynthEditor::ScopeComponent : public juce::Component,
+                                       private juce::Timer
+{
+public:
+    explicit ScopeComponent (MiXXynthProcessor& p) : proc (p)
+    {
+        samples.resize (static_cast<size_t> (MiXXynthProcessor::kScopeSize), 0.0f);
+        startTimerHz (30);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+
+        g.setColour (juce::Colour (0xff0d1117));
+        g.fillRoundedRectangle (area, 3.0f);
+
+        auto plot = area.reduced (6.0f, 4.0f);
+        const float midY = plot.getCentreY();
+
+        // The zero line, and the +/-1 lines. Full scale is a landmark rather than an
+        // assumption, which is the point of not auto-scaling.
+        g.setColour (juce::Colour (0xff222a33));
+        g.drawHorizontalLine (static_cast<int> (midY), plot.getX(), plot.getRight());
+
+        g.setColour (juce::Colour (0xff2f3a45));
+        g.drawHorizontalLine (static_cast<int> (plot.getY()), plot.getX(), plot.getRight());
+        g.drawHorizontalLine (static_cast<int> (plot.getBottom()), plot.getX(), plot.getRight());
+
+        const int n = static_cast<int> (samples.size());
+
+        if (n < 2 || ! hasSignal)
+            return;
+
+        // The trigger: the first upward zero crossing in the first half of the window, so
+        // the trace has room to run. If there is none the window is drawn as it is, which
+        // is what happens on silence or on a DC-ish signal.
+        int start = 0;
+
+        for (int i = 1; i < n / 2; ++i)
+        {
+            if (samples[static_cast<size_t> (i - 1)] <= 0.0f && samples[static_cast<size_t> (i)] > 0.0f)
+            {
+                start = i;
+                break;
+            }
+        }
+
+        const int shown = juce::jmin (n - start, n);
+
+        juce::Path path;
+        const float scaleY = plot.getHeight() * 0.5f;
+
+        for (int i = 0; i < shown; ++i)
+        {
+            const float x = plot.getX() + plot.getWidth() * static_cast<float> (i)
+                                            / static_cast<float> (juce::jmax (1, shown - 1));
+            const float y = midY - juce::jlimit (-1.0f, 1.0f, samples[static_cast<size_t> (start + i)])
+                                     * scaleY;
+
+            if (i == 0)
+                path.startNewSubPath (x, y);
+            else
+                path.lineTo (x, y);
+        }
+
+        g.setColour (juce::Colour (0xff35e0ff));
+        g.strokePath (path, juce::PathStrokeType (1.2f));
+    }
+
+private:
+    void timerCallback() override
+    {
+        const int n = proc.readScope (samples.data(), static_cast<int> (samples.size()));
+
+        // Whether there is anything to draw. A scope that keeps showing the last thing it
+        // saw is worse than one that shows a flat line, because it looks live.
+        hasSignal = false;
+
+        for (int i = 0; i < n; ++i)
+            if (std::abs (samples[static_cast<size_t> (i)]) > 1.0e-5f)
+            {
+                hasSignal = true;
+                break;
+            }
+
+        repaint();
+    }
+
+    MiXXynthProcessor& proc;
+    std::vector<float> samples;
+    bool hasSignal = false;
+};
+
 //
 // It exists because a safety limiter is only trustworthy if you can see that it is NOT
 // working. A meter that sits at zero confirms the threshold is doing nothing on ordinary
@@ -2913,6 +3017,10 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     limiterMeter = std::make_unique<LimiterMeter>();
     bar.addAndMakeVisible (*limiterMeter);
 
+    // The output scope, above everything else so it is on screen whatever tab is showing.
+    scope = std::make_unique<ScopeComponent> (proc);
+    addAndMakeVisible (*scope);
+
     // Performance bar: on-screen keyboard plus pitch and mod wheels. The
     // keyboard both mirrors incoming notes and plays the synth when clicked;
     // the wheels mirror MIDI and can be dragged to drive it.
@@ -2965,6 +3073,12 @@ void MiXXynthEditor::resized()
     auto b = getLocalBounds();
 
     title.setBounds (b.removeFromTop (34).reduced (10, 4));
+
+    // The scope sits directly under the title and spans the full width, so it is on screen
+    // whatever tab or section is showing. That is the whole reason it is here rather than
+    // inside a page.
+    if (scope != nullptr)
+        scope->setBounds (b.removeFromTop (62).reduced (8, 2));
 
     // The sidebar is wide enough for the shape editors and never scrolls away,
     // so the LFOs and envelopes are visible on every tab.

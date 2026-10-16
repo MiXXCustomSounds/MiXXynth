@@ -977,6 +977,24 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
 
+    // ---- the oscilloscope ----------------------------------------------------
+    // The output, after the limiter, so the scope shows what actually leaves the plugin
+    // rather than what the voices produced. Appending into a rolling window and publishing
+    // the write index last, so the UI never reads a window that is half-updated.
+    {
+        int w = scopeWrite.load (std::memory_order_relaxed);
+
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            scopeSamples[static_cast<size_t> (w)].store (buffer.getSample (0, i),
+                                                         std::memory_order_relaxed);
+
+            w = (w + 1) % kScopeSize;
+        }
+
+        scopeWrite.store (w, std::memory_order_release);
+    }
+
     // Publish the newest voice's shape phases for the editor's playheads. Single
     // writer (audio thread), single reader (UI), so relaxed atomics are enough.
     {

@@ -197,6 +197,39 @@ private:
     std::atomic<bool> modValuesLive { false };
     std::atomic<int> stateLoadCount { 0 };
 
+    // ---- the oscilloscope ---------------------------------------------------
+    // A rolling window of the output, for the scope at the top of the editor. The audio
+    // thread appends and publishes a write index with release ordering; the UI reads the
+    // index and then the samples. Same single-writer/single-reader contract as the shape
+    // phases, so relaxed atomics on the samples themselves are enough - a scope one frame
+    // stale is not a correctness problem, and a torn sample would be invisible anyway.
+public:
+    // How many samples the scope window holds. Public because the editor has to size its
+    // own buffer to it.
+    static constexpr int kScopeSize = 1024;
+
+private:
+    std::array<std::atomic<float>, kScopeSize> scopeSamples {};
+    std::atomic<int> scopeWrite { 0 };
+
+public:
+    // Copies the most recent window, oldest first. Returns how many samples were written.
+    int readScope (float* dest, int maxSamples) const
+    {
+        const int n = juce::jmin (maxSamples, kScopeSize);
+        const int end = scopeWrite.load (std::memory_order_acquire);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const int index = ((end - n + i) % kScopeSize + kScopeSize) % kScopeSize;
+            dest[i] = scopeSamples[static_cast<size_t> (index)].load (std::memory_order_relaxed);
+        }
+
+        return n;
+    }
+
+private:
+
     // Shared band-limited operator waveform tables (M4b). One copy for the whole
     // plugin; the voices hold a pointer to it.
     mixxynth::OpWaveTables waveTables;

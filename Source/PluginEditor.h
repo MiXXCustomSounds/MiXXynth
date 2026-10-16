@@ -184,6 +184,10 @@ private:
     juce::Component bar;
     juce::Label barTitle;
 
+    // The output oscilloscope, at the top of the editor so it is visible on every tab.
+    class ScopeComponent;
+    std::unique_ptr<ScopeComponent> scope;
+
     // The output limiter's controls, which live in the bar beside Master because that is
     // where they sit in the signal path: last.
     class LimiterMeter;
