@@ -90,6 +90,26 @@ Binding material constraints the author named directly, recorded as given and no
 - the VA section and the ADSR section stylised as each other
 - exposed wires and circuitry in some places, used very sparingly
 
+**The standing exit was taken.** At the first direction round the author chose the category
+standard over both the dealt direction and the grounded alternates: what a synth plugin ships,
+executed impeccably. Recorded here because it is a standing preference, not a round outcome.
+
+Convention is the commitment. The build executes the category standard at full fidelity, without
+irony and without smuggled quirk. This is a door the author walked through deliberately, so it is
+not a fallback and not a floor to be raised later by stealth.
+
+That choice supersedes the material list above for the plugin's own UI surface, and the
+supersession is named rather than quietly applied: oak edges, silver screws, rack rails, dark
+cloth and exposed wires are costume on an Operate surface, which the mode rules forbid. They are
+retired from the interface. What survives of the vintage identity is the half that was never
+material - the engine depth, the twelve effects, and the claim that this is old raw material put
+through modern processing. Those were always the load-bearing half.
+
+The tension this leaves is real and is not resolved here: Product Principles 2 and 4 still argue
+for vintage materials as load-bearing and for hardware permanence as the feeling being bought.
+Those principles now describe the sound and the build quality rather than the paint, or they need
+revising. The author decides which; nothing is rewritten on their behalf.
+
 ## Evidence on Hand
 
 The repository itself: working DSP, a smoke suite, an editor audit, and a pluginval-clean build.

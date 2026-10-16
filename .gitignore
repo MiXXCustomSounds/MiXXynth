@@ -40,3 +40,7 @@ build*.log
 *.log
 shot-*.png
 repro-*.png
+# Impeccable question runtime state (machine-local: pid, port, log)
+.impeccable/questions/*.state.json
+.impeccable/questions/*.hand.json
+.impeccable/questions/*.log
