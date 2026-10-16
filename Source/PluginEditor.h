@@ -7,6 +7,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "AdsrEditor.h"
 #include "ModKnob.h"
 #include "ModShape.h"
 #include "ShapeEditorComponent.h"
@@ -77,6 +78,11 @@ public:
     // Rolls the FM tab's dice. Exposed so the audit can check the roll's
     // invariants without driving a button.
     void rollFmDice();
+
+    // The FM page's per-operator envelope editors, in operator order. They are not
+    // ModTargets - an operator envelope only controls its own operator - so they are
+    // not in modTargets and need their own way out for the audit.
+    std::vector<mixxynth::ui::AdsrEditor*> getAdsrEditors() const;
 
     // Signature of the last slot configuration, so refreshModRings() can skip
     // rebuilding every knob's assignment list when nothing has changed.

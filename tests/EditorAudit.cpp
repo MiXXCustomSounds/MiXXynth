@@ -14,6 +14,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "../Source/AdsrEditor.h"
 #include "../Source/Algorithms.h"
 #include "../Source/ModKnob.h"
 #include "../Source/ModMatrix.h"
@@ -26,6 +27,7 @@
 // The M6 checks below name this type directly; everything else in this file is
 // reached through the editor, so nothing else needs a using declaration.
 using mixxynth::ui::SquareCell;
+using mixxynth::ui::AdsrEditor;
 
 namespace
 {
@@ -92,6 +94,18 @@ namespace
         // Per-operator enable is a toggle, not a knob.
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
             s.insert ("op" + juce::String (i + 1) + "on");
+
+        // Per-operator ADSR is edited by the graphical envelope, which is not a
+        // ModTarget - it is deliberately not a modulation destination, since it only
+        // ever controls its own operator.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            const juce::String n = juce::String (i + 1);
+            s.insert ("op" + n + "attack");
+            s.insert ("op" + n + "decay");
+            s.insert ("op" + n + "sustain");
+            s.insert ("op" + n + "release");
+        }
 
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)
         {
@@ -1534,16 +1548,13 @@ int main()
         auto* op1Ratio = cellFor ("op1ratio");
         auto* op1Fbk   = cellFor ("op1feedback");
 
-        mixxynth::ui::ModKnob* op1Attack = nullptr;
+        const auto envelopes = miXXEditor->getAdsrEditors();
+        auto* op1Env = envelopes.empty() ? nullptr : envelopes.front();
 
-        for (auto* k : miXXEditor->modTargets)
-            if (k->getParamID() == "op1attack")
-                op1Attack = dynamic_cast<mixxynth::ui::ModKnob*> (k);
-
-        if (op1Shape != nullptr && op1Ratio != nullptr && op1Fbk != nullptr && op1Attack != nullptr)
+        if (op1Shape != nullptr && op1Ratio != nullptr && op1Fbk != nullptr && op1Env != nullptr)
         {
             const int reference = op1Ratio->getX() - op1Shape->getRight();
-            const int atAdsr = op1Attack->getX() - op1Fbk->getRight();
+            const int atAdsr = op1Env->getX() - op1Fbk->getRight();
 
             check (std::abs (atAdsr - reference) <= 1,
                    "the ADSR column sits one gap after the grid, not floating off it",
@@ -1553,6 +1564,136 @@ int main()
         // The algorithm-pinning check is NOT here: the audit sets the algorithm to a
         // preset later on to exercise the DSP, so the pinned state only exists right
         // after the editor is built. It is checked there instead.
+    }
+
+    // ---- M6: the operator envelopes -------------------------------------------
+    // The ADSR column is graphical now, and its time axis is a power curve rather
+    // than a straight line. That curve is the part worth testing: if it were not
+    // exactly invertible, a drag would not land on the value its handle is drawn
+    // at, and the handle would slide away from the pointer as you moved it.
+    {
+        const auto envelopes = miXXEditor->getAdsrEditors();
+
+        check (static_cast<int> (envelopes.size()) == MiXXFmVoice::numOps,
+               "there is one envelope per operator",
+               juce::String (static_cast<int> (envelopes.size())));
+
+        int zeroSized = 0;
+
+        for (auto* e : envelopes)
+            if (e->getWidth() <= 0 || e->getHeight() <= 0)
+                ++zeroSized;
+
+        check (zeroSized == 0, "every envelope has a size", juce::String (zeroSized));
+
+        // The axis has to round-trip, or the handle and the value disagree.
+        int badRoundTrip = 0;
+
+        for (float t : { 0.0f, 0.002f, 0.05f, 0.5f, 2.0f, 4.0f, 8.0f, 14.0f })
+            if (std::abs (AdsrEditor::xToTime (AdsrEditor::timeToX (t)) - t) > 0.001f)
+                ++badRoundTrip;
+
+        check (badRoundTrip == 0, "the time axis round-trips through the power curve",
+               juce::String (badRoundTrip) + " of 8");
+
+        // The reason the axis is curved at all: 2 ms against a 14 s window is
+        // 0.014% of the width, which is not a place a pointer can go. These are the
+        // two things that have to be true for the curve to be worth having.
+        const float shortest = AdsrEditor::timeToX (0.002f);
+        const float linear = 0.002f / AdsrEditor::windowSeconds;
+
+        check (shortest > 20.0f * linear,
+               "the curve spreads a 2 ms stage far wider than a linear axis would",
+               juce::String (shortest, 4) + " vs " + juce::String (linear, 6));
+        check (shortest * 300.0f > 8.0f,
+               "a 2 ms stage is at least 8 px across a 300 px envelope",
+               juce::String (shortest * 300.0f, 2) + " px");
+
+        if (! envelopes.empty())
+        {
+            auto* env = envelopes.front();
+
+            auto setStage = [&proc] (const juce::String& id, float seconds)
+            {
+                if (auto* p = proc.apvts.getParameter (id))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (p->convertTo0to1 (seconds));
+                    p->endChangeGesture();
+                }
+            };
+
+            auto readStage = [&proc] (const juce::String& id)
+            {
+                if (auto* p = proc.apvts.getParameter (id))
+                    return p->convertFrom0to1 (p->getValue());
+
+                return 0.0f;
+            };
+
+            setStage ("op1attack", 0.1f);
+            setStage ("op1decay", 0.4f);
+            setStage ("op1sustain", 0.5f);
+            setStage ("op1release", 0.8f);
+
+            const auto shape = env->currentShape();
+
+            check (shape.numPoints == 6 && std::abs (shape.points[1].y - 1.0f) < 0.001f,
+                   "the envelope shape peaks at full level",
+                   juce::String (shape.numPoints) + " points");
+
+            // The plateau is what makes this read as an ADSR rather than an ADR.
+            // Without it the curve decays straight into its release and the sustain
+            // level is a point rather than a level, which is what the first version of
+            // this drew.
+            check (std::abs (shape.points[3].y - shape.points[2].y) < 0.001f
+                     && shape.points[3].x > shape.points[2].x,
+                   "the shape holds a sustain plateau before it releases",
+                   juce::String (shape.points[2].x, 3) + " -> "
+                     + juce::String (shape.points[3].x, 3));
+            check (std::abs (shape.points[2].y - 0.5f) < 0.001f,
+                   "the sustain level is the decay corner's height",
+                   juce::String (shape.points[2].y, 3));
+
+            // Dragging the attack peak right lengthens the attack.
+            env->dragHandleForTest (AdsrEditor::attackPeak, { 0.5f, 1.0f });
+
+            check (readStage ("op1attack") > 0.1f,
+                   "dragging the attack peak right lengthens the attack",
+                   juce::String (readStage ("op1attack"), 3));
+
+            // The decay corner carries two values: the decay time and the sustain.
+            setStage ("op1attack", 0.1f);
+            env->dragHandleForTest (AdsrEditor::decayCorner, { 0.5f, 0.25f });
+
+            check (std::abs (readStage ("op1sustain") - 0.25f) < 0.001f,
+                   "dragging the decay corner sets the sustain level",
+                   juce::String (readStage ("op1sustain"), 3));
+            check (readStage ("op1decay") > 0.0f,
+                   "dragging the decay corner right lengthens the decay",
+                   juce::String (readStage ("op1decay"), 3));
+
+            // The release cannot be dragged left past the decay corner, because that
+            // would invert the envelope.
+            env->dragHandleForTest (AdsrEditor::releaseEnd, { 0.0f, 0.0f });
+
+            check (readStage ("op1release") >= 0.0f && readStage ("op1release") < 0.01f,
+                   "the release clamps to zero rather than inverting the envelope",
+                   juce::String (readStage ("op1release"), 4));
+
+            // And a stage clamps at its own parameter maximum, not past it.
+            env->dragHandleForTest (AdsrEditor::attackPeak, { 1.0f, 1.0f });
+
+            check (std::abs (readStage ("op1attack") - 2.0f) < 0.01f,
+                   "the attack clamps at its parameter maximum",
+                   juce::String (readStage ("op1attack"), 3));
+
+            // Leave the envelope where the rest of the audit expects the init patch.
+            setStage ("op1attack", 0.0f);
+            setStage ("op1decay", 0.0f);
+            setStage ("op1sustain", 0.0f);
+            setStage ("op1release", 0.0f);
+        }
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

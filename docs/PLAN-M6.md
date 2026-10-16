@@ -133,13 +133,42 @@ everywhere, so `ModKnob` and `SquareCell` will coexist for a while, and two copi
 of the assignment logic is how the FM grid and the VA page end up behaving
 differently.
 
-### New: the operator ADSR adapter
+### The operator envelope: `AdsrEditor`, not `ShapeEditorComponent`
 
-Operator ADSR is four float parameters (`opNattack/decay/sustain/release`), while
-`ShapeEditorComponent` edits a `ModShape`. An adapter builds a four-point shape
-*view* from the parameters and writes drags back to the four parameters. **The
-parameter format does not change**, so no preset is affected and the DSP keeps
-using the same four floats.
+The plan was to reuse `ShapeEditorComponent` behind an adapter between the four
+float parameters and a `ModShape`. That turned out to be the wrong shape of reuse,
+for one specific reason: **a breakpoint editor needs its points to be distinct,
+and the init patch has every stage at zero.**
+
+With attack, decay and release all at zero, an adapter that places a point at each
+stage boundary produces three points stacked on the origin. They cannot be told
+apart, cannot be dragged apart, and so the most common state in the plugin is the
+one state that editor cannot edit.
+
+So `AdsrEditor` is its own component with three **semantic** handles - attack
+peak, decay corner, release end - rather than free breakpoints. It still shares the
+drawing: it builds the equivalent `ModShape` and renders it through the same
+`buildShapePath` the modulation section uses, with the same colours, grid and
+curve, so the two cannot drift apart visually.
+
+**The parameter format does not change**, so no preset is affected and the DSP
+keeps using the same four floats.
+
+Two decisions inside it, recorded because neither is obvious:
+
+- **The time axis is a power curve, not a straight line.** The window spans the
+  three parameter maxima plus a nominal half-second sustain hold, so 14.5 s. On a
+  linear axis a 2 ms attack is 0.014% of the width, which is not somewhere a
+  pointer can go; the curve puts it at 2.9%, which is eight pixels across a 300 px
+  cell, and the audit checks exactly that. It is also exactly invertible, so a drag
+  lands on the value its handle is drawn at instead of sliding away from the
+  pointer.
+- **The sustain plateau is a drawing convention.** A sustain lasts as long as the
+  note does, so it has no duration to put on a time axis; the display gives it a
+  fixed half second. The first version left it out, and the result decayed straight
+  into its release - which reads as an ADR, with the sustain level as a single point
+  rather than a level. That was visible in the first screenshot and not in any
+  check, so there is now a check for it.
 
 ## Decisions
 
@@ -181,15 +210,18 @@ needed so the grid never becomes unreadable. Squares stay square at every size.
    holds knobs, which is step 6.
 4. The live shape cell, via published operator phases.
 5. The live modulated fill, via the published-value path.
-6. The ADSR column, via `ShapeEditorComponent`.
-7. Remove the algorithm section; pin the parameter to Free.
-8. Audit checks and a visual pass.
+6. ~~The ADSR column~~ — **done**, but not via `ShapeEditorComponent`. See below.
+7. ~~Remove the algorithm section; pin the parameter to Free~~ — **done**, as part
+   of step 3.
+8. Audit checks and a visual pass — ongoing. Every step has added checks rather
+   than saving them for the end, because a check written a step later is a check
+   written after the bug has already been shipped once.
 
 Each step keeps the plugin buildable and the tests passing.
 
 ## Progress
 
-**Steps 1-3 complete.** 166 audit checks, 0 failures; pluginval strictness 5
+**Steps 1-3 and 6 complete.** 179 audit checks, 0 failures; pluginval strictness 5
 SUCCESS; smoke OK.
 
 - **Step 1** (`fabaa53`): `SquareCell` and `ModTarget` exist, build and are tested.
@@ -198,12 +230,19 @@ SUCCESS; smoke OK.
   the evidence that nothing moved rather than a claim that it did not.
 - **Step 3**: the FM section is a grid. The editor now holds a list of `ModTarget`,
   so a knob and a cell are registered and wired identically.
+- **Step 6** (`AdsrEditor`): the ADSR column is graphical envelopes rather than four
+  knobs per operator, drawn in the modulation section's ENV style.
 
-**The grid is visible now.** The FM tab is six columns - operator, shape, ratio,
-level, feedback, ADSR - and seven rows, with FM Index in the header row. The
+**The grid is visible and complete.** The FM tab is six columns - operator, shape,
+ratio, level, feedback, ADSR - and seven rows, with FM Index in the header row. The
 algorithm selector is gone; the parameter is pinned to Free (matrix) as the page
-builds, so routing is the matrix's job alone.
+builds, so routing is the matrix's job alone. Each operator's envelope is a
+draggable curve, not four numbers.
 
 **Still to come:** the shape cell shows its shape's *name*, not its waveform (step
-4); the cells do not yet show live modulation (step 5); the ADSR column is still
-four knobs per operator rather than a graphical envelope (step 6).
+4); the cells do not yet show live modulation (step 5).
+
+**One thing to look at:** the grid is square-celled and centred, and the tab is
+wider than the grid needs, so there is dead space either side. That is the honest
+consequence of the "every cell is square" rule - the height binds before the width.
+If the envelopes want more room, the ADSR column could absorb that slack instead.

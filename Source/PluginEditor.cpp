@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 
+#include "AdsrEditor.h"
 #include "Algorithms.h"
 #include "EditorTheme.h"
 #include "ModMatrix.h"
@@ -8,6 +9,7 @@
 
 using mixxynth::ui::ModKnob;
 using mixxynth::ui::SquareCell;
+using mixxynth::ui::AdsrEditor;
 
 namespace
 {
@@ -508,6 +510,11 @@ namespace
 class MiXXynthEditor::FmPage : public juce::Component
 {
 public:
+    // The per-operator envelope editors, in operator order. Exposed for the audit,
+    // because they are deliberately not ModTargets and so the modTargets list does
+    // not hold them.
+    const juce::OwnedArray<AdsrEditor>& envelopeEditors() const { return adsrEditors; }
+
     explicit FmPage (MiXXynthEditor& e) : ed (e)
     {
         auto& p = e.processor();
@@ -595,13 +602,18 @@ public:
             addCell (ranged (p, "op" + n + "level"), mixxynth::dstOp1Level + i, "Op" + n + " Level");
             addCell (ranged (p, "op" + n + "feedback"), mixxynth::dstOff, "Op" + n + " Fb");
 
-            // The ADSR column still holds knobs for now. The graphical envelopes are
-            // step 6, and removing these before those exist would leave four
-            // parameters with no control at all.
-            addKnob (ranged (p, "op" + n + "attack"), mixxynth::dstOff, "A");
-            addKnob (ranged (p, "op" + n + "decay"), mixxynth::dstOff, "D");
-            addKnob (ranged (p, "op" + n + "sustain"), mixxynth::dstOff, "S");
-            addKnob (ranged (p, "op" + n + "release"), mixxynth::dstOff, "R");
+            // The envelope: the same editor the modulation section uses, so an
+            // operator envelope looks and behaves like a modulation one. It is not a
+            // modulation target, because it only ever controls this operator.
+            auto* env = new AdsrEditor (ranged (p, "op" + n + "attack"),
+                                        ranged (p, "op" + n + "decay"),
+                                        ranged (p, "op" + n + "sustain"),
+                                        ranged (p, "op" + n + "release"));
+
+            env->onStatus = [this] (const juce::String& t) { ed.setModStatus (t); };
+
+            adsrEditors.add (env);
+            addAndMakeVisible (env);
         }
 
         refreshAudibility();
@@ -720,6 +732,12 @@ public:
     // a sound at all, which reads as a broken knob. This says so, and says why.
     void refreshAudibility()
     {
+        // The page polls this, so it is also where the envelopes are told to catch up
+        // with a preset load or a dice roll. Each one decides for itself whether
+        // anything actually moved, so a quiet poll costs nothing.
+        for (auto* env : adsrEditors)
+            env->refreshFromParams();
+
         const auto carriers = carrierMask();
         bool fmAudible = false;
 
@@ -858,16 +876,10 @@ public:
                     cells[idx]->setBounds (cellAt (row, 1 + c));
             }
 
-            // The envelope block: four knobs across the rectangular cell.
-            auto adsr = cellAt (row, numSquareCols);
-
-            for (int k = 0; k < 4; ++k)
-            {
-                const int idx = i * 4 + k;
-
-                if (idx < knobs.size())
-                    knobs[idx]->setBounds (adsr.removeFromLeft (adsrW / 4));
-            }
+            // The envelope takes the whole rectangular cell. It wants width far more
+            // than height, which is the reason this column is three squares wide.
+            if (i < adsrEditors.size())
+                adsrEditors[i]->setBounds (cellAt (row, numSquareCols).reduced (1));
         }
     }
 
@@ -885,18 +897,6 @@ private:
         return c;
     }
 
-    // Still a knob, and still here because the ADSR column has not been rebuilt as
-    // graphical envelopes yet (step 6).
-    void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
-    {
-        auto* k = new ModKnob (label, param, dest, true);
-        ed.wireModTarget (*k);
-        addAndMakeVisible (k);
-        ed.modTargets.push_back (k);
-        owned.add (k);
-        knobs.add (k);
-    }
-
     MiXXynthEditor& ed;
     DiceButton diceButton;
     juce::Label audibility;
@@ -906,9 +906,10 @@ private:
     // cells[0] is FM Index; the operator rows follow as four per operator.
     SquareCell* indexCell = nullptr;
 
+    // One envelope per operator, in operator order.
+    juce::OwnedArray<AdsrEditor> adsrEditors;
+
     juce::Random rng;
-    juce::OwnedArray<ModKnob> owned;
-    juce::Array<ModKnob*> knobs;
     juce::OwnedArray<SquareCell> ownedCells;
     juce::Array<SquareCell*> cells;
     juce::OwnedArray<OperatorCell> opOnToggles;
@@ -2779,6 +2780,17 @@ void MiXXynthEditor::rollFmDice()
 {
     if (fmPage != nullptr)
         fmPage->rollDice();
+}
+
+std::vector<mixxynth::ui::AdsrEditor*> MiXXynthEditor::getAdsrEditors() const
+{
+    std::vector<mixxynth::ui::AdsrEditor*> out;
+
+    if (fmPage != nullptr)
+        for (auto* e : fmPage->envelopeEditors())
+            out.push_back (e);
+
+    return out;
 }
 
 void MiXXynthEditor::setModStatus (const juce::String& text)
