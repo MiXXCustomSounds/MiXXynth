@@ -6,7 +6,7 @@ silent by default and never said so.
 > **Status note (M6).** This is a bug-fix record, not a description of the current
 > UI. Both tabs it refers to are gone: the routing matrix and the VA/filter are now
 > **views of the FM tab** rather than tabs of their own, and the editor is four tabs
-> (FM, Voice, Mod, FX). The buttons and banner this document mentions — "Copy
+> (FM, Mod, FX). The buttons and banner this document mentions — "Copy
 > algorithm to matrix", "Free mode", the mode banner — no longer exist, because the
 > routing view edits the matrix directly and the algorithm is pinned to Free. The
 > *bugs* described below were real and their fixes are still in the code.

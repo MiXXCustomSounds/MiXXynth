@@ -1,11 +1,11 @@
 # MiXXynth — M6: consolidation and depth
 
-Status: **in progress.** Steps 1-3 and 6 are done, and the tab consolidation has
-landed: the routing matrix and the VA/filter are views of the FM tab now, and the
-editor is four tabs (FM, Voice, Mod, FX). Steps 4 (the live shape graphic) and 5
-(the live modulated fill) remain, along with the per-operator filters. Supersedes
-the ordering of M5's remaining workstreams. M5 workstreams 1-3 (modulation UX, the
-WeirdVerb rename, convolution) are done; M5's *feature* workstreams (distortion,
+Status: **in progress.** Steps 1-3, 5 and 6 are done, and the tabs are down to three.
+The routing matrix and the VA/filter are views and a panel of the FM tab, and the voice
+controls live in the sidebar above the modulation section, so the editor is **FM, Mod,
+FX**. Step 4 (the live shape graphic) remains, along with the per-operator filters.
+Supersedes the ordering of M5's remaining workstreams. M5 workstreams 1-3 (modulation
+UX, the WeirdVerb rename, convolution) are done; M5's *feature* workstreams (distortion,
 chorus, presets) are deferred until this is finished, because this is depth on what
 already exists rather than new modules.
 
@@ -236,8 +236,19 @@ audit checks, 0 failures; smoke OK; the build is warning-clean.
   was permanently 100% and unadjustable. `velToLevel` replaces it, defaulting to 1 -
   which is exactly the old behaviour, so no patch changed loudness. `velToIndex` is new
   and opt-in: it opens the FM index with touch, which is the expressive half.
-- Both live on the **Voice tab** with polyphony and unison, because both are properties
-  of a voice rather than of an oscillator or a filter.
+- **Step 5, the live modulated fill**: modulation totals are computed in their own pass and
+  both the sound and the readout come from that one number; the published values are read
+  back out of the VoiceParams rather than recomputed. The editor pushes them on its 30 Hz
+  poll, skipping any control that is not actually driven (or it would paint blue for no
+  reason) and any control being dragged (or the fill jumps out from under the cursor).
+- **The voice section** moved out of a tab of its own and into the sidebar, above the
+  modulation section: nine knobs in three columns plus the MPE controls. It scrolls with
+  the modules, so neither section can be scrolled out of reach, and the MODULATION caption
+  moved inside the scroll with it - a caption pinned outside would label the wrong thing
+  the moment the list moved. That took the editor from four tabs to three.
+
+- Both live in the sidebar's **VOICE** section, because both are properties of a voice
+  rather than of an oscillator or a filter.
 
 - **Consolidation**: the VA/Filt tab is gone, and the VA is a PANEL to the left of the
   grid rather than a third view of it. The view switch is back to `Values | Routing`,

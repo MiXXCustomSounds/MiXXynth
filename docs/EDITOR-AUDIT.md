@@ -21,7 +21,7 @@ The interactive half — dragging every knob in the standalone — is at the bot
 | 12 | Clear empties its slot and leaves others alone | Right-click clear |
 | 13 | Depth ring reflects and clears with its slot | Visual feedback |
 | 14 | No visible control is left at zero bounds | Regression guard for the `setSize()` ordering bug |
-| 15 | Four tabs exist and each has content | Layout regression guard |
+| 15 | Three tabs exist and each has content | Layout regression guard |
 | 16 | The sidebar holds exactly one shape strip per LFO/ENV (`kNumShapes`) | Catches a strip silently failing to build |
 | 17 | Every strip is visible and at least 100px tall | The editors must be usable, not collapsed |
 | 18 | Every strip is sized (non-zero width) | Same zero-bounds guard as #14, for the sidebar |
@@ -113,7 +113,9 @@ Run the standalone and confirm by ear/eye:
 - [ ] FM tab, VA panel (left of the grid, visible in BOTH views): the shape cell sweeps
       the morph, Sub and Noise add to it, the envelope draws and responds, and filter
       type, cutoff, resonance and drive all respond
-- [ ] Voice tab: polyphony limits held notes; unison thickens and spreads
+- [ ] Sidebar, VOICE section: polyphony limits held notes; unison thickens and spreads;
+      Drift makes a held note wander; Vel to Level and Vel to Index change how touch
+      affects loudness and brightness
 - [ ] Mod tab: 32 slot rows, source/destination/depth all editable
 - [ ] Sidebar (any tab): all seven shape editors are visible and keep their position
       when you switch tabs

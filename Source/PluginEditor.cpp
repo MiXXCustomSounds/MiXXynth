@@ -1706,111 +1706,6 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Voice page: polyphony and unison
-// ---------------------------------------------------------------------------
-class MiXXynthEditor::VoicePage : public juce::Component
-{
-public:
-    explicit VoicePage (MiXXynthEditor& e) : ed (e)
-    {
-        auto& p = e.processor();
-
-        addKnob (ranged (p, "polyphony"), "Polyphony");
-        addKnob (ranged (p, "unison"), "Unison");
-        addKnob (ranged (p, "unisonDetune"), "Unison Detune");
-        addKnob (ranged (p, "unisonSpread"), "Unison Spread");
-        addKnob (ranged (p, "unisonPhaseRand"), "Phase Random");
-        addKnob (ranged (p, "pitchBendRange"), "Bend Range");
-
-        // Drift and velocity response. Both are properties of a voice rather than of an
-        // oscillator or the filter, so they belong here beside polyphony and unison
-        // rather than on the FM tab.
-        addKnob (ranged (p, "drift"), "Drift");
-        addKnob (ranged (p, "velToLevel"), "Vel to Level");
-        addKnob (ranged (p, "velToIndex"), "Vel to Index");
-
-        mpeToggle = makeBoolToggle (p, "mpeEnabled", "MPE");
-        addAndMakeVisible (mpeToggle);
-
-        mpeChannels = new juce::Slider (juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft);
-        mpeChannels->setRange (1.0, 15.0, 1.0);
-        addAndMakeVisible (mpeChannels);
-
-        if (auto* param = dynamic_cast<juce::AudioParameterInt*> (ranged (p, "mpeMemberChannels")))
-        {
-            mpeChannels->setValue (param->get(), juce::dontSendNotification);
-            mpeChannels->onValueChange = [this, param]
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (
-                    param->convertTo0to1 (static_cast<float> (mpeChannels->getValue())));
-                param->endChangeGesture();
-            };
-        }
-
-        channelsLabel.setText ("MPE channels", juce::dontSendNotification);
-        addAndMakeVisible (channelsLabel);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.setColour (juce::Colour (0xff8b98a5));
-        g.setFont (11.5f);
-        g.drawFittedText ("Polyphony is the maximum number of notes held at once; unison stacks detuned, "
-                          "stereo-spread copies per note. They share a 64-voice pool, so a large unison "
-                          "reduces how many notes fit. Drift is a slow per-operator pitch wander, so a "
-                          "single voice moves over time rather than sitting still. Vel to Level and Vel "
-                          "to Index set how much the keyboard's touch changes loudness and brightness.",
-                          getLocalBounds().removeFromTop (52), juce::Justification::centredLeft, 3);
-    }
-
-    void resized() override
-    {
-        auto b = getLocalBounds().reduced (10);
-        b.removeFromTop (56);
-
-        auto row = b.removeFromTop (110);
-
-        // Divide by the actual knob count, so adding one does not squash the row.
-        const int knobCount = juce::jmax (1, knobs.size());
-        const int cellW = juce::jmax (80, b.getWidth() / knobCount);
-
-        for (auto* k : knobs)
-            k->setBounds (row.removeFromLeft (cellW).reduced (6));
-
-        b.removeFromTop (8);
-        auto mpeRow = b.removeFromTop (26);
-
-        if (mpeToggle != nullptr)
-            mpeToggle->setBounds (mpeRow.removeFromLeft (90).reduced (2, 0));
-
-        mpeRow.removeFromLeft (12);
-        channelsLabel.setBounds (mpeRow.removeFromLeft (100));
-
-        if (mpeChannels != nullptr)
-            mpeChannels->setBounds (mpeRow.removeFromLeft (120).reduced (2, 0));
-    }
-
-private:
-    void addKnob (juce::RangedAudioParameter* param, const juce::String& label)
-    {
-        // Voice settings are not modulation destinations.
-        auto* k = new ModKnob (label, param, mixxynth::dstOff, true);
-        addAndMakeVisible (k);
-        ed.modTargets.push_back (k);
-        owned.add (k);
-        knobs.add (k);
-    }
-
-    MiXXynthEditor& ed;
-    juce::OwnedArray<ModKnob> owned;
-    juce::Array<ModKnob*> knobs;
-    juce::ToggleButton* mpeToggle = nullptr;
-    juce::Slider* mpeChannels = nullptr;
-    juce::Label channelsLabel;
-};
-
-// ---------------------------------------------------------------------------
 // FX page: the rack (M4b workstream 4)
 //
 // A card per live slot, in chain order. Slots are a fixed pool of eight with a
@@ -2442,6 +2337,62 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     modViewport.setViewedComponent (&modContent, false);
     modViewport.setScrollBarsShown (true, false);
 
+    // ---- voice section ----
+    // Moved out of a tab of its own and into the sidebar, above the modulation section.
+    // It scrolls with the modules rather than being pinned, so the two sections read as
+    // one list and neither can be scrolled out of reach.
+    //
+    // The MODULATION caption moves in here too: with a section above it, a caption pinned
+    // outside the scroll would label the wrong thing the moment the list scrolled.
+    modContent.addAndMakeVisible (railTitle);
+
+    voiceCaption.setText ("VOICE", juce::dontSendNotification);
+    voiceCaption.setJustificationType (juce::Justification::centredLeft);
+    voiceCaption.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+    modContent.addAndMakeVisible (voiceCaption);
+
+    for (const auto& spec : { std::pair<const char*, const char*> { "polyphony", "Polyphony" },
+                              { "unison", "Unison" },
+                              { "unisonDetune", "Unison Detune" },
+                              { "unisonSpread", "Unison Spread" },
+                              { "unisonPhaseRand", "Phase Random" },
+                              { "pitchBendRange", "Bend Range" },
+                              { "drift", "Drift" },
+                              { "velToLevel", "Vel to Level" },
+                              { "velToIndex", "Vel to Index" } })
+    {
+        // Voice settings are not modulation destinations, so every one of these is dstOff
+        // - which is also what makes a dropped chip on one flash red rather than silently
+        // doing nothing.
+        auto* k = new ModKnob (spec.second, ranged (p, spec.first), mixxynth::dstOff, true);
+        modContent.addAndMakeVisible (k);
+        modTargets.push_back (k);
+        voiceKnobs.add (k);
+    }
+
+    mpeToggle = makeBoolToggle (p, "mpeEnabled", "MPE");
+    modContent.addAndMakeVisible (mpeToggle);
+
+    mpeChannels = new juce::Slider (juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft);
+    mpeChannels->setRange (1.0, 15.0, 1.0);
+    modContent.addAndMakeVisible (mpeChannels);
+
+    if (auto* param = dynamic_cast<juce::AudioParameterInt*> (ranged (p, "mpeMemberChannels")))
+    {
+        mpeChannels->setValue (param->get(), juce::dontSendNotification);
+        mpeChannels->onValueChange = [this, param]
+        {
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (
+                param->convertTo0to1 (static_cast<float> (mpeChannels->getValue())));
+            param->endChangeGesture();
+        };
+    }
+
+    channelsLabel.setText ("MPE channels", juce::dontSendNotification);
+    channelsLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+    modContent.addAndMakeVisible (channelsLabel);
+
     addLfoButton.setButtonText ("+ LFO");
     addLfoButton.onClick = [this] { addShapeModule (true); };
     modContent.addAndMakeVisible (addLfoButton);
@@ -2516,15 +2467,14 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     modWheel->onValueChanged = [this] (float v) { proc.setModWheelFromUI (v); };
 
     // The FM routing matrix is a second view of the FM grid now rather than a tab of
-    // its own, so the FM page is the only thing that has to be built for it.
+    // its own, so the FM page is the only thing that has to be built for it. The voice
+    // section is not a page at all any more - it lives in the sidebar.
     fmPage = std::make_unique<FmPage> (*this);
     modPage = std::make_unique<ModPage> (*this);
-    voicePage = std::make_unique<VoicePage> (*this);
     fxPage = std::make_unique<FxPage> (*this);
 
     tabs.setOutline (0);
     tabs.addTab ("FM", juce::Colour (0xff14181d), fmPage.get(), false);
-    tabs.addTab ("Voice", juce::Colour (0xff14181d), voicePage.get(), false);
     tabs.addTab ("Mod", juce::Colour (0xff14181d), modPage.get(), false);
     tabs.addTab ("FX", juce::Colour (0xff14181d), fxPage.get(), false);
     addAndMakeVisible (tabs);
@@ -2559,18 +2509,54 @@ void MiXXynthEditor::resized()
     tabs.setBounds (b);
 
     auto railArea = rail.getLocalBounds().reduced (6);
-    railTitle.setBounds (railArea.removeFromTop (18));
     modStatus.setBounds (railArea.removeFromBottom (32));
     modViewport.setBounds (railArea);
 
-    // Lay the modules out inside the scrolled content: LFOs, then the + LFO
-    // button, then the envelopes, then + ENV, then the performance chips.
+    // Lay the content out inside the scroll: the voice section first, then the modulation
+    // modules, the + buttons, and the performance chips.
     const int contentWidth = juce::jmax (200, modViewport.getMaximumVisibleWidth());
     const int stripH = ShapeStrip::preferredHeight();
     const int buttonH = 22;
     const int numLfos = proc.getNumLfoModules();
 
+    // ---- voice section ----
+    // Three columns. The sidebar is one column wide, and nine knobs stacked singly would
+    // push the whole modulation section off the bottom of the scroll.
     int y = 0;
+
+    voiceCaption.setBounds (0, y + 2, contentWidth, 16);
+    y += 20;
+
+    {
+        constexpr int cols = 3;
+        const int knobW = juce::jmax (60, contentWidth / cols);
+        const int knobH = 84;
+
+        for (int i = 0; i < voiceKnobs.size(); ++i)
+            voiceKnobs[i]->setBounds ((i % cols) * knobW,
+                                      y + (i / cols) * knobH,
+                                      knobW - 4, knobH - 8);
+
+        y += ((voiceKnobs.size() + cols - 1) / cols) * knobH;
+    }
+
+    {
+        auto mpeRow = juce::Rectangle<int> (0, y, contentWidth, 24);
+
+        if (mpeToggle != nullptr)
+            mpeToggle->setBounds (mpeRow.removeFromLeft (64).reduced (2, 0));
+
+        channelsLabel.setBounds (mpeRow.removeFromLeft (84));
+
+        if (mpeChannels != nullptr)
+            mpeChannels->setBounds (mpeRow.removeFromLeft (112).reduced (2, 0));
+
+        y += 30;
+    }
+
+    // ---- modulation section ----
+    railTitle.setBounds (0, y + 2, contentWidth, 16);
+    y += 24;
 
     // No LFOs yet: the button has to come before the envelopes.
     if (numLfos == 0)

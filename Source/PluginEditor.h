@@ -157,7 +157,6 @@ private:
     class ShapeStrip;
     class FmPage;
     class ModPage;
-    class VoicePage;
     class FxPage;
 
     MiXXynthProcessor& proc;
@@ -166,6 +165,16 @@ private:
     juce::Component rail;
     juce::Label railTitle;
     juce::Viewport modViewport;
+
+    // The voice section, which lives in the sidebar above the modulation section rather
+    // than on a tab of its own. Fewer tabs, and the voice controls are things you set once
+    // and then want to keep an eye on while working on the oscillator - which a tab you
+    // have to switch to does not give you.
+    juce::Label voiceCaption;
+    juce::OwnedArray<mixxynth::ui::ModKnob> voiceKnobs;
+    juce::ToggleButton* mpeToggle = nullptr;
+    juce::Slider* mpeChannels = nullptr;
+    juce::Label channelsLabel;
     juce::Component modContent;
     juce::Label perfChipTitle;
     juce::Label modStatus;
@@ -184,7 +193,6 @@ private:
     std::unique_ptr<mixxynth::ui::WheelComponent> pitchWheel, modWheel;
     std::unique_ptr<FmPage> fmPage;
     std::unique_ptr<ModPage> modPage;
-    std::unique_ptr<VoicePage> voicePage;
     std::unique_ptr<FxPage> fxPage;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthEditor)

@@ -816,9 +816,10 @@ int main()
     std::printf ("     visible child components=%d\n", visited);
     std::printf ("     %s\n", miXXEditor->perfBarDebug().toRawUTF8());
 
-    // Every tab must exist and be populated. Four: the routing matrix and the VA/filter are
-    // views of the FM grid now rather than tabs of their own.
-    check (miXXEditor->getNumTabs() == 4, "four tabs", juce::String (miXXEditor->getNumTabs()));
+    // Every tab must exist and be populated. Three: the routing matrix and the VA/filter
+    // are views of the FM grid, and the voice controls live in the sidebar, so none of
+    // them needs a tab of its own.
+    check (miXXEditor->getNumTabs() == 3, "three tabs", juce::String (miXXEditor->getNumTabs()));
 
     // The voice controls added in M6: drift and velocity response. The generic coverage
     // check cannot say WHERE a parameter's control lives, and for these three that is the
