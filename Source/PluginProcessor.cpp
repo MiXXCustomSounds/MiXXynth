@@ -367,6 +367,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "limiterRelease", "Limiter Release",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.35f));
 
+    // Snap or Free. A parameter rather than editor state, so it saves with the patch: whether
+    // you want the controls to land on round numbers is a property of how you work, and
+    // having to set it again every time you load something would be worse than not having it.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "snapValues", "Snap Values", true));
+
     // M4b workstream 4: the FX rack.
     //
     // A fixed pool of eight slots, because an APVTS parameter's items cannot

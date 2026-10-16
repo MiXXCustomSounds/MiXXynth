@@ -395,7 +395,7 @@ void SquareCell::mouseDrag (const juce::MouseEvent& e)
     if (! draggingValue)
         return;
 
-    const float v = valueFromDrag (dragStartValue01, dragStartY, e.position.y);
+    float v = valueFromDrag (dragStartValue01, dragStartY, e.position.y);
 
     if (juce::approximatelyEqual (v, dragValue01))
         return;

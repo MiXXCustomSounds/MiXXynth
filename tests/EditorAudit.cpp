@@ -87,7 +87,7 @@ namespace
     {
         std::set<juce::String> s { "algorithm", "vaOctave", "filterType", "filterOn",
                                    "mpeEnabled", "mpeMemberChannels",
-                                   "limiterOn" };
+                                   "limiterOn", "snapValues" };
 
         // The VA's amplitude envelope is edited by the graphical envelope, not a knob. It
         // is deliberately not a modulation destination: it only ever controls the VA

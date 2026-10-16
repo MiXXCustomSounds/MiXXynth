@@ -17,6 +17,7 @@
 #include "../Source/Fx/LimiterFx.h"
 #include "../Source/Fx/MultibandFx.h"
 #include "../Source/Fx/EqFx.h"
+#include "../Source/SnapValues.h"
 
 #include <algorithm>
 #include <cmath>
@@ -3967,6 +3968,79 @@ int main()
             ok = check (worst < 1.0e-4, "a flat Graphic EQ passes the signal through",
                         worst) && ok;
         }
+    }
+
+    // --- 45. Snap mode lands on values that mean something ---
+    //
+    // The switch is only worth having if the sets are right, so they are checked against the
+    // values a player would actually reach for rather than against "it snapped to something".
+    {
+        using SV = mixxynth::SnapValues;
+
+        // A ratio parameter: 0..16 with the same skew the real one has.
+        juce::AudioParameterFloat ratio ("op1ratio", "Ratio",
+                                         juce::NormalisableRange<float> (0.0f, 16.0f, 0.001f, 0.4f), 0.0f);
+
+        // A detune parameter, in cents.
+        juce::AudioParameterFloat detune ("vaDetune", "Detune",
+                                          juce::NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f);
+
+        // A level, which has no special meaning and gets the fraction set.
+        juce::AudioParameterFloat level ("op1level", "Level",
+                                         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f);
+
+        // With Snap off, everything is exactly what was asked for.
+        {
+            SV::setEnabled (false);
+
+            const float v = SV::snap (ratio, 0.3719f);
+
+            ok = check (std::abs (v - 0.3719f) < 1.0e-6f, "Snap off leaves the value alone", v) && ok;
+        }
+
+        SV::setEnabled (true);
+
+        // A ratio near 2.0 must land ON 2.0, not merely near it. This is the whole point: the
+        // skewed range means the normalised value for 2.0 is not where it looks like it is.
+        {
+            const float target = ratio.convertTo0to1 (2.0f);
+            const float nudged = juce::jlimit (0.0f, 1.0f, target + 0.02f);
+            const float snapped = SV::snap (ratio, nudged);
+            const float real = ratio.convertFrom0to1 (snapped);
+
+            ok = check (std::abs (real - 2.0f) < 1.0e-3f, "a ratio snaps to 2.0", real) && ok;
+        }
+
+        // And a ratio between two points lands on the nearer one.
+        {
+            const float between = ratio.convertTo0to1 (4.4f);
+            const float real = ratio.convertFrom0to1 (SV::snap (ratio, between));
+
+            ok = check (std::abs (real - 4.0f) < 1.0e-3f, "a ratio snaps to the nearest", real) && ok;
+        }
+
+        // Detune lands on ten-cent steps.
+        {
+            const float real = detune.convertFrom0to1 (SV::snap (detune, detune.convertTo0to1 (23.0f)));
+
+            ok = check (std::abs (real - 20.0f) < 1.0e-3f, "detune snaps to a ten-cent step", real) && ok;
+        }
+
+        // A level lands on a 5% step.
+        {
+            const float real = level.convertFrom0to1 (SV::snap (level, 0.268f));
+
+            ok = check (std::abs (real - 0.25f) < 1.0e-3f, "a level snaps to a round fraction", real) && ok;
+        }
+
+        // Every parameter gets SOME set, because a switch that does nothing on most of the
+        // panel looks broken rather than selective.
+        ok = check (SV::numSnapPointsFor ("op1ratio") > 10
+                      && SV::numSnapPointsFor ("vaDetune") > 5
+                      && SV::numSnapPointsFor ("somethingUnknown") > 5,
+                    "every parameter has a snap set", 0.0) && ok;
+
+        SV::setEnabled (false);
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

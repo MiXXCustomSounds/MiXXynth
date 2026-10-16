@@ -6,6 +6,7 @@
 #include "ModMatrix.h"
 #include "PluginProcessor.h"
 #include "SquareCell.h"
+#include "SnapValues.h"
 
 using mixxynth::ui::ModKnob;
 using mixxynth::ui::ModTarget;
@@ -837,6 +838,14 @@ public:
         diceButton.onClick = [this] { rollDice(); };
         addAndMakeVisible (diceButton);
 
+        // Snap or Free. Bound to the parameter so it saves with the patch, and the label is
+        // set from the value on the editor's poll rather than here - one place decides what
+        // the button says, and it is the same place that tells the controls how to behave.
+        snapButton.setTooltip ("Snap to musical values, or move freely");
+        addAndMakeVisible (snapButton);
+        snapAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+            ed.processor().apvts, "snapValues", snapButton);
+
         audibility.setJustificationType (juce::Justification::centredLeft);
         audibility.setFont (juce::FontOptions (11.0f));
         addAndMakeVisible (audibility);
@@ -1285,6 +1294,16 @@ public:
         return 0.0f;
     }
 
+    // Sets the Snap switch's label. The label names the mode you are IN rather than the one
+    // you would switch to, because a switch that names the other state is one people misread.
+    void setSnapLabel (bool snap)
+    {
+        const juce::String text = snap ? "Snap" : "Free";
+
+        if (snapButton.getButtonText() != text)
+            snapButton.setButtonText (text);
+    }
+
     // With the all-zero init patch it is easy to sit on a patch that cannot make
     // a sound at all, which reads as a broken knob. This says so, and says why.
     void refreshAudibility()
@@ -1389,7 +1408,13 @@ public:
         // Toolbar: the die, the view switch, then the audibility warning.
         auto toolbar = b.removeFromTop (30);
         diceButton.setBounds (toolbar.removeFromLeft (30).reduced (2));
+        toolbar.removeFromLeft (6);
+
+        // Beside the die: the two are both about what moving a control does rather than what
+        // it is set to.
+        snapButton.setBounds (toolbar.removeFromLeft (66).reduced (0, 2));
         toolbar.removeFromLeft (8);
+
         viewSwitch.setBounds (toolbar.removeFromLeft (150).reduced (0, 2));
         toolbar.removeFromLeft (8);
         audibility.setBounds (toolbar);
@@ -2007,6 +2032,13 @@ private:
     static constexpr int modRowHeight = 44;
 
     DiceButton diceButton;
+
+    // Snap or Free, beside the die because they are both about what moving a control DOES
+    // rather than what it is set to. The label shows the mode you are IN, not the one you
+    // would switch to - a switch that names the other state is a switch people misread.
+    juce::ToggleButton snapButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> snapAttachment;
+
     ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing" } };
     juce::Label audibility;
 
@@ -3557,6 +3589,19 @@ void MiXXynthEditor::runTabPolls()
 
     if (fmPage != nullptr)
         fmPage->refreshAudibility();
+
+    // The Snap switch, on the same poll as everything else. One place decides what the button
+    // says AND how the controls behave, so the two cannot disagree - which they would if the
+    // label were set from the click and the behaviour from the parameter.
+    {
+        const auto* snapParam = proc.apvts.getRawParameterValue ("snapValues");
+        const bool snap = snapParam != nullptr && snapParam->load() > 0.5f;
+
+        mixxynth::SnapValues::setEnabled (snap);
+
+        if (fmPage != nullptr)
+            fmPage->setSnapLabel (snap);
+    }
 
     // The FX page watches the slot types so a preset load repopulates the rack.
     if (fxPage != nullptr)

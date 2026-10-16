@@ -61,6 +61,7 @@ target_sources(MiXXynth PRIVATE
     Source/VoiceManager.cpp
     Source/VoiceManager.h
     Source/ModMatrix.cpp
+    Source/SnapValues.cpp
     Source/ModMatrix.h
     Source/Limiter.cpp
     Source/Limiter.h
@@ -129,6 +130,7 @@ add_executable(MiXXynthSmoke
     Source/FmVoice.cpp
     Source/VoiceManager.cpp
     Source/ModMatrix.cpp
+    Source/SnapValues.cpp
     Source/Limiter.cpp
     Source/ModShape.cpp
     Source/OpWave.cpp
@@ -182,6 +184,7 @@ add_executable(MiXXynthEditorAudit
     Source/FmVoice.cpp
     Source/VoiceManager.cpp
     Source/ModMatrix.cpp
+    Source/SnapValues.cpp
     Source/Limiter.cpp
     Source/ModShape.cpp
     Source/OpWave.cpp

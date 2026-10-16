@@ -5,6 +5,8 @@
 #include <sst/jucegui/data/Continuous.h>
 #include <sst/jucegui/data/Discrete.h>
 
+#include "SnapValues.h"
+
 // M3a: adapters exposing MiXXynth's APVTS parameters to sst-jucegui widgets.
 // All edits go through the parameter so host automation and undo behave.
 namespace mixxynth::ui
@@ -69,8 +71,16 @@ namespace mixxynth::ui
             if (p == nullptr)
                 return;
 
+            // Snap mode lives HERE, and only here.
+            //
+            // setValueFromGUI is by definition the user moving a control, and
+            // setValueFromModel below is the automation and preset path. Quantising a host's
+            // automation to 5% steps would be a bug rather than a feature, so the snap goes
+            // in the one place that cannot touch it.
+            const float snapped = mixxynth::SnapValues::snap (*p, juce::jlimit (0.0f, 1.0f, f));
+
             p->beginChangeGesture();
-            p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, f));
+            p->setValueNotifyingHost (snapped);
             p->endChangeGesture();
             notifyAll();
         }
