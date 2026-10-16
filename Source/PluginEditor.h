@@ -116,6 +116,10 @@ public:
     // controls behind - which is a bug the page shipped once already.
     void setFmView (int v);
 
+    // Switches the envelope section's page. Same reason as setFmView: page two's controls are
+    // only laid out while it is showing, so the audit cannot check them without driving it.
+    void setFmAdsrPage (int page);
+
     // Geometry dump for the editor audit (modulation sidebar).
     juce::String sidebarDebug() const;
 

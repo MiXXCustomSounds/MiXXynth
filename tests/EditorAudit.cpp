@@ -115,6 +115,21 @@ namespace
             s.insert ("op" + n + "release");
         }
 
+        // Per-operator FILTER. The on/off toggle, the mode combo, the graphical filter
+        // envelope and the routing switch are all real controls that are not ModTargets. The
+        // filter's cutoff, resonance and drive ARE cells, so those three are counted already.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            const juce::String n = juce::String (i + 1);
+            s.insert ("op" + n + "fltOn");
+            s.insert ("op" + n + "fltType");
+            s.insert ("op" + n + "fltAttack");
+            s.insert ("op" + n + "fltDecay");
+            s.insert ("op" + n + "fltSustain");
+            s.insert ("op" + n + "fltRelease");
+            s.insert ("op" + n + "fltRoute");
+        }
+
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)
         {
             const juce::String id = juce::String (n + 1);
@@ -879,36 +894,47 @@ int main()
                 return "#" + juce::String (idx);
             };
 
+            // Both grid views AND both envelope pages. Page two's controls are only laid out
+            // while it is showing, so a page this never visits is a page it never guards -
+            // and the last thing that was laid out in one state only was a column of cells
+            // drawn on top of another view.
             for (int v = 0; v < 2; ++v)
             {
                 miXXEditor->setFmView (v);
 
-                juce::StringArray clashes;
-
-                for (int i = 0; i < fm->getNumChildComponents(); ++i)
+                for (int pg = 0; pg < 2; ++pg)
                 {
-                    auto* a = fm->getChildComponent (i);
+                    miXXEditor->setFmAdsrPage (pg);
 
-                    if (a == nullptr || ! a->isVisible() || a->getBounds().isEmpty())
-                        continue;
+                    juce::StringArray clashes;
 
-                    for (int j = i + 1; j < fm->getNumChildComponents(); ++j)
+                    for (int i = 0; i < fm->getNumChildComponents(); ++i)
                     {
-                        auto* b = fm->getChildComponent (j);
+                        auto* a = fm->getChildComponent (i);
 
-                        if (b == nullptr || ! b->isVisible() || b->getBounds().isEmpty())
+                        if (a == nullptr || ! a->isVisible() || a->getBounds().isEmpty())
                             continue;
 
-                        if (a->getBounds().intersects (b->getBounds()))
-                            clashes.add (describe (i) + "+" + describe (j));
-                    }
-                }
+                        for (int j = i + 1; j < fm->getNumChildComponents(); ++j)
+                        {
+                            auto* b = fm->getChildComponent (j);
 
-                check (clashes.isEmpty(), "no controls overlap in an FM view",
-                       juce::String (v) + ": " + clashes.joinIntoString (", "));
+                            if (b == nullptr || ! b->isVisible() || b->getBounds().isEmpty())
+                                continue;
+
+                            if (a->getBounds().intersects (b->getBounds()))
+                                clashes.add (describe (i) + "+" + describe (j));
+                        }
+                    }
+
+                    check (clashes.isEmpty(), "no controls overlap in an FM view",
+                           juce::String (v) + "/" + juce::String (pg) + ": "
+                             + clashes.joinIntoString (", "));
+                }
             }
 
             miXXEditor->setFmView (0);
+            miXXEditor->setFmAdsrPage (0);
         }
     }
 
@@ -1509,6 +1535,7 @@ int main()
         std::vector<SquareCell*> allCells;
         int routingCount = 0;
         int vaCount = 0;
+        int filterPageCount = 0;
 
         for (auto* k : miXXEditor->modTargets)
         {
@@ -1519,15 +1546,17 @@ int main()
 
             allCells.push_back (c);
 
-            // Every view's cells are SquareCells, so they have to be told apart by their
-            // parameters: mtxxy is a routing depth, va* and filter* are the VA view, and
-            // everything else in this page is a value.
+            // Every section's cells are SquareCells, so they have to be told apart by their
+            // parameters: mtxxy is a routing depth, va* and filter* are the VA panel, flt is
+            // the envelope section's filter page, and everything else in the grid is a value.
             const auto id = c->getParamID();
 
             if (id.startsWith ("mtx"))
                 ++routingCount;
             else if (id.startsWith ("va") || id.startsWith ("filter"))
                 ++vaCount;
+            else if (id.contains ("flt"))
+                ++filterPageCount;
             else
                 fmCells.push_back (c);
         }
@@ -1536,6 +1565,11 @@ int main()
         // three filter cells (cutoff, resonance, drive).
         check (vaCount == 9, "the VA view built its oscillator and filter cells",
                juce::String (vaCount));
+
+        // The filter page: cutoff, resonance and drive for each operator.
+        check (filterPageCount == 3 * MiXXFmVoice::numOps,
+               "the filter page built its cells",
+               juce::String (filterPageCount) + " of " + juce::String (3 * MiXXFmVoice::numOps));
 
         // One for FM Index, then shape/ratio/level/feedback for each operator.
         const int expected = 1 + 4 * MiXXFmVoice::numOps;

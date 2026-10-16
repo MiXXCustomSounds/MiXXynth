@@ -269,7 +269,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "filterType", "Filter Type",
-        juce::StringArray { "Low Pass", "High Pass", "Band Pass" }, 0));
+        juce::StringArray { "Low", "High", "Band" }, 0));
 
     // Cutoff uses a TRUE logarithmic mapping rather than JUCE's power-curve skew.
     // The old range (skew 0.25, i.e. value = 20 + 19980 * v^4) was very uneven:
@@ -300,10 +300,59 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "filterDrive", "Filter Drive",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
-    // The per-operator filters live in VoiceParams but have no APVTS parameters yet, and
-    // deliberately so: the audit refuses a parameter with no control, and their controls are
-    // part of the ADSR section restructure rather than a separate change. The voice defaults
-    // them all off, so nothing about the sound depends on this waiting.
+    // M6: a filter per operator. Same control set as the global filter above, once per
+    // operator, plus its own envelope and the routing choice that decides whether it sits on
+    // the operator's output, its modulation, or both.
+    //
+    // Cutoff uses the same true-logarithmic map as the global one, so equal control travel is
+    // equal octaves here too. A filter sweep is a musical interval, not a frequency.
+    for (int i = 0; i < mixxynth::kNumOps; ++i)
+    {
+        const juce::String n = juce::String (i + 1);
+
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            "op" + n + "fltOn", "Op " + n + " Filter", false));
+
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            "op" + n + "fltType", "Op " + n + " Filter Type",
+            juce::StringArray { "Low", "High", "Band" }, 0));
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltCutoff", "Op " + n + " Filter Cutoff", cutoffRange, 20000.0f));
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltReso", "Op " + n + " Filter Resonance",
+            juce::NormalisableRange<float> (0.0f, 0.98f, 0.001f), 0.2f));
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltDrive", "Op " + n + " Filter Drive",
+            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
+        // The filter's envelope. A short attack and a long decay by default, because that is
+        // the shape a filter envelope is almost always wanted in - and because an envelope
+        // starting at full would make switching a filter on sound like nothing happened.
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltAttack", "Op " + n + " Filter Attack",
+            juce::NormalisableRange<float> (0.0f, 8.0f, 0.001f, 0.4f), 0.005f));
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltDecay", "Op " + n + " Filter Decay",
+            juce::NormalisableRange<float> (0.0f, 8.0f, 0.001f, 0.4f), 0.30f));
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltSustain", "Op " + n + " Filter Sustain",
+            juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "fltRelease", "Op " + n + " Filter Release",
+            juce::NormalisableRange<float> (0.0f, 8.0f, 0.001f, 0.4f), 0.20f));
+
+        // Where the filter sits. Both by default, so switching one on does the obvious thing
+        // rather than half of it.
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            "op" + n + "fltRoute", "Op " + n + " Filter Route",
+            juce::StringArray { "Out", "Mod", "Both" }, 2));
+    }
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "masterGain", "Master Gain",
@@ -724,6 +773,23 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     vp.cutoff       = getParam (apvts, "filterCutoff");
     vp.resonance    = getParam (apvts, "filterReso");
     vp.drive        = getParam (apvts, "filterDrive");
+
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+    {
+        const juce::String n = juce::String (i + 1);
+
+        vp.opFilterOn[i]      = getParam (apvts, "op" + n + "fltOn") > 0.5f;
+        vp.opFilterType[i]    = static_cast<int> (getParam (apvts, "op" + n + "fltType"));
+        vp.opFilterCutoff[i]  = getParam (apvts, "op" + n + "fltCutoff");
+        vp.opFilterReso[i]    = getParam (apvts, "op" + n + "fltReso");
+        vp.opFilterDrive[i]   = getParam (apvts, "op" + n + "fltDrive");
+        vp.opFilterAttack[i]  = getParam (apvts, "op" + n + "fltAttack");
+        vp.opFilterDecay[i]   = getParam (apvts, "op" + n + "fltDecay");
+        vp.opFilterSustain[i] = getParam (apvts, "op" + n + "fltSustain");
+        vp.opFilterRelease[i] = getParam (apvts, "op" + n + "fltRelease");
+        vp.opFilterRouting[i] = static_cast<int> (getParam (apvts, "op" + n + "fltRoute"));
+    }
+
     vp.drift        = getParam (apvts, "drift");
     vp.velToLevel   = getParam (apvts, "velToLevel");
     vp.velToIndex   = getParam (apvts, "velToIndex");

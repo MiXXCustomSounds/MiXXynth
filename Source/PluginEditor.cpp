@@ -590,6 +590,29 @@ namespace
 
 // FM page: algorithm + FM index + per-op ratio/level/feedback/ADSR
 // ---------------------------------------------------------------------------
+// A combo font small enough that "Low Pass" fits one square.
+//
+// JUCE takes a combo's font from the LookAndFeel rather than from the control - there is no
+// setFont to call - so a smaller font means a LookAndFeel. Six combos share this one, and
+// FmPage owns it, declared before them so it outlives every control pointing at it.
+class CompactComboLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    juce::Font getComboBoxFont (juce::ComboBox& box) override
+    {
+        juce::ignoreUnused (box);
+        return juce::Font (juce::FontOptions (10.5f));
+    }
+
+    // The default reserves about a third of the width for the arrow, which on a single square
+    // leaves too little for the word - "Low" came out as "L". A fixed narrow strip for the
+    // arrow instead, so the text gets everything else.
+    void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
+    {
+        label.setBounds (4, 1, juce::jmax (0, box.getWidth() - 22), box.getHeight() - 2);
+    }
+};
+
 class MiXXynthEditor::FmPage : public juce::Component
 {
 public:
@@ -696,7 +719,85 @@ public:
             env->onStatus = [this] (const juce::String& t) { ed.setModStatus (t); };
 
             adsrEditors.add (env);
-            addAndMakeVisible (env);
+            addChildComponent (env);
+        }
+
+        // ---- page two: the per-operator filters ----
+        // Everything here is hidden until the Filter page is selected, which is why these use
+        // addChildComponent rather than addAndMakeVisible: the page switch owns their
+        // visibility, and a control that adds itself visible would flash on the wrong page
+        // for one frame.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            const juce::String n = juce::String (i + 1);
+
+            // The filter's own envelope, through the same editor the other two envelope
+            // types use - a fourth kind of envelope that behaved differently would be a
+            // fourth set of bugs.
+            auto* fenv = new AdsrEditor (ranged (p, "op" + n + "fltAttack"),
+                                         ranged (p, "op" + n + "fltDecay"),
+                                         ranged (p, "op" + n + "fltSustain"),
+                                         ranged (p, "op" + n + "fltRelease"));
+
+            fenv->onStatus = [this] (const juce::String& t) { ed.setModStatus (t); };
+            filterEnvEditors.add (fenv);
+            addChildComponent (fenv);
+
+            // On/off, labelled with the operator it belongs to: six identical "FILT" cells
+            // would say nothing about which one you are switching.
+            auto* on = new OperatorCell ("OP " + n);
+            filterOnCells.add (on);
+            addChildComponent (on);
+
+            if (auto* b = dynamic_cast<juce::AudioParameterBool*> (ranged (p, "op" + n + "fltOn")))
+            {
+                on->setToggleState (b->get(), juce::dontSendNotification);
+                on->onClick = [on, b]
+                {
+                    b->beginChangeGesture();
+                    b->setValueNotifyingHost (on->getToggleState() ? 1.0f : 0.0f);
+                    b->endChangeGesture();
+                };
+            }
+
+            // The mode is a list, so it stays a combo: a cell can hold a value, not a list.
+            auto* type = new juce::ComboBox();
+
+            // Through the compact look and feel, because the combo gets one square and
+            // "Low Pass" does not fit across one at the default font - it came out as "..." and
+            // told you nothing about which mode you were in.
+            type->setLookAndFeel (&compactComboLook);
+
+            if (auto* tp = dynamic_cast<juce::AudioParameterChoice*> (ranged (p, "op" + n + "fltType")))
+            {
+                for (int c = 0; c < tp->choices.size(); ++c)
+                    type->addItem (tp->choices[c], c + 1);
+
+                type->setSelectedId (tp->getIndex() + 1, juce::dontSendNotification);
+                type->onChange = [type, tp]
+                {
+                    tp->beginChangeGesture();
+                    tp->setValueNotifyingHost (
+                        tp->convertTo0to1 (static_cast<float> (type->getSelectedId() - 1)));
+                    tp->endChangeGesture();
+                };
+            }
+
+            filterTypeBoxes.add (type);
+            addChildComponent (type);
+
+            // Not modulation destinations: making eighteen more of them would mean eighteen
+            // more destination slots, and the global filter's cutoff is already one for the
+            // cases that need it. dstOff says so, and makes a dropped chip flash rather than
+            // silently do nothing.
+            filterCutoffCell[static_cast<size_t> (i)] =
+                addFilterCell (ranged (p, "op" + n + "fltCutoff"), mixxynth::dstOff, "Cutoff");
+            filterResoCell[static_cast<size_t> (i)] =
+                addFilterCell (ranged (p, "op" + n + "fltReso"), mixxynth::dstOff, "Reso");
+            filterDriveCell[static_cast<size_t> (i)] =
+                addFilterCell (ranged (p, "op" + n + "fltDrive"), mixxynth::dstOff, "Drive");
+
+            addRouteButtons (ranged (p, "op" + n + "fltRoute"), i);
         }
 
         // ---- the routing view ----
@@ -1094,9 +1195,10 @@ public:
         // alone was not enough: at a glance everything read as one very wide grid, and a
         // section's cells looked like stray columns of it.
         //
-        // The same gap and the same bar on BOTH sides, so the grid sits symmetrically
-        // between them rather than merely having space around it.
-        constexpr int dividerGap = 34;
+        // The bars hug the grid. A gap either side of them was spending width on separation
+        // that the squares need far more: at nineteen squares across, every pixel of gap is a
+        // pixel off every cell.
+        constexpr int dividerGap = 8;
 
         // The envelope section is sized for its WIDER page. Page one is the envelope alone;
         // page two adds the filter's own controls and the routing switch. Sizing it for the
@@ -1126,26 +1228,32 @@ public:
         const int gridW = gridSquares * square + (gridSquares - 1) * gap;
         const int gridH = numRows * square + (numRows - 1) * gap;
 
+        // The VA panel and the grid keep their square cells; the envelope section does not
+        // have to, because it has no squares to keep square - its envelope is already three
+        // columns wide by one tall. So it takes whatever width is left to the right margin,
+        // which is what stops the tab having a strip of nothing along its right edge.
         const int vaW = vaCols * square + (vaCols - 1) * gap;
-        const int adsrW = adsrSquares * square + (adsrSquares - 1) * gap;
 
-        // The three sections are centred together as one block, so the tab reads as a single
-        // instrument rather than as three things that happen to share a space.
-        const int totalW = vaW + dividerGap + gridW + dividerGap + adsrW;
-
-        const int originX = b.getX() + juce::jmax (0, (b.getWidth() - totalW) / 2);
-        const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
-
-        const int gridX = originX + vaW + dividerGap;
+        const int gridX = b.getX() + vaW + dividerGap;
         const int adsrX = gridX + gridW + dividerGap;
+        const int adsrW = juce::jmax (0, b.getRight() - adsrX);
+
+        // The section's own column pitch. Divided from the room it actually has rather than
+        // from the grid's square, so it grows to fill instead of leaving a gap.
+        const int sectionCol = juce::jmax (22, (adsrW - (adsrSquares - 1) * gap) / adsrSquares);
+
+        // Left-aligned and filling, rather than centred: there is nothing left over to centre
+        // in, and centring a block that already spans the tab would only hide a mistake.
+        const int originX = b.getX();
+        const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
 
         // Where the two dividers go. Stored for paint() rather than recomputed there, because
         // paint() has no access to the layout arithmetic above.
         //
         // Both run the grid's full height rather than their own section's, so they read as
         // section breaks down the tab instead of as underlines to the things beside them.
-        dividerX = originX + vaW + (dividerGap - dividerWidth) / 2;
-        divider2X = gridX + gridW + (dividerGap - dividerWidth) / 2;
+        dividerX = gridX - (dividerGap + dividerWidth) / 2;
+        divider2X = adsrX - (dividerGap + dividerWidth) / 2;
         dividerTop = originY;
         dividerBottom = originY + gridH;
 
@@ -1229,15 +1337,60 @@ public:
         {
             auto sectionCell = [&] (int row, int col, int span)
             {
-                return juce::Rectangle<int> (adsrX + col * (square + gap),
+                return juce::Rectangle<int> (adsrX + col * (sectionCol + gap),
                                              originY + row * (square + gap),
-                                             span * square + (span - 1) * gap, square);
+                                             span * sectionCol + (span - 1) * gap, square);
             };
 
             adsrPages.setBounds (sectionCell (0, 0, 4).reduced (0, 2));
 
             for (int i = 0; i < adsrEditors.size(); ++i)
                 adsrEditors[i]->setBounds (sectionCell (i + 1, 0, 3).reduced (1));
+
+            // Page two, in reading order: the filter's envelope, then what the filter is, then
+            // where it goes.
+            //
+            // Both pages are laid out every time rather than only the visible one, for the same
+            // reason the grid lays out both its views: the bounds are then always valid
+            // whichever page is showing, so a switch before the first resize cannot leave one
+            // of them unsized and the audit can check them without driving the switch.
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                const int row = i + 1;
+
+                if (i < filterEnvEditors.size())
+                    filterEnvEditors[i]->setBounds (sectionCell (row, 0, 3).reduced (1));
+
+                if (i < filterOnCells.size())
+                    filterOnCells[i]->setBounds (sectionCell (row, 3, 1).reduced (1));
+
+                if (i < filterTypeBoxes.size())
+                    filterTypeBoxes[i]->setBounds (sectionCell (row, 4, 1)
+                                                     .reduced (1, juce::jmax (2, square / 5)));
+
+                if (filterCutoffCell[static_cast<size_t> (i)] != nullptr)
+                    filterCutoffCell[static_cast<size_t> (i)]
+                        ->setBounds (sectionCell (row, 5, 1).reduced (1));
+
+                if (filterResoCell[static_cast<size_t> (i)] != nullptr)
+                    filterResoCell[static_cast<size_t> (i)]
+                        ->setBounds (sectionCell (row, 6, 1).reduced (1));
+
+                if (filterDriveCell[static_cast<size_t> (i)] != nullptr)
+                    filterDriveCell[static_cast<size_t> (i)]
+                        ->setBounds (sectionCell (row, 7, 1).reduced (1));
+
+                // The routing switch fills the last square with its three positions.
+                if (i * 3 + 2 < routeButtons.size())
+                {
+                    auto cell = sectionCell (row, 8, 1).reduced (1);
+                    const int each = cell.getHeight() / 3;
+
+                    for (int v = 0; v < 3; ++v)
+                        routeButtons[i * 3 + v]->setBounds (cell.withHeight (each)
+                                                                .translated (0, v * each));
+                }
+            }
         }
 
         // ---- the VA panel ----
@@ -1369,6 +1522,66 @@ private:
         return c;
     }
 
+    // A filter-page cell. Registered for modulation like any other, but kept in its own list
+    // so the grid layouts never see it.
+    SquareCell* addFilterCell (juce::RangedAudioParameter* param, int dest, const juce::String& label)
+    {
+        auto* c = new SquareCell (label, param, dest, true);
+
+        // This page has no column headers either, so its cells name themselves.
+        c->setShowLabel (true);
+
+        ed.wireModTarget (*c);
+        addChildComponent (c);
+        ed.modTargets.push_back (c);
+        filterOwned.add (c);
+        return c;
+    }
+
+    // The routing switch: three stacked buttons sharing a radio group.
+    //
+    // Radio buttons rather than three toggles, because the choice IS exclusive - "Out" and
+    // "Mod" lit together is "Both", which already has its own button. Three independent
+    // switches would invite a state the control cannot actually represent.
+    void addRouteButtons (juce::RangedAudioParameter* param, int opIndex)
+    {
+        auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param);
+
+        if (choice == nullptr)
+            return;
+
+        const int group = opIndex + 1;   // 0 means "no group", so it has to start at 1
+
+        for (int v = 0; v < choice->choices.size(); ++v)
+        {
+            auto* b = new juce::TextButton (choice->choices[v]);
+
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (group);
+
+            // Joined edges, so the three read as one control with three positions rather than
+            // as three buttons that happen to be stacked.
+            b->setConnectedEdges ((v > 0 ? juce::Button::ConnectedOnTop : 0)
+                                    | (v < choice->choices.size() - 1
+                                         ? juce::Button::ConnectedOnBottom : 0));
+
+            b->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffffa53d));
+            b->setColour (juce::TextButton::textColourOnId, juce::Colour (0xff101418));
+            b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xff8b98a5));
+            b->setToggleState (choice->getIndex() == v, juce::dontSendNotification);
+
+            b->onClick = [choice, v]
+            {
+                choice->beginChangeGesture();
+                choice->setValueNotifyingHost (choice->convertTo0to1 (static_cast<float> (v)));
+                choice->endChangeGesture();
+            };
+
+            addChildComponent (b);
+            routeButtons.add (b);
+        }
+    }
+
     // Shows one page of the envelope section.
     //
     // The section itself never hides - it is a section, like the VA panel, not a reading of
@@ -1382,9 +1595,22 @@ private:
         for (auto* e : adsrEditors)
             e->setVisible (volume);
 
-        // Page two is empty until the filter parameters that drive it arrive. Left explicit
-        // rather than silently absent, because an empty page with no explanation reads as a
-        // bug rather than as work in progress.
+        // Page two. Everything that page owns shows together: a filter envelope without its
+        // controls, or controls without their envelope, would be half a page.
+        for (auto* e : filterEnvEditors)
+            e->setVisible (! volume);
+
+        for (auto* c : filterOnCells)
+            c->setVisible (! volume);
+
+        for (auto* b : filterTypeBoxes)
+            b->setVisible (! volume);
+
+        for (auto* c : filterOwned)
+            c->setVisible (! volume);
+
+        for (auto* b : routeButtons)
+            b->setVisible (! volume);
     }
 
     // Shows one view's contents and hides the others'. The operator cells and the toolbar
@@ -1458,9 +1684,21 @@ public:
 
     int getView() const { return viewSwitch.getSelected(); }
 
+    // The envelope section's page, for the same reason as setView: the audit has to be able
+    // to inspect a page it is not currently on, and page two's controls are only laid out -
+    // and only overlap-checked - while it is showing.
+    void setAdsrPage (int page) { adsrPages.setSelected (page); }
+
+    int getAdsrPage() const { return adsrPages.getSelected(); }
+
 private:
 
     MiXXynthEditor& ed;
+
+    // Declared before the controls that use it: members are destroyed in reverse order, so a
+    // look and feel has to come first to outlive every combo pointing at it.
+    CompactComboLookAndFeel compactComboLook;
+
     DiceButton diceButton;
     ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing" } };
     juce::Label audibility;
@@ -1474,8 +1712,23 @@ private:
     // cells[0] is FM Index; the operator rows follow as four per operator.
     SquareCell* indexCell = nullptr;
 
-    // One envelope per operator, in operator order.
+    // One envelope per operator, in operator order. Page one of the envelope section.
     juce::OwnedArray<AdsrEditor> adsrEditors;
+
+    // ---- page two: the per-operator filters ---------------------------------
+    // Laid out across the section in reading order: the filter's own envelope, then what the
+    // filter is, then where it goes.
+    juce::OwnedArray<AdsrEditor> filterEnvEditors;
+    juce::OwnedArray<OperatorCell> filterOnCells;
+    juce::OwnedArray<juce::ComboBox> filterTypeBoxes;
+    juce::OwnedArray<SquareCell> filterOwned;
+    std::array<SquareCell*, MiXXFmVoice::numOps> filterCutoffCell {};
+    std::array<SquareCell*, MiXXFmVoice::numOps> filterResoCell {};
+    std::array<SquareCell*, MiXXFmVoice::numOps> filterDriveCell {};
+
+    // Three stacked buttons per operator, sharing a radio group so they behave as one choice
+    // rather than as three switches.
+    juce::OwnedArray<juce::TextButton> routeButtons;
 
     // ---- the routing view -------------------------------------------------
     // One cell per ordered operator pair, so the grid is 6x6 with no holes: the 30
@@ -2926,6 +3179,12 @@ void MiXXynthEditor::setFmView (int v)
 {
     if (fmPage != nullptr)
         fmPage->setView (v);
+}
+
+void MiXXynthEditor::setFmAdsrPage (int page)
+{
+    if (fmPage != nullptr)
+        fmPage->setAdsrPage (page);
 }
 
 std::vector<mixxynth::ui::AdsrEditor*> MiXXynthEditor::getAdsrEditors() const
