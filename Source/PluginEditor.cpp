@@ -634,13 +634,10 @@ public:
         for (auto* icon : headerIcons)
             addAndMakeVisible (icon);
 
-        // The envelope column keeps its word: it is not one of the four value
-        // columns the icons replace, and "ADSR" is four letters, not a glyph.
-        adsrHeader.setText ("ADSR", juce::dontSendNotification);
-        adsrHeader.setJustificationType (juce::Justification::centred);
-        adsrHeader.setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
-        adsrHeader.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        addAndMakeVisible (adsrHeader);
+        // The envelope section's page switch. It sits on the grid's header row, so the two
+        // sections read across as one layout rather than as two stacks beside each other.
+        adsrPages.onChange = [this] (int page) { applyAdsrPage (page); };
+        addAndMakeVisible (adsrPages);
 
         // FM Index is one value for the whole stack rather than a per-operator one,
         // so it sits in the header row's first cell, out of the operator rows' way.
@@ -1030,13 +1027,19 @@ public:
         // values view's Fb column and the routing view's diagonal both sit in the "self"
         // position and they do NOT mean the same thing. Rather than hoping nobody
         // conflates them, the text says which is which.
-        // The bar between the VA panel and the grid. It runs the grid's full height rather
-        // than the panel's, so it reads as a section break down the whole tab instead of
-        // as an underline to the panel.
+        // The bars either side of the grid. They run the grid's full height rather than their
+        // own section's, so they read as section breaks down the whole tab instead of as
+        // underlines to the things beside them.
+        //
+        // Drawn in one loop from one set of numbers, because two bars that are supposed to
+        // match are two bars that can stop matching: symmetry you have to maintain by hand
+        // is symmetry that eventually is not there.
         if (dividerBottom > dividerTop)
         {
             g.setColour (juce::Colour (0xff4a5765));
-            g.fillRect (dividerX, dividerTop, dividerWidth, dividerBottom - dividerTop);
+
+            for (const int x : { dividerX, divider2X })
+                g.fillRect (x, dividerTop, dividerWidth, dividerBottom - dividerTop);
         }
 
         const int view = viewSwitch.getSelected();
@@ -1067,86 +1070,92 @@ public:
 
         b.removeFromTop (6);
 
-        const bool routing = viewSwitch.getSelected() == 1;
-
         constexpr int numRows = MiXXFmVoice::numOps + 1;  // header row + one per operator
         constexpr int gap = 3;
 
-        // The geometry is computed ONCE, from the wider of the two views, and both are
-        // laid out from that same origin. That is what makes the views align: the
-        // operator column and the first five value columns sit at identical x in both,
-        // so switching views moves nothing. Sizing each view to its own content instead
-        // made them different widths, so centring put their left edges in different
-        // places and the shared operator cells jumped sideways on every switch.
+        // The geometry is computed ONCE, from the wider of the two grid views, and both are
+        // laid out from that same origin. That is what makes the views align: the operator
+        // column and the first four value columns sit at identical x in both, so switching
+        // views moves nothing.
         //
-        //   values:  operator, shape, ratio, level, fdbk, envelope (three squares wide)
+        //   values:  operator, shape, ratio, level, fdbk
         //   routing: operator, then one column per target operator
         //
-        // The routing view is one square narrower, so it leaves a square of unused
-        // space on the right rather than re-centring.
-        constexpr int valueCols = 6;
-        constexpr int valueSquares = 8;   // the envelope counts as three
+        // Routing is the wider of the two, so the values view leaves slack on the right
+        // rather than re-centring itself into a different place.
 
-        // The VA panel is three squares wide and sits to the LEFT of the grid, so the
-        // width budget has to cover both. That is what stops the grid being sized as if it
-        // had the whole tab and then colliding with the panel.
+        // The VA panel sits to the LEFT of the grid and the envelope section to the RIGHT,
+        // so the width budget has to cover all three. That is what stops the grid being
+        // sized as if it had the whole tab and then colliding with a section.
         constexpr int vaCols = 3;
         constexpr int vaRows = 5;   // oscillator x2, envelope, filter x2
 
-        // The two sections are separated by a bar rather than by a bare gap. A gap alone
-        // was not enough: at a glance the panel and the grid read as one very wide grid,
-        // and the panel's cells looked like a stray column of it.
+        // The sections are separated from the grid by a BAR rather than by a bare gap. A gap
+        // alone was not enough: at a glance everything read as one very wide grid, and a
+        // section's cells looked like stray columns of it.
+        //
+        // The same gap and the same bar on BOTH sides, so the grid sits symmetrically
+        // between them rather than merely having space around it.
         constexpr int dividerGap = 34;
 
+        // The envelope section is sized for its WIDER page. Page one is the envelope alone;
+        // page two adds the filter's own controls and the routing switch. Sizing it for the
+        // narrower page would move the grid every time you switched pages, because the whole
+        // block is centred as one.
+        constexpr int adsrSquares = 3 + 5 + 1;   // envelope, filter controls, route switch
+
+        // The widest the grid itself ever is: Routing's operator column plus its six targets.
+        // Values is narrower, so it leaves slack on the right rather than re-centring itself -
+        // which is what keeps the operator column at the same x in both views.
+        constexpr int gridSquares = 7;
+
+        constexpr int acrossSquares = vaCols + gridSquares + adsrSquares;
+        constexpr int acrossGaps = (vaCols - 1) + (gridSquares - 1) + (adsrSquares - 1)
+                                     + 2;   // one per divider
+
         // Squares are sized by whichever constraint binds first: the room there is, or the
-        // room the squares need. The values view is the wider of the two grid views, so it
-        // is always the binding one. This is what lets the grid scale with the window
-        // without ever distorting, and why the minimum window size has to be large enough
-        // for the squares to stay legible.
-        //
-        // Across: the grid is valueSquares wide, the panel is vaCols wide, there is a gap
-        // between them on top of the gaps inside each, and the divider has to come out of
-        // the budget too - sizing the grid as if the divider were not there is how a
-        // layout ends up wider than the window it is in.
+        // room the squares need. This is what lets the grid scale with the window without
+        // ever distorting, and why the minimum window size has to be large enough for the
+        // squares to stay legible.
         const int rowH = (b.getHeight() - gap * (numRows - 1)) / numRows;
 
         const int square = juce::jmax (22, juce::jmin (rowH,
-                                      (b.getWidth() - dividerGap - gap * (valueCols + vaCols))
-                                        / (valueSquares + vaCols)));
+                                      (b.getWidth() - 2 * dividerGap - gap * acrossGaps)
+                                        / acrossSquares));
 
-        const int tailW = square * 3;   // the envelope column, values view only
-
-        // The footprint is the values view's, whichever view is showing.
-        const int gridW = 5 * square + tailW + gap * (valueCols - 1);
+        const int gridW = gridSquares * square + (gridSquares - 1) * gap;
         const int gridH = numRows * square + (numRows - 1) * gap;
 
         const int vaW = vaCols * square + (vaCols - 1) * gap;
+        const int adsrW = adsrSquares * square + (adsrSquares - 1) * gap;
 
-        // The panel and the grid are centred together as one block, so the pair reads as a
-        // single instrument rather than as two things that happen to share a tab.
-        const int totalW = vaW + dividerGap + gridW;
+        // The three sections are centred together as one block, so the tab reads as a single
+        // instrument rather than as three things that happen to share a space.
+        const int totalW = vaW + dividerGap + gridW + dividerGap + adsrW;
 
         const int originX = b.getX() + juce::jmax (0, (b.getWidth() - totalW) / 2);
         const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
 
         const int gridX = originX + vaW + dividerGap;
+        const int adsrX = gridX + gridW + dividerGap;
 
-        // Where the divider goes. Stored for paint() rather than recomputed there, because
+        // Where the two dividers go. Stored for paint() rather than recomputed there, because
         // paint() has no access to the layout arithmetic above.
+        //
+        // Both run the grid's full height rather than their own section's, so they read as
+        // section breaks down the tab instead of as underlines to the things beside them.
         dividerX = originX + vaW + (dividerGap - dividerWidth) / 2;
+        divider2X = gridX + gridW + (dividerGap - dividerWidth) / 2;
         dividerTop = originY;
         dividerBottom = originY + gridH;
 
-        // Columns are contiguous: each starts one gap after the previous one ends. The
-        // wider last column's position already accounts for its width, so it must NOT
-        // be given an extra offset as well - that bug floated the envelope column away
-        // from the grid and pushed the whole thing off centre.
+        // Every grid cell is the same square now that the envelope column has left for its
+        // own section, so this is a plain pitch rather than a special case for a wider last
+        // column. Rows run from the header row at 0.
         auto cellAt = [&] (int row, int col)
         {
-            const int w = (! routing && col == valueCols - 1) ? tailW : square;
-
             return juce::Rectangle<int> (gridX + col * (square + gap),
-                                         originY + row * (square + gap), w, square);
+                                         originY + row * (square + gap), square, square);
         };
 
         // Both views are laid out every time, not just the visible one. They share the
@@ -1192,8 +1201,6 @@ public:
         for (int c = 0; c < headerIcons.size(); ++c)
             headerIcons[c]->setBounds (cellAt (0, 1 + c).reduced (square / 5));
 
-        adsrHeader.setBounds (cellAt (0, valueCols - 1));
-
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
             const int row = i + 1;
@@ -1210,10 +1217,27 @@ public:
                 if (idx < cells.size())
                     cells[idx]->setBounds (cellAt (row, 1 + c));
             }
+        }
 
-            // The envelope takes the whole rectangular cell.
-            if (i < adsrEditors.size())
-                adsrEditors[i]->setBounds (cellAt (row, valueCols - 1).reduced (1));
+        // ---- the envelope section ----
+        // To the right of the grid, past a divider identical to the VA panel's. Its rows use
+        // the grid's own originY and pitch, so row n here lines up with row n there - which is
+        // the whole reason it is laid out from the same numbers rather than from its own.
+        //
+        //   row 0:   the page switch, on the grid's header row
+        //   row 1+:  one row per operator
+        {
+            auto sectionCell = [&] (int row, int col, int span)
+            {
+                return juce::Rectangle<int> (adsrX + col * (square + gap),
+                                             originY + row * (square + gap),
+                                             span * square + (span - 1) * gap, square);
+            };
+
+            adsrPages.setBounds (sectionCell (0, 0, 4).reduced (0, 2));
+
+            for (int i = 0; i < adsrEditors.size(); ++i)
+                adsrEditors[i]->setBounds (sectionCell (i + 1, 0, 3).reduced (1));
         }
 
         // ---- the VA panel ----
@@ -1345,6 +1369,24 @@ private:
         return c;
     }
 
+    // Shows one page of the envelope section.
+    //
+    // The section itself never hides - it is a section, like the VA panel, not a reading of
+    // the grid - so only its contents change. That is also why this is separate from
+    // applyView: the two switches are independent, and folding them together would couple
+    // "which grid view" to "which envelope page" for no reason.
+    void applyAdsrPage (int page)
+    {
+        const bool volume = (page == 0);
+
+        for (auto* e : adsrEditors)
+            e->setVisible (volume);
+
+        // Page two is empty until the filter parameters that drive it arrive. Left explicit
+        // rather than silently absent, because an empty page with no explanation reads as a
+        // bug rather than as work in progress.
+    }
+
     // Shows one view's contents and hides the others'. The operator cells and the toolbar
     // are shared: every view is a reading of the same six operators, so switching views
     // moves nothing.
@@ -1381,10 +1423,10 @@ private:
         for (auto* icon : headerIcons)
             icon->setVisible (values);
 
-        adsrHeader.setVisible (values);
-
-        for (auto* e : adsrEditors)
-            e->setVisible (values);
+        // The envelope section is a SECTION like the VA panel, so it is visible in both grid
+        // views. What changes is which PAGE it shows, and that is the page switch's business
+        // rather than the view switch's - the two are independent.
+        applyAdsrPage (adsrPages.getSelected());
 
         // The VA panel is a SECTION of the tab rather than a reading of the grid, so it
         // is visible in both views. It was a third view itself until the panel moved
@@ -1422,7 +1464,11 @@ private:
     DiceButton diceButton;
     ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing" } };
     juce::Label audibility;
-    juce::Label adsrHeader;
+
+    // The envelope section's own page switch. Two pages rather than three readings of the
+    // grid: the volume envelopes and the filter envelopes are the same six operators, but
+    // they are not the same numbers.
+    ViewSwitch adsrPages { juce::StringArray { "Volume", "Filter" } };
     juce::OwnedArray<GridIcon> headerIcons;
 
     // cells[0] is FM Index; the operator rows follow as four per operator.
@@ -1458,9 +1504,12 @@ private:
     juce::Label vaEnvLabel;
     juce::Label vaModeLabel;
 
-    // The bar between the VA panel and the grid, in this component's own coordinates.
-    // Set by resized() because paint() has no access to the layout arithmetic.
-    int dividerX = 0, dividerTop = 0, dividerBottom = 0;
+    // The two bars, in this component's own coordinates. Set by resized() because paint()
+    // has no access to the layout arithmetic.
+    //
+    // Both dividers, not one: the grid is flanked symmetrically, and a change to the spacing
+    // or the width applies to both or it is not symmetry.
+    int dividerX = 0, divider2X = 0, dividerTop = 0, dividerBottom = 0;
 
     // Two pixels, not one: a hairline at this scale reads as an accident rather than as a
     // deliberate break, which is the opposite of what a section divider is for.

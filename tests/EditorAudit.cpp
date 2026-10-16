@@ -1678,11 +1678,10 @@ int main()
             setParam ("op1level", 0.0f);
         }
 
-        // The columns also have to be contiguous: an earlier version gave the envelope
-        // column an extra offset on top of the one its position already implied, so it
-        // floated away from the rest of the grid and pushed the whole thing off centre.
-        // "Every cell is square" did not catch that, because every cell still was; the
-        // gap between two columns is the thing that was wrong.
+        // The envelope used to be the grid's last column, so this used to assert it sat one
+        // cell-gap after the grid's last value column. It is its own section now, past a
+        // divider, so what matters is different: its ROWS line up with the grid's, and the
+        // space either side of the grid is the same number.
         auto* op1Shape = cellFor ("op1wave");
         auto* op1Ratio = cellFor ("op1ratio");
         auto* op1Fbk   = cellFor ("op1feedback");
@@ -1692,12 +1691,43 @@ int main()
 
         if (op1Shape != nullptr && op1Ratio != nullptr && op1Fbk != nullptr && op1Env != nullptr)
         {
-            const int reference = op1Ratio->getX() - op1Shape->getRight();
-            const int atAdsr = op1Env->getX() - op1Fbk->getRight();
+            // Row alignment. Laid out from its own origin it would look perfectly fine in
+            // isolation and be a whole row out against the grid, so this compares centres
+            // rather than merely checking that the section is somewhere to the right.
+            check (std::abs (op1Env->getBounds().getCentreY()
+                               - op1Fbk->getBounds().getCentreY()) <= 1,
+                   "the envelope section's rows line up with the grid's",
+                   juce::String (op1Env->getBounds().getCentreY())
+                     + " vs " + juce::String (op1Fbk->getBounds().getCentreY()));
+        }
 
-            check (std::abs (atAdsr - reference) <= 1,
-                   "the ADSR column sits one gap after the grid, not floating off it",
-                   juce::String (atAdsr) + " px vs " + juce::String (reference) + " px");
+        if (op1Shape != nullptr && op1Ratio != nullptr)
+        {
+            const int cellGap = op1Ratio->getX() - op1Shape->getRight();
+
+            check (op1Env == nullptr || op1Env->getX() > op1Fbk->getRight() + cellGap * 3,
+                   "the envelope section is set apart by a divider, not a cell gap",
+                   juce::String (op1Env != nullptr ? op1Env->getX() - op1Fbk->getRight() : 0));
+        }
+
+        // Symmetry, checked rather than eyeballed. The space between the VA panel and the grid
+        // and the space between the grid and the envelope section are the same number: two
+        // gaps that are supposed to match are two gaps that can stop matching.
+        {
+            auto* vaNoise = cellFor ("vaNoiseLevel");
+            auto* indexCell2 = cellFor ("fmIndex");
+            auto* lastRoutingCol = cellFor ("mtx16");
+
+            if (vaNoise != nullptr && indexCell2 != nullptr && lastRoutingCol != nullptr
+                  && op1Env != nullptr)
+            {
+                const int leftGap  = indexCell2->getX() - vaNoise->getRight();
+                const int rightGap = op1Env->getX() - lastRoutingCol->getRight();
+
+                check (std::abs (leftGap - rightGap) <= 1,
+                       "the grid is flanked symmetrically by its two sections",
+                       juce::String (leftGap) + " px left vs " + juce::String (rightGap) + " px right");
+            }
         }
 
         // The algorithm-pinning check is NOT here: the audit sets the algorithm to a
