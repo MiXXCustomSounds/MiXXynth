@@ -14,6 +14,11 @@ namespace
     const juce::Colour cellBorder     { 0xff2a323d };
     const juce::Colour valueText      { 0xffe2e8ee };
 
+    // Dimmer than the value, because the name is a caption and the number is the point.
+    // Not called `labelText`: that is the constructor parameter, and the shadow would be
+    // both a warning and a trap.
+    const juce::Colour captionText    { 0xff8b98a5 };
+
     // The plugin's accent. A cell at 0% is black, so orange means "there is a
     // value here" and blue means "and it is moving".
     const juce::Colour accentOrange   { 0xffffa53d };
@@ -89,7 +94,20 @@ juce::String SquareCell::valueTextForTest() const
 
 juce::Colour SquareCell::fillColour() const
 {
-    return isShowingLiveValue() ? modulatedBlue : accentOrange;
+    // Blue means "this is being modulated", orange means "this is a value you set".
+    //
+    // This used to depend ONLY on a live published value, which meant it could never say
+    // blue: nothing publishes modulated values yet (it is PLAN-M6 step 5). So the colour
+    // was correct in principle and invisible in practice.
+    //
+    // Whether a cell is modulated is knowable without that path - it has an assignment with
+    // a non-zero depth - so the colour is decided from that. The live value still drives the
+    // fill once it exists, and the two are not the same question: one says "is this moving",
+    // the other says "where is it now".
+    const bool modulated = isShowingLiveValue()
+                             || std::abs (totalDepth (getAssignments())) > 1.0e-6f;
+
+    return modulated ? modulatedBlue : accentOrange;
 }
 
 juce::Rectangle<float> SquareCell::fillRect() const
@@ -151,29 +169,81 @@ void SquareCell::paint (juce::Graphics& g)
 
     if (showValue && source.p != nullptr)
     {
+        // The name, above the value, when the cell has to say what it is. The strip is only
+        // taken when a label is actually drawn, so a grid cell - which is already named by
+        // its column header - keeps its full height for the value.
+        const bool drawLabel = showLabel && text.isNotEmpty();
+
+        auto textArea = getLocalBounds().removeFromTop (static_cast<int> (textHeight) + 2
+                                                          + (drawLabel ? static_cast<int> (labelHeight) : 0));
+
+        if (drawLabel)
+        {
+            g.setColour (captionText);
+            g.setFont (9.5f);
+            g.drawFittedText (text.toUpperCase(),
+                              textArea.removeFromTop (static_cast<int> (labelHeight)).reduced (2, 0),
+                              juce::Justification::centred, 1);
+        }
+
         // The parameter's own text unless something more legible was supplied: a
         // shape cell wants to say "sine", not "0.000".
         g.setColour (valueText);
         g.setFont (11.0f);
-        g.drawFittedText (valueTextForTest(),
-                          getLocalBounds().removeFromTop (static_cast<int> (textHeight) + 2)
-                                          .reduced (3, 1),
+        g.drawFittedText (valueTextForTest(), textArea.reduced (3, 1),
                           juce::Justification::centred, 1);
     }
 
-    // One white line per assignment, drawn at value + depth, so you can see where
-    // the modulation is aiming and how far it can reach. The line's position is
-    // the grab handle for that assignment's amount.
-    for (int i = 0; i < getNumAssignments(); ++i)
+    // One 'T' per assignment: a stem from the value to where the modulation can push it,
+    // with a crossbar at the far end.
+    //
+    //   depth > 0                    depth < 0
+    //      ___                         ^  value
+    //       |                          |
+    //       |   <- stem                |   <- stem
+    //    ^  value                   __|__  <- crossbar
+    //
+    // The orientation falls out of the arithmetic rather than being special-cased: the
+    // crossbar is always at value + depth, so a positive depth puts it above the value and
+    // a negative one puts it below. That is what makes a bipolar assignment read as a
+    // mirrored 'T' without anything having to decide that it is bipolar.
+    //
+    // The stem's LENGTH is the depth, so the shape is the amount. The horizontal line this
+    // replaced could not show that, because a line has no length to read - it only had a
+    // position, and position was already saying where the reach was.
+    //
+    // The crossbar is also the grab handle, which is why depthEdgeAt tests its y.
     {
-        const bool isDragged = draggingDepth && depthDragIndex == i;
-        const float depth = effectiveDepth (i, isDragged, depthDragDepth);
-        const float y = yForValue01 (value01() + depth);
-        const bool hot = isDragged || overDepthIndex == i;
+        const int n = juce::jmax (1, getNumAssignments());
+        const float slot = (b.getWidth() - 6.0f) / static_cast<float> (n);
+        const float valueY = yForValue01 (value01());
 
-        g.setColour (hot ? accentOrange : juce::Colours::white.withAlpha (0.85f));
-        g.fillRect (b.getX() + 2.0f, y - (hot ? 1.5f : 1.0f),
-                    b.getWidth() - 4.0f, hot ? 3.0f : 2.0f);
+        for (int i = 0; i < getNumAssignments(); ++i)
+        {
+            const bool isDragged = draggingDepth && depthDragIndex == i;
+            const float depth = effectiveDepth (i, isDragged, depthDragDepth);
+            const float reachY = yForValue01 (value01() + depth);
+            const bool hot = isDragged || overDepthIndex == i;
+
+            // Assignments sit side by side in their own columns, so several on one cell
+            // stay readable instead of drawing over each other.
+            const float cx = b.getX() + 3.0f + slot * (static_cast<float> (i) + 0.5f);
+
+            const float top = juce::jmin (valueY, reachY);
+            const float bottom = juce::jmax (valueY, reachY);
+
+            const float stemW = hot ? 3.0f : 2.0f;
+            const float barW = juce::jmin (slot * 0.72f, 20.0f);
+            const float barH = hot ? 3.0f : 2.0f;
+
+            g.setColour (hot ? accentOrange : juce::Colours::white.withAlpha (0.9f));
+
+            // The stem. At least a crossbar tall, so a depth dragged to zero still shows a
+            // tick at the value rather than vanishing entirely.
+            g.fillRect (cx - stemW * 0.5f, top, stemW, juce::jmax (barH, bottom - top));
+
+            g.fillRect (cx - barW * 0.5f, reachY - barH * 0.5f, barW, barH);
+        }
     }
 }
 

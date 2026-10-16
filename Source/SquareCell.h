@@ -56,6 +56,18 @@ public:
     // a mystery number.
     void setValueTextFunction (std::function<juce::String (float)> f);
 
+    // Draws the control's own name in a strip at the top of the cell.
+    //
+    // Opt-in, because the grid's cells are already named by their column headers and a
+    // second copy of the word would be noise. The VA panel has no headers of its own, so
+    // its cells have to say what they are - which is the difference between a panel and a
+    // row of unlabelled numbers.
+    void setShowLabel (bool shouldShow)
+    {
+        showLabel = shouldShow;
+        repaint();
+    }
+
     // Suppresses the value text at the ends of the range, where the fill already says
     // what the number would - black means nothing, full means everything.
     //
@@ -106,6 +118,7 @@ private:
     bool showValue = true;
     float liveValue01 = -1.0f;
     bool hideAtExtremes = false;
+    bool showLabel = false;
     std::function<juce::String (float)> valueTextFunction;
 
     bool draggingValue = false;
@@ -127,6 +140,7 @@ private:
     // set - which is every cell.
     static constexpr float edgeGrab = 4.0f;
     static constexpr float textHeight = 12.0f;
+    static constexpr float labelHeight = 11.0f;
 
     // 140 px of travel covers the whole range: slower than the 110 px a
     // modulation depth uses, because a value is edited far more often and wants

@@ -762,11 +762,20 @@ public:
         // than another reading of the grid: the VA is one oscillator and one filter, not
         // six operators, so it sits in its own column to the left of the grid and stays
         // visible whichever view the grid is showing.
-        vaHeader.setText ("VA", juce::dontSendNotification);
-        vaHeader.setJustificationType (juce::Justification::centredLeft);
-        vaHeader.setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
-        vaHeader.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        addAndMakeVisible (vaHeader);
+        // Captions for the panel and for its two controls that are not cells, and so cannot
+        // caption themselves. One style, so the panel's words all look alike.
+        auto caption = [this] (juce::Label& l, const juce::String& t)
+        {
+            l.setText (t, juce::dontSendNotification);
+            l.setJustificationType (juce::Justification::centredLeft);
+            l.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
+            l.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+            addAndMakeVisible (l);
+        };
+
+        caption (vaHeader, "VA");
+        caption (vaEnvLabel, "ENVELOPE");
+        caption (vaModeLabel, "FILTER TYPE");
 
         // The shape is the same morph the operators use, so its cell names the shape
         // exactly as the operator shape cells do.
@@ -1015,6 +1024,15 @@ public:
         // values view's Fb column and the routing view's diagonal both sit in the "self"
         // position and they do NOT mean the same thing. Rather than hoping nobody
         // conflates them, the text says which is which.
+        // The bar between the VA panel and the grid. It runs the grid's full height rather
+        // than the panel's, so it reads as a section break down the whole tab instead of
+        // as an underline to the panel.
+        if (dividerBottom > dividerTop)
+        {
+            g.setColour (juce::Colour (0xff4a5765));
+            g.fillRect (dividerX, dividerTop, dividerWidth, dividerBottom - dividerTop);
+        }
+
         const int view = viewSwitch.getSelected();
 
         g.setColour (juce::Colour (0xff8b98a5));
@@ -1069,18 +1087,26 @@ public:
         constexpr int vaCols = 3;
         constexpr int vaRows = 5;   // oscillator x2, envelope, filter x2
 
+        // The two sections are separated by a bar rather than by a bare gap. A gap alone
+        // was not enough: at a glance the panel and the grid read as one very wide grid,
+        // and the panel's cells looked like a stray column of it.
+        constexpr int dividerGap = 34;
+
         // Squares are sized by whichever constraint binds first: the room there is, or the
         // room the squares need. The values view is the wider of the two grid views, so it
         // is always the binding one. This is what lets the grid scale with the window
         // without ever distorting, and why the minimum window size has to be large enough
         // for the squares to stay legible.
         //
-        // Across: the grid is valueSquares wide, the panel is vaCols wide, and there is a
-        // gap between them on top of the gaps inside each.
+        // Across: the grid is valueSquares wide, the panel is vaCols wide, there is a gap
+        // between them on top of the gaps inside each, and the divider has to come out of
+        // the budget too - sizing the grid as if the divider were not there is how a
+        // layout ends up wider than the window it is in.
         const int rowH = (b.getHeight() - gap * (numRows - 1)) / numRows;
 
         const int square = juce::jmax (22, juce::jmin (rowH,
-                                      (b.getWidth() - gap * (valueCols + vaCols)) / (valueSquares + vaCols)));
+                                      (b.getWidth() - dividerGap - gap * (valueCols + vaCols))
+                                        / (valueSquares + vaCols)));
 
         const int tailW = square * 3;   // the envelope column, values view only
 
@@ -1092,12 +1118,18 @@ public:
 
         // The panel and the grid are centred together as one block, so the pair reads as a
         // single instrument rather than as two things that happen to share a tab.
-        const int totalW = vaW + gap + gridW;
+        const int totalW = vaW + dividerGap + gridW;
 
         const int originX = b.getX() + juce::jmax (0, (b.getWidth() - totalW) / 2);
         const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
 
-        const int gridX = originX + vaW + gap;
+        const int gridX = originX + vaW + dividerGap;
+
+        // Where the divider goes. Stored for paint() rather than recomputed there, because
+        // paint() has no access to the layout arithmetic above.
+        dividerX = originX + vaW + (dividerGap - dividerWidth) / 2;
+        dividerTop = originY;
+        dividerBottom = originY + gridH;
 
         // Columns are contiguous: each starts one gap after the previous one ends. The
         // wider last column's position already accounts for its width, so it must NOT
@@ -1195,6 +1227,10 @@ public:
             auto va = juce::Rectangle<int> (originX, originY + square + gap,
                                             vaW, vaRows * square + (vaRows - 1) * gap);
 
+            // Captions are a thin strip rather than a whole square: they name the control
+            // below them, so they should not cost as much room as the control itself.
+            constexpr int captionHeight = 12;
+
             // Takes the next square out of the row and advances past it and its gap.
             auto take = [&] (juce::Rectangle<int>& row)
             {
@@ -1225,21 +1261,26 @@ public:
                 if (vaCells[static_cast<size_t> (i)] != nullptr)
                     vaCells[static_cast<size_t> (i)]->setBounds (take (row2));
 
-            // The envelope takes the panel's whole width. Three squares is a wide, short
-            // envelope, which is exactly the proportion the operator envelopes get.
+            // The envelope takes the panel's whole width, with a caption strip above it -
+            // the editor draws a graph, so its name has to sit above the graph rather than
+            // inside it.
             auto envRow = nextRow();
+            vaEnvLabel.setBounds (envRow.removeFromTop (captionHeight).reduced (1, 0));
 
             if (vaEnvEditor != nullptr)
                 vaEnvEditor->setBounds (envRow.reduced (1));
 
             // The filter's on/off and its mode. The mode is a choice, so it stays a combo
-            // box: a cell can hold a value, not a list.
+            // box: a cell can hold a value, not a list - and a combo cannot caption itself,
+            // so it gets a strip of its own too.
             auto filtRow = nextRow();
 
             if (! vaToggles.isEmpty())
                 vaToggles[0]->setBounds (take (filtRow));
 
-            vaFilterType.setBounds (filtRow.removeFromLeft (square * 2 + gap).reduced (1, square / 5));
+            auto modeCell = filtRow.removeFromLeft (square * 2 + gap);
+            vaModeLabel.setBounds (modeCell.removeFromTop (captionHeight).reduced (1, 0));
+            vaFilterType.setBounds (modeCell.reduced (1, 2));
 
             // Cutoff, resonance, drive.
             auto valRow = nextRow();
@@ -1286,6 +1327,11 @@ private:
     SquareCell* addVaCell (juce::RangedAudioParameter* param, int dest, const juce::String& label)
     {
         auto* c = new SquareCell (label, param, dest, true);
+
+        // The panel has no column headers, so every one of its cells has to name itself.
+        // The grid's cells do not, which is why this is opt-in.
+        c->setShowLabel (true);
+
         ed.wireModTarget (*c);
         addChildComponent (c);
         ed.modTargets.push_back (c);
@@ -1349,6 +1395,8 @@ private:
             vaEnvEditor->setVisible (true);
 
         vaHeader.setVisible (true);
+        vaEnvLabel.setVisible (true);
+        vaModeLabel.setVisible (true);
 
         resized();
         repaint();
@@ -1401,6 +1449,16 @@ private:
     juce::OwnedArray<AdsrEditor> vaEnvOwned;
     AdsrEditor* vaEnvEditor = nullptr;
     juce::Label vaHeader;
+    juce::Label vaEnvLabel;
+    juce::Label vaModeLabel;
+
+    // The bar between the VA panel and the grid, in this component's own coordinates.
+    // Set by resized() because paint() has no access to the layout arithmetic.
+    int dividerX = 0, dividerTop = 0, dividerBottom = 0;
+
+    // Two pixels, not one: a hairline at this scale reads as an accident rather than as a
+    // deliberate break, which is the opposite of what a section divider is for.
+    static constexpr int dividerWidth = 2;
 
     juce::Random rng;
     juce::OwnedArray<SquareCell> ownedCells;
