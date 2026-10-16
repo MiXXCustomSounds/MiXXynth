@@ -4,8 +4,10 @@
 #include "EditorTheme.h"
 #include "ModMatrix.h"
 #include "PluginProcessor.h"
+#include "SquareCell.h"
 
 using mixxynth::ui::ModKnob;
+using mixxynth::ui::SquareCell;
 
 namespace
 {
@@ -341,6 +343,166 @@ private:
 
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// FM grid furniture
+//
+// The grid only reads as a grid if every cell is the same shape and none of them
+// is a word. So the four column headers are pictures, the dice is a die face
+// rather than the word "Dice", and the operator cell is a label and a switch in
+// one square instead of a label with a checkbox beside it.
+// ---------------------------------------------------------------------------
+namespace
+{
+    // The four column headers, each a glyph that says what the column does without
+    // spending a word on it.
+    class GridIcon : public juce::Component
+    {
+    public:
+        enum Kind { shape, ratio, level, feedback };
+
+        explicit GridIcon (Kind k) : kind (k) {}
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto c = getLocalBounds().toFloat().getCentre();
+            const float s = static_cast<float> (juce::jmin (getWidth(), getHeight())) * 0.6f;
+
+            g.setColour (juce::Colour (0xff7c8896));
+
+            switch (kind)
+            {
+                case shape:
+                {
+                    // One cycle of a sine, which is where the morph starts.
+                    const float w = s, h = s * 0.42f;
+                    const float x = c.x - w * 0.5f;
+
+                    juce::Path p;
+                    p.startNewSubPath (x, c.y);
+                    p.cubicTo (x + w * 0.25f, c.y - h, x + w * 0.25f, c.y - h, x + w * 0.5f, c.y);
+                    p.cubicTo (x + w * 0.75f, c.y + h, x + w * 0.75f, c.y + h, x + w, c.y);
+
+                    g.strokePath (p, juce::PathStrokeType (1.8f));
+                    break;
+                }
+
+                case ratio:
+                {
+                    // A multiplication sign: the ratio multiplies the pitch.
+                    const float r = s * 0.36f;
+                    g.drawLine (c.x - r, c.y - r, c.x + r, c.y + r, 1.8f);
+                    g.drawLine (c.x - r, c.y + r, c.x + r, c.y - r, 1.8f);
+                    break;
+                }
+
+                case level:
+                {
+                    // Three rising bars.
+                    const float barW = s * 0.17f;
+                    const float gap = s * 0.15f;
+                    const float left = c.x - (barW * 3.0f + gap * 2.0f) * 0.5f;
+                    const float base = c.y + s * 0.42f;
+
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        const float hgt = s * (0.32f + 0.28f * static_cast<float> (i));
+                        g.fillRect (left + static_cast<float> (i) * (barW + gap),
+                                    base - hgt, barW, hgt);
+                    }
+
+                    break;
+                }
+
+                case feedback:
+                {
+                    // An open loop with an arrowhead: the operator feeding itself.
+                    const float r = s * 0.36f;
+
+                    juce::Path arc;
+                    arc.addCentredArc (c.x, c.y, r, r, 0.0f, 0.7f, 5.4f, true);
+                    g.strokePath (arc, juce::PathStrokeType (1.8f));
+
+                    juce::Path head;
+                    head.addTriangle (c.x + r * 0.15f, c.y - r * 1.28f,
+                                      c.x + r * 0.72f, c.y - r * 0.95f,
+                                      c.x + r * 0.30f, c.y - r * 0.45f);
+                    g.fillPath (head);
+                    break;
+                }
+            }
+        }
+
+    private:
+        Kind kind;
+    };
+
+    // A square button showing a die face. The word "Dice" told you what the button
+    // did; the die says the same thing in the space the grid has to spare.
+    class DiceButton : public juce::Button
+    {
+    public:
+        DiceButton() : juce::Button ("Dice")
+        {
+            setTooltip ("Randomise every control in this section");
+        }
+
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto b = getLocalBounds().toFloat().reduced (1.0f);
+            const bool hot = over || down;
+
+            g.setColour (hot ? juce::Colour (0xff232b34) : juce::Colour (0xff161c22));
+            g.fillRoundedRectangle (b, 4.0f);
+            g.setColour (hot ? juce::Colour (0xffffa53d) : juce::Colour (0xff39434f));
+            g.drawRoundedRectangle (b.reduced (0.5f), 4.0f, 1.5f);
+
+            // Six pips in two columns of three.
+            const auto c = b.getCentre();
+            const float s = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f;
+            const float r = juce::jmax (1.6f, s * 0.12f);
+            const float dx = s * 0.23f, dy = s * 0.27f;
+
+            g.setColour (hot ? juce::Colour (0xffffa53d) : juce::Colour (0xffc2ccd6));
+
+            for (int col = 0; col < 2; ++col)
+                for (int row = 0; row < 3; ++row)
+                    g.fillEllipse (c.x + (col == 0 ? -dx : dx) - r,
+                                   c.y + (static_cast<float> (row) - 1.0f) * dy - r,
+                                   r * 2.0f, r * 2.0f);
+        }
+    };
+
+    // The operator cell: the label and the on/off switch in one square. The old
+    // layout put a checkbox beside the row, which cost a whole column and made the
+    // operator's own identity the least prominent thing about it.
+    class OperatorCell : public juce::Button
+    {
+    public:
+        explicit OperatorCell (const juce::String& t) : juce::Button (t)
+        {
+            setClickingTogglesState (true);
+            setTooltip ("Enable or silence this operator");
+        }
+
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto b = getLocalBounds().toFloat();
+            const bool on = getToggleState();
+
+            g.setColour (on ? juce::Colour (0xff18251c) : juce::Colour (0xff101418));
+            g.fillRoundedRectangle (b, 3.0f);
+
+            g.setColour (on ? juce::Colour (0xff4ade80)
+                            : (over || down ? juce::Colour (0xff55606d) : juce::Colour (0xff2a323d)));
+            g.drawRoundedRectangle (b.reduced (0.5f), 3.0f, on ? 2.0f : 1.0f);
+
+            g.setColour (on ? juce::Colour (0xff4ade80) : juce::Colour (0xff5a6673));
+            g.setFont (juce::FontOptions (12.0f, on ? juce::Font::bold : juce::Font::plain));
+            g.drawFittedText (getButtonText(), getLocalBounds(), juce::Justification::centred, 1);
+        }
+    };
+}
+
 // FM page: algorithm + FM index + per-op ratio/level/feedback/ADSR
 // ---------------------------------------------------------------------------
 class MiXXynthEditor::FmPage : public juce::Component
@@ -350,30 +512,22 @@ public:
     {
         auto& p = e.processor();
 
-        algoLabel.setText ("Algorithm", juce::dontSendNotification);
-        algoLabel.setJustificationType (juce::Justification::centredRight);
-        addAndMakeVisible (algoLabel);
-
+        // M6: the algorithm section is gone from the UI, so the parameter is pinned
+        // to Free (matrix) right here. Leaving it wherever it happened to be would
+        // leave an invisible control still overriding the routing matrix, which is
+        // exactly the confusing behaviour being escaped. The DX7 DSP stays in place
+        // so the feature can come back once it works properly.
         if (auto* algoParam = choice (p, "algorithm"))
         {
-            for (int i = 0; i < algoParam->choices.size(); ++i)
-                algo.addItem (algoParam->choices[i], i + 1);
-
-            algo.setSelectedId (algoParam->getIndex() + 1, juce::dontSendNotification);
-            algo.onChange = [this, algoParam]
+            if (algoParam->getIndex() != mixxynth::kFreeAlgorithm)
             {
                 algoParam->beginChangeGesture();
                 algoParam->setValueNotifyingHost (
-                    algoParam->convertTo0to1 (static_cast<float> (algo.getSelectedId() - 1)));
+                    algoParam->convertTo0to1 (static_cast<float> (mixxynth::kFreeAlgorithm)));
                 algoParam->endChangeGesture();
-            };
+            }
         }
 
-        addAndMakeVisible (algo);
-        addKnob (ranged (p, "fmIndex"), mixxynth::dstFmIndex, "FM Index");
-
-        diceButton.setButtonText ("Dice");
-        diceButton.setTooltip ("Randomise every knob on this page");
         diceButton.onClick = [this] { rollDice(); };
         addAndMakeVisible (diceButton);
 
@@ -381,13 +535,35 @@ public:
         audibility.setFont (juce::FontOptions (11.0f));
         addAndMakeVisible (audibility);
 
+        // One glyph per value column, so the header row stays square.
+        headerIcons.add (new GridIcon (GridIcon::shape));
+        headerIcons.add (new GridIcon (GridIcon::ratio));
+        headerIcons.add (new GridIcon (GridIcon::level));
+        headerIcons.add (new GridIcon (GridIcon::feedback));
+
+        for (auto* icon : headerIcons)
+            addAndMakeVisible (icon);
+
+        // The envelope column keeps its word: it is not one of the four value
+        // columns the icons replace, and "ADSR" is four letters, not a glyph.
+        adsrHeader.setText ("ADSR", juce::dontSendNotification);
+        adsrHeader.setJustificationType (juce::Justification::centred);
+        adsrHeader.setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
+        adsrHeader.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        addAndMakeVisible (adsrHeader);
+
+        // FM Index is one value for the whole stack rather than a per-operator one,
+        // so it sits in the header row's first cell, out of the operator rows' way.
+        indexCell = addCell (ranged (p, "fmIndex"), mixxynth::dstFmIndex, "FM Index");
+
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
             const juce::String n = juce::String (i + 1);
 
-            // Per-operator enable. A disabled operator outputs silence, which
-            // also stops it modulating anything downstream.
-            auto* t = new juce::ToggleButton ("Op" + n);
+            // The operator cell is the label and the on/off switch in one square. A
+            // disabled operator outputs silence, which also stops it modulating
+            // anything downstream.
+            auto* t = new OperatorCell ("OP " + n);
             opOnToggles.add (t);
             addAndMakeVisible (t);
 
@@ -402,15 +578,30 @@ public:
                 };
             }
 
-            // Wave first, so the column reads: shape, then its settings.
-            addKnob (ranged (p, "op" + n + "wave"), mixxynth::dstOff, "Op" + n + " Wave");
-            addKnob (ranged (p, "op" + n + "ratio"), mixxynth::dstOp1Ratio + i, "Op" + n + " Ratio");
-            addKnob (ranged (p, "op" + n + "level"), mixxynth::dstOp1Level + i, "Op" + n + " Level");
-            addKnob (ranged (p, "op" + n + "feedback"), mixxynth::dstOff, "Op" + n + " Fb");
-            addKnob (ranged (p, "op" + n + "attack"), mixxynth::dstOff, "Op" + n + " A");
-            addKnob (ranged (p, "op" + n + "decay"), mixxynth::dstOff, "Op" + n + " D");
-            addKnob (ranged (p, "op" + n + "sustain"), mixxynth::dstOff, "Op" + n + " S");
-            addKnob (ranged (p, "op" + n + "release"), mixxynth::dstOff, "Op" + n + " R");
+            // Shape first, so the row reads: what the operator is, then how much of
+            // it there is.
+            auto* shape = addCell (ranged (p, "op" + n + "wave"), mixxynth::dstOff,
+                                   "Op" + n + " Shape");
+
+            // The morph is a continuous sweep through sine > triangle > saw > square,
+            // so the cell names the shape it is at rather than showing a bare number.
+            // Step 4 replaces this text with the actual waveform.
+            shape->setValueTextFunction ([] (float v)
+            {
+                return juce::String (mixxynth::OpWaveTables::shapeName (v));
+            });
+
+            addCell (ranged (p, "op" + n + "ratio"), mixxynth::dstOp1Ratio + i, "Op" + n + " Ratio");
+            addCell (ranged (p, "op" + n + "level"), mixxynth::dstOp1Level + i, "Op" + n + " Level");
+            addCell (ranged (p, "op" + n + "feedback"), mixxynth::dstOff, "Op" + n + " Fb");
+
+            // The ADSR column still holds knobs for now. The graphical envelopes are
+            // step 6, and removing these before those exist would leave four
+            // parameters with no control at all.
+            addKnob (ranged (p, "op" + n + "attack"), mixxynth::dstOff, "A");
+            addKnob (ranged (p, "op" + n + "decay"), mixxynth::dstOff, "D");
+            addKnob (ranged (p, "op" + n + "sustain"), mixxynth::dstOff, "S");
+            addKnob (ranged (p, "op" + n + "release"), mixxynth::dstOff, "R");
         }
 
         refreshAudibility();
@@ -486,28 +677,10 @@ public:
         ed.setModStatus ("Dice rolled a new FM patch");
     }
 
-    // Keeps each Wave knob's label showing the shape it is currently at, so the
-    // morph is readable instead of a mystery dial.
-    void refreshWaveLabels()
-    {
-        constexpr int knobsPerOp = 8;
-
-        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-        {
-            const int idx = 1 + i * knobsPerOp;
-
-            if (idx >= knobs.size())
-                break;
-
-            float wave = 0.0f;
-
-            if (auto* p = ranged (ed.processor(), "op" + juce::String (i + 1) + "wave"))
-                wave = p->convertFrom0to1 (p->getValue());
-
-            knobs[idx]->setLabelText ("Op" + juce::String (i + 1) + " "
-                                        + mixxynth::OpWaveTables::shapeName (wave));
-        }
-    }
+    // refreshWaveLabels is deliberately gone. It existed because the wave morph was
+    // shown in a knob's label, and a knob does not know how to rename itself, so
+    // something had to poll. The shape cell is given a text function instead, and
+    // evaluates it at paint time from the live value, so there is nothing to poll.
 
     // Which operators reach the output, given the current algorithm (or the
     // carrier switches in Free mode).
@@ -601,61 +774,119 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        // The operator cells carry their own labels now and the column headers are
+        // glyphs, so the hint only has to explain the gestures, which are the one
+        // thing a grid cannot show you.
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText ("Op toggles enable or silence an operator. Wave sweeps sine > triangle > saw > square; "
-                          "the knob label shows where you are. Drag a source chip onto any knob to modulate it.",
+        g.drawFittedText ("Drag a cell up or down to set its value. Drop a modulation source onto one to modulate it, "
+                          "then drag the white line to set how far the modulation reaches.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (8);
-        b.removeFromTop (18);
+        b.removeFromTop (18);   // the hint line, drawn in paint()
 
-        auto top = b.removeFromTop (24);
-        algoLabel.setBounds (top.removeFromLeft (80));
-        algo.setBounds (top.removeFromLeft (230));
-        top.removeFromLeft (10);
-        diceButton.setBounds (top.removeFromLeft (72).reduced (2, 0));
+        // Toolbar: the die, then the audibility warning beside it.
+        auto toolbar = b.removeFromTop (30);
+        diceButton.setBounds (toolbar.removeFromLeft (30).reduced (2));
+        toolbar.removeFromLeft (8);
+        audibility.setBounds (toolbar);
 
-        audibility.setBounds (b.removeFromTop (16));
+        b.removeFromTop (6);
 
-        b.removeFromTop (4);
+        constexpr int numRows = MiXXFmVoice::numOps + 1;  // header row + one per operator
+        constexpr int numSquareCols = 5;                  // operator, shape, ratio, level, fdbk
+        constexpr int gap = 3;
 
-        // FM Index gets its own narrow column; the operator grid takes the rest.
-        auto indexColumn = b.removeFromLeft (116);
+        // Every cell is square, so the geometry is whichever constraint binds first:
+        // the room there is, or the room the squares need. That is what lets the grid
+        // scale with the window without ever distorting, and it is also why the
+        // minimum window size has to be big enough for the squares to stay legible.
+        const int rowH = (b.getHeight() - gap * (numRows - 1)) / numRows;
 
-        if (! knobs.isEmpty())
-            knobs[0]->setBounds (indexColumn.removeFromTop (juce::jmin (indexColumn.getWidth(), 120)));
+        // The ADSR column is deliberately rectangular - an envelope wants width more
+        // than height - so it counts as three squares when working out whether the
+        // grid fits across.
+        const int square = juce::jmax (22, juce::jmin (rowH,
+                                      (b.getWidth() - gap * (numSquareCols + 2))
+                                        / (numSquareCols + 3)));
+        const int adsrW = square * 3;
 
-        // One operator per row with its eight knobs across, rather than eight rows
-        // per operator. The earlier six-column layout left each dial about 31 px,
-        // which is what made them unusable.
-        const int rows = 8;
-        const int rowH = juce::jmax (64, b.getHeight() / MiXXFmVoice::numOps);
-        const int labelW = 60;
+        const int gridW = numSquareCols * square + (numSquareCols + 1) * gap + adsrW;
+        const int gridH = numRows * square + (numRows - 1) * gap;
+
+        const int originX = b.getX() + juce::jmax (0, (b.getWidth() - gridW) / 2);
+        const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
+
+        // Columns are contiguous: each one starts a gap after the previous one ends.
+        // The ADSR column is simply wider, which is already accounted for by its
+        // position, so it must NOT be given an extra offset as well.
+        auto cellAt = [&] (int row, int col)
+        {
+            const int w = (col == numSquareCols) ? adsrW : square;
+
+            return juce::Rectangle<int> (originX + col * (square + gap),
+                                         originY + row * (square + gap), w, square);
+        };
+
+        // Header row: FM Index in the first cell, then one glyph per value column.
+        if (indexCell != nullptr)
+            indexCell->setBounds (cellAt (0, 0));
+
+        for (int c = 0; c < headerIcons.size(); ++c)
+            headerIcons[c]->setBounds (cellAt (0, 1 + c).reduced (square / 5));
+
+        adsrHeader.setBounds (cellAt (0, numSquareCols));
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
-            auto row = b.removeFromTop (rowH);
+            const int row = i + 1;
 
             if (i < opOnToggles.size())
-                opOnToggles[i]->setBounds (row.removeFromLeft (labelW).reduced (4, 2));
+                opOnToggles[i]->setBounds (cellAt (row, 0));
 
-            const int colW = juce::jmax (48, row.getWidth() / rows);
-
-            for (int k = 0; k < rows; ++k)
+            // Shape, ratio, level, feedback. cells[0] is FM Index, so the operator
+            // rows start at 1.
+            for (int c = 0; c < 4; ++c)
             {
-                const int idx = 1 + i * rows + k;
+                const int idx = 1 + i * 4 + c;
+
+                if (idx < cells.size())
+                    cells[idx]->setBounds (cellAt (row, 1 + c));
+            }
+
+            // The envelope block: four knobs across the rectangular cell.
+            auto adsr = cellAt (row, numSquareCols);
+
+            for (int k = 0; k < 4; ++k)
+            {
+                const int idx = i * 4 + k;
 
                 if (idx < knobs.size())
-                    knobs[idx]->setBounds (row.removeFromLeft (colW).reduced (2));
+                    knobs[idx]->setBounds (adsr.removeFromLeft (adsrW / 4));
             }
         }
     }
 
 private:
+    // A square cell. Registered for modulation exactly like a knob is, because both
+    // are ModTargets and the editor makes no distinction between them.
+    SquareCell* addCell (juce::RangedAudioParameter* param, int dest, const juce::String& label)
+    {
+        auto* c = new SquareCell (label, param, dest, true);
+        ed.wireModTarget (*c);
+        addAndMakeVisible (c);
+        ed.modTargets.push_back (c);
+        ownedCells.add (c);
+        cells.add (c);
+        return c;
+    }
+
+    // Still a knob, and still here because the ADSR column has not been rebuilt as
+    // graphical envelopes yet (step 6).
     void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
     {
         auto* k = new ModKnob (label, param, dest, true);
@@ -667,14 +898,20 @@ private:
     }
 
     MiXXynthEditor& ed;
-    juce::Label algoLabel;
-    juce::ComboBox algo;
-    juce::TextButton diceButton;
+    DiceButton diceButton;
     juce::Label audibility;
+    juce::Label adsrHeader;
+    juce::OwnedArray<GridIcon> headerIcons;
+
+    // cells[0] is FM Index; the operator rows follow as four per operator.
+    SquareCell* indexCell = nullptr;
+
     juce::Random rng;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs;
-    juce::OwnedArray<juce::ToggleButton> opOnToggles;
+    juce::OwnedArray<SquareCell> ownedCells;
+    juce::Array<SquareCell*> cells;
+    juce::OwnedArray<OperatorCell> opOnToggles;
 };
 
 // ---------------------------------------------------------------------------
@@ -2526,10 +2763,7 @@ void MiXXynthEditor::runTabPolls()
         vaPage->refreshHint();
 
     if (fmPage != nullptr)
-    {
-        fmPage->refreshWaveLabels();
         fmPage->refreshAudibility();
-    }
 
     // The FX page watches the slot types so a preset load repopulates the rack.
     if (fxPage != nullptr)

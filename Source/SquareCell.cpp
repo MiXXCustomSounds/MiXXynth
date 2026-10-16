@@ -62,6 +62,20 @@ void SquareCell::setLiveValue01 (float v01)
     }
 }
 
+void SquareCell::setValueTextFunction (std::function<juce::String (float)> f)
+{
+    valueTextFunction = std::move (f);
+    repaint();
+}
+
+juce::String SquareCell::valueTextForTest() const
+{
+    if (valueTextFunction != nullptr)
+        return valueTextFunction (value01());
+
+    return source.p != nullptr ? source.p->getText (value01(), 8) : juce::String {};
+}
+
 juce::Colour SquareCell::fillColour() const
 {
     return isShowingLiveValue() ? modulatedBlue : accentOrange;
@@ -126,9 +140,11 @@ void SquareCell::paint (juce::Graphics& g)
 
     if (showValue && source.p != nullptr)
     {
+        // The parameter's own text unless something more legible was supplied: a
+        // shape cell wants to say "sine", not "0.000".
         g.setColour (valueText);
         g.setFont (11.0f);
-        g.drawFittedText (source.p->getText (value01(), 8),
+        g.drawFittedText (valueTextForTest(),
                           getLocalBounds().removeFromTop (static_cast<int> (textHeight) + 2)
                                           .reduced (3, 1),
                           juce::Justification::centred, 1);

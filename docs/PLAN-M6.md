@@ -175,7 +175,10 @@ needed so the grid never becomes unreadable. Squares stay square at every size.
    `ModTarget` extraction came with it.
 2. ~~Migrate `ModKnob` onto `ModTarget`~~ — **done.** The duplicate drag-drop,
    menu and depth-drag logic is gone; `ModKnob` is now only the dial and the arcs.
-3. The grid layout: header icons, operator cells, toolbar, dice icon.
+3. ~~The grid layout~~ — **done.** The FM section is a six-column grid of square
+   cells with glyph column headers and a die button in the toolbar. The algorithm
+   selector is gone and the parameter is pinned to Free. The ADSR column still
+   holds knobs, which is step 6.
 4. The live shape cell, via published operator phases.
 5. The live modulated fill, via the published-value path.
 6. The ADSR column, via `ShapeEditorComponent`.
@@ -186,14 +189,21 @@ Each step keeps the plugin buildable and the tests passing.
 
 ## Progress
 
-**Steps 1 and 2 complete.** 158 audit checks, 0 failures; pluginval strictness 5
+**Steps 1-3 complete.** 166 audit checks, 0 failures; pluginval strictness 5
 SUCCESS; smoke OK.
 
 - **Step 1** (`fabaa53`): `SquareCell` and `ModTarget` exist, build and are tested.
 - **Step 2**: `ModKnob` derives from `ModTarget`, and its duplicate drag-drop, menu
   and depth-drag logic is deleted. **The audit suite passed unchanged**, which is
   the evidence that nothing moved rather than a claim that it did not.
+- **Step 3**: the FM section is a grid. The editor now holds a list of `ModTarget`,
+  so a knob and a cell are registered and wired identically.
 
-**Nothing is visible in the plugin yet.** `SquareCell` is not referenced by
-`PluginEditor.cpp`, so the FM tab still looks exactly as it did. The first visible
-change comes at step 3.
+**The grid is visible now.** The FM tab is six columns - operator, shape, ratio,
+level, feedback, ADSR - and seven rows, with FM Index in the header row. The
+algorithm selector is gone; the parameter is pinned to Free (matrix) as the page
+builds, so routing is the matrix's job alone.
+
+**Still to come:** the shape cell shows its shape's *name*, not its waveform (step
+4); the cells do not yet show live modulation (step 5); the ADSR column is still
+four knobs per operator rather than a graphical envelope (step 6).

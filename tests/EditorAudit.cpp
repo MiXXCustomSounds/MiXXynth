@@ -125,6 +125,15 @@ int main()
     if (miXXEditor == nullptr)
         return 1;
 
+    // The FM section lost its algorithm selector, so the FM page pins the parameter
+    // to Free (matrix) as it builds. A hidden parameter still steering routing would
+    // be the exact confusion that removal was meant to end, so this is checked here,
+    // immediately, before anything else touches the algorithm.
+    if (auto* algo = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("algorithm")))
+        check (algo->getIndex() == mixxynth::kFreeAlgorithm,
+               "the algorithm parameter is pinned to Free (matrix)",
+               juce::String (algo->getIndex()) + " of " + juce::String (mixxynth::kFreeAlgorithm));
+
     // ---- 1. Destination name list agrees with the ModDest enum ----
     if (auto* dstParam = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("mod1dst")))
     {
@@ -400,19 +409,20 @@ int main()
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)
             miXXEditor->clearModDest (slotDst (n));
 
-        miXXEditor->assignModSlot (mixxynth::srcLfo1, mixxynth::dstFmIndex);
-        miXXEditor->assignModSlot (mixxynth::srcMacro1, mixxynth::dstFmIndex);
+        // The arc geometry is a ModKnob property, and the FM grid's controls are
+        // SquareCells now, so this deliberately targets a control that is still a
+        // knob: the VA filter's cutoff, which is a real modulation destination too.
+        miXXEditor->assignModSlot (mixxynth::srcLfo1, mixxynth::dstFilterCutoff);
+        miXXEditor->assignModSlot (mixxynth::srcMacro1, mixxynth::dstFilterCutoff);
         miXXEditor->refreshModRings();
 
-        // The arc geometry is a ModKnob property, not something every modulation
-        // control has, so this asks for a knob specifically.
         mixxynth::ui::ModKnob* knob = nullptr;
 
         for (auto* k : miXXEditor->modTargets)
-            if (k->getParamID() == "fmIndex" && k->getNumAssignments() == 2)
+            if (k->getParamID() == "filterCutoff" && k->getNumAssignments() == 2)
                 knob = dynamic_cast<mixxynth::ui::ModKnob*> (k);
 
-        check (knob != nullptr, "the FM Index knob collected both sources", "");
+        check (knob != nullptr, "the filter cutoff knob collected both sources", "");
 
         if (knob != nullptr)
         {
@@ -426,29 +436,29 @@ int main()
             // bounds, so a parent that does not repaint leaves it frozen - which is
             // exactly the bug this replaced, and it was invisible while the arc
             // swept from a fixed angle instead.
+            // Start from a known low value rather than from whatever the audit left
+            // the cutoff at. Otherwise this measures 0.9 against a cutoff an earlier
+            // section parked at 1.0, and reports the arc moving backwards.
+            auto setCutoff = [&proc] (float v)
+            {
+                if (auto* p = proc.apvts.getParameter ("filterCutoff"))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (v);
+                    p->endChangeGesture();
+                }
+            };
+
+            setCutoff (0.2f);
             const auto before = knob->arcAnglesForTest (0);
 
-            if (auto* p = proc.apvts.getParameter ("fmIndex"))
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost (0.9f);
-                p->endChangeGesture();
-            }
-
+            setCutoff (0.9f);
             const auto after = knob->arcAnglesForTest (0);
 
             check (! juce::approximatelyEqual (before.first, after.first)
                      && after.first > before.first,
                    "the modulation arc follows the knob's value",
                    juce::String (before.first, 3) + " -> " + juce::String (after.first, 3));
-
-            // Put it back, so the rest of the audit sees a predictable patch.
-            if (auto* p = proc.apvts.getParameter ("fmIndex"))
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost (0.0f);
-                p->endChangeGesture();
-            }
         }
 
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)
@@ -1423,6 +1433,126 @@ int main()
         check (plain.fillColour() == juce::Colour (0xffffa53d),
                "a non-target cell still fills with the accent",
                plain.fillColour().toDisplayString (true));
+    }
+
+    // ---- M6: the FM grid ------------------------------------------------------
+    // The FM section is a grid of square cells now rather than 48 labelled knobs.
+    // These pin the three things that make it a grid rather than a pile of
+    // controls: the cells are square, they are cells rather than knobs, and the
+    // shape column still says which shape it is at.
+    {
+        std::vector<SquareCell*> fmCells;
+
+        for (auto* k : miXXEditor->modTargets)
+            if (auto* c = dynamic_cast<SquareCell*> (k))
+                fmCells.push_back (c);
+
+        // One for FM Index, then shape/ratio/level/feedback for each operator.
+        const int expected = 1 + 4 * MiXXFmVoice::numOps;
+
+        check (static_cast<int> (fmCells.size()) == expected,
+               "the FM grid built one cell per value, plus FM Index",
+               juce::String (static_cast<int> (fmCells.size())) + " of " + juce::String (expected));
+
+        // The whole premise is that every value cell is square. If they are not, it
+        // is a table with extra steps.
+        int nonSquare = 0, zeroSized = 0;
+
+        for (auto* c : fmCells)
+        {
+            const auto b = c->getBounds();
+
+            if (b.getWidth() <= 0 || b.getHeight() <= 0)
+                ++zeroSized;
+            else if (std::abs (b.getWidth() - b.getHeight()) > 1)
+                ++nonSquare;
+        }
+
+        check (zeroSized == 0, "every FM cell has a size", juce::String (zeroSized));
+        check (nonSquare == 0, "every FM value cell is square", juce::String (nonSquare));
+
+        // FM Index used to be a knob. It is the control that proves the section
+        // moved onto the grid rather than keeping one thing behind.
+        SquareCell* index = nullptr;
+
+        for (auto* c : fmCells)
+            if (c->getParamID() == "fmIndex")
+                index = c;
+
+        check (index != nullptr, "FM Index is a cell, not a knob");
+
+        // The shape column names the shape rather than showing a bare number, which
+        // is what the old knob's label did and what a plain number cell would lose.
+        SquareCell* shape = nullptr;
+
+        for (auto* c : fmCells)
+            if (c->getParamID() == "op1wave")
+                shape = c;
+
+        check (shape != nullptr, "the shape column has a cell per operator");
+
+        if (shape != nullptr)
+        {
+            auto setWave = [&proc] (float v)
+            {
+                if (auto* p = proc.apvts.getParameter ("op1wave"))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (v);
+                    p->endChangeGesture();
+                }
+            };
+
+            setWave (0.0f);
+            const auto atSine = shape->valueTextForTest();
+
+            setWave (1.0f);
+            const auto atSquare = shape->valueTextForTest();
+
+            check (atSine.isNotEmpty() && atSquare.isNotEmpty() && atSine != atSquare,
+                   "the shape cell names its shape, and the name follows the morph",
+                   atSine + " -> " + atSquare);
+
+            setWave (0.0f);
+        }
+
+        // The columns have to be contiguous. The first version of this layout gave the
+        // ADSR column an extra offset on top of the one its position already implied,
+        // so it floated away from the rest of the grid and pushed the whole thing off
+        // centre. "Every cell is square" did not catch that, because every cell still
+        // was; the gap between two columns is the thing that was wrong.
+        auto cellFor = [&fmCells] (const juce::String& id) -> SquareCell*
+        {
+            for (auto* c : fmCells)
+                if (c->getParamID() == id)
+                    return c;
+
+            return nullptr;
+        };
+
+        auto* op1Shape = cellFor ("op1wave");
+        auto* op1Ratio = cellFor ("op1ratio");
+        auto* op1Fbk   = cellFor ("op1feedback");
+
+        mixxynth::ui::ModKnob* op1Attack = nullptr;
+
+        for (auto* k : miXXEditor->modTargets)
+            if (k->getParamID() == "op1attack")
+                op1Attack = dynamic_cast<mixxynth::ui::ModKnob*> (k);
+
+        if (op1Shape != nullptr && op1Ratio != nullptr && op1Fbk != nullptr && op1Attack != nullptr)
+        {
+            const int reference = op1Ratio->getX() - op1Shape->getRight();
+            const int atAdsr = op1Attack->getX() - op1Fbk->getRight();
+
+            check (std::abs (atAdsr - reference) <= 1,
+                   "the ADSR column sits one gap after the grid, not floating off it",
+                   juce::String (atAdsr) + " px vs " + juce::String (reference) + " px");
+        }
+
+        // The algorithm-pinning check is NOT here: the audit sets the algorithm to a
+        // preset later on to exercise the DSP, so the pinned state only exists right
+        // after the editor is built. It is checked there instead.
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

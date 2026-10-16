@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "ModTarget.h"
@@ -49,6 +51,15 @@ public:
     // and paints orange.
     void setLiveValue01 (float v01);
 
+    // Overrides the text drawn in the cell. The operator shape cell uses this to
+    // say "sine" rather than "0.000", which is the difference between a readout and
+    // a mystery number.
+    void setValueTextFunction (std::function<juce::String (float)> f);
+
+    // The text the cell would draw right now. Lets the audit check that a shape
+    // cell names its shape rather than showing a bare number.
+    juce::String valueTextForTest() const;
+
     // ---- test seams --------------------------------------------------------
     // What the cell is showing: the live value if modulated, else the parameter.
     float value01() const;
@@ -80,6 +91,7 @@ private:
     juce::String text;
     bool showValue = true;
     float liveValue01 = -1.0f;
+    std::function<juce::String (float)> valueTextFunction;
 
     bool draggingValue = false;
     float dragStartValue01 = 0.0f;
