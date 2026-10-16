@@ -19,8 +19,13 @@
 #include "../Source/ModMatrix.h"
 #include "../Source/PluginEditor.h"
 #include "../Source/PluginProcessor.h"
+#include "../Source/SquareCell.h"
 #include "../Source/Fx/FxRack.h"
 #include "../Source/Fx/WeirdVerbFx.h"
+
+// The M6 checks below name this type directly; everything else in this file is
+// reached through the editor, so nothing else needs a using declaration.
+using mixxynth::ui::SquareCell;
 
 namespace
 {
@@ -1296,6 +1301,126 @@ int main()
             proc.writeFxSlot (s, mixxynth::FxSlotState {});
             proc.setFxSlotFile (s, {}, {});
         }
+    }
+
+    // ---- M6: the square cell -------------------------------------------------
+    // The cell is not wired into the editor yet, so these drive it directly. They
+    // pin the readout contract, because those three properties ARE the reason for
+    // replacing a knob with a cell: the fill height is the value, the colour says
+    // whether it is modulated, and the white line says how far it can be pushed.
+    {
+        MiXXynthProcessor cellProc;
+        cellProc.prepareToPlay (44100.0, 512);
+
+        auto* level = cellProc.apvts.getParameter ("op1level");
+        SquareCell cell ("Op1 Level", level, mixxynth::dstOp1Level);
+        cell.setBounds (0, 0, 60, 60);
+
+        check (cell.isModTarget(), "a square cell with a destination is a mod target");
+        check (cell.getParam() != nullptr && cell.getParam()->getParameterID() == "op1level",
+               "the cell reports its parameter",
+               cell.getParam() != nullptr ? cell.getParam()->getParameterID() : juce::String {});
+        check (cell.getLabelText() == "Op1 Level", "the cell reports its label", cell.getLabelText());
+
+        // Value 0 must be a black cell, and 1 a full one.
+        level->setValueNotifyingHost (0.0f);
+
+        check (std::abs (cell.value01()) < 0.001f, "value 0 reads as 0",
+               juce::String (cell.value01(), 3));
+        check (cell.fillRect().getHeight() < 1.0f, "value 0 fills nothing, so the cell is black",
+               juce::String (cell.fillRect().getHeight(), 2));
+
+        level->setValueNotifyingHost (1.0f);
+
+        check (std::abs (cell.value01() - 1.0f) < 0.001f, "value 1 reads as 1",
+               juce::String (cell.value01(), 3));
+        check (cell.fillRect().getHeight() > 50.0f, "value 1 fills the cell",
+               juce::String (cell.fillRect().getHeight(), 2));
+
+        // Half the value must be half the fill: the fill IS the readout.
+        level->setValueNotifyingHost (0.5f);
+
+        const float halfFill = cell.fillRect().getHeight();
+        const float fullFill = cell.yForValue01 (0.0f) - cell.yForValue01 (1.0f);
+
+        check (std::abs (halfFill - fullFill * 0.5f) < 1.0f,
+               "half the value is half the fill",
+               juce::String (halfFill, 2) + " vs " + juce::String (fullFill * 0.5f, 2));
+    }
+
+    // The colour is the modulated/unmodulated signal, and a live value has to be
+    // display only: the whole point is that it shows what the modulation is doing,
+    // so it must never write the parameter it is showing.
+    {
+        MiXXynthProcessor cellProc;
+        auto* level = cellProc.apvts.getParameter ("op1level");
+        SquareCell cell ("Op1 Level", level, mixxynth::dstOp1Level);
+        cell.setBounds (0, 0, 60, 60);
+
+        level->setValueNotifyingHost (0.5f);
+
+        check (! cell.isShowingLiveValue(), "a cell with no live value is not modulated");
+        check (cell.fillColour() == juce::Colour (0xffffa53d),
+               "an unmodulated cell fills with the accent",
+               cell.fillColour().toDisplayString (true));
+
+        cell.setLiveValue01 (0.75f);
+
+        check (cell.isShowingLiveValue(), "a live value marks the cell as modulated");
+        check (cell.fillColour() == juce::Colour (0xff3aa0ff),
+               "a modulated cell fills with blue",
+               cell.fillColour().toDisplayString (true));
+        check (std::abs (cell.value01() - 0.75f) < 0.001f,
+               "the live value drives the fill, so the cell moves with the modulation",
+               juce::String (cell.value01(), 3));
+        check (std::abs (level->getValue() - 0.5f) < 0.001f,
+               "the live value does NOT overwrite the parameter",
+               juce::String (level->getValue(), 3));
+
+        cell.setLiveValue01 (-1.0f);
+
+        check (! cell.isShowingLiveValue() && std::abs (cell.value01() - 0.5f) < 0.001f,
+               "clearing the live value falls back to the parameter",
+               juce::String (cell.value01(), 3));
+
+        // Dragging: 140 px covers the whole range, and it clamps rather than wraps.
+        check (SquareCell::valueFromDrag (0.5f, 100.0f, 30.0f) == 1.0f,
+               "70 px up from the middle reaches the top",
+               juce::String (SquareCell::valueFromDrag (0.5f, 100.0f, 30.0f), 3));
+        check (SquareCell::valueFromDrag (0.5f, 100.0f, 1000.0f) == 0.0f,
+               "dragging far down clamps to 0 rather than wrapping");
+        check (SquareCell::valueFromDrag (0.5f, 100.0f, 100.0f) == 0.5f,
+               "not moving leaves the value alone");
+
+        // The white line sits at value + depth, and stacks one per source.
+        cell.setModAssignments ({ { mixxynth::srcLfo1, 0.25f } });
+
+        check (cell.getNumAssignments() == 1, "assignments reach the cell",
+               juce::String (cell.getNumAssignments()));
+        check (std::abs (cell.getModDepth() - 0.25f) < 0.001f, "the total depth is summed",
+               juce::String (cell.getModDepth(), 3));
+
+        const float atValue = cell.yForValue01 (0.5f);
+        const float atDepth = cell.yForValue01 (0.5f + 0.25f);
+
+        check (atDepth < atValue, "a positive depth draws the white line above the value",
+               juce::String (atDepth, 1) + " vs " + juce::String (atValue, 1));
+
+        cell.setModAssignments ({ { mixxynth::srcLfo1, 0.25f }, { mixxynth::srcEnv1, -0.25f } });
+
+        check (cell.getNumAssignments() == 2, "a second source stacks on the same cell",
+               juce::String (cell.getNumAssignments()));
+        check (std::abs (cell.getModDepth()) < 0.001f,
+               "opposite depths cancel in the total",
+               juce::String (cell.getModDepth(), 3));
+
+        // A cell with no destination refuses modulation rather than pretending.
+        SquareCell plain ("Plain", cellProc.apvts.getParameter ("filterOn"), mixxynth::dstOff);
+
+        check (! plain.isModTarget(), "a cell with no destination is not a mod target");
+        check (plain.fillColour() == juce::Colour (0xffffa53d),
+               "a non-target cell still fills with the accent",
+               plain.fillColour().toDisplayString (true));
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

@@ -46,6 +46,10 @@ target_sources(MiXXynth PRIVATE
     Source/PluginEditor.h
     Source/ModKnob.cpp
     Source/ModKnob.h
+    Source/ModTarget.cpp
+    Source/ModTarget.h
+    Source/SquareCell.cpp
+    Source/SquareCell.h
     Source/WheelComponent.cpp
     Source/WheelComponent.h
     Source/ParamSources.h
@@ -131,6 +135,8 @@ add_executable(MiXXynthEditorAudit
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/ModKnob.cpp
+    Source/ModTarget.cpp
+    Source/SquareCell.cpp
     Source/WheelComponent.cpp
     Source/FmVoice.cpp
     Source/VoiceManager.cpp
