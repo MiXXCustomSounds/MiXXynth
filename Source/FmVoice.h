@@ -215,6 +215,12 @@ private:
     bool vaGateLast = false;
     float vaEnv = 0.0f;
 
+    // True once the VA layer has actually contributed to the output this note. Set
+    // while rendering, read by isActive() - which is why it is a member and not a
+    // local: the question "is this voice finished" is asked between blocks, when no
+    // parameters are in scope.
+    bool vaWasAudible = false;
+
     // The three VA layer levels arrive once per block, straight from the parameters, so a knob
     // move or a modulation step lands as a jump. On the morph oscillator a jump reads as a
     // level change; on the sub, which is a square, it reads as a CLICK, because a square whose

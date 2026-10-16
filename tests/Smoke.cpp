@@ -2602,6 +2602,103 @@ int main()
                     "the rack builds the Juno chorus on demand", 1.0) && ok;
     }
 
+    // --- 35. VA: a long VA release is not cut off by the operators' envelopes ---
+    //
+    // The voice was declared finished as soon as the OPERATORS' envelopes ended,
+    // because isActive() only looked at those. The VA has its own envelope and its
+    // own release, so a long VA release was truncated the moment the operators let
+    // go - an early cut-off and a click. The VA and the sub died together, which is
+    // the signature: they share one envelope.
+    //
+    // This has to run through the VOICE MANAGER, not the voice. A voice rendered
+    // directly keeps rendering whatever its state, so it cannot reproduce the bug at
+    // all; it is the manager that asks isActive() and stops. An earlier version of
+    // this test drove the voice directly and passed on the bug for exactly that
+    // reason.
+    //
+    // It also uses a 512-sample buffer rather than the shared `blockLen`, which is a
+    // full 44100 samples. Measuring "the last of 40 blocks" with that would have been
+    // measuring 40 seconds of silence.
+    {
+        constexpr int shortBlock = 512;
+
+        auto p = paramsForAlgo (4);
+
+        // The VA reads the band-limited morph tables, and renders NOTHING without
+        // them. paramsForAlgo does not set this, so a test that forgets it measures
+        // silence and passes or fails for reasons unrelated to the VA.
+        mixxynth::OpWaveTables tables;
+        p.waveTables = &tables;
+
+        p.vaLevel = 1.0f;
+        p.vaShape = 0.0f;
+        p.vaSubLevel = 0.0f;
+        p.vaNoiseLevel = 0.0f;
+        p.vaAttack = 0.0f;
+        p.vaDecay = 0.0f;
+        p.vaSustain = 1.0f;
+        p.vaRelease = 1.0f;      // long, so the tail outlives the operators by far
+        p.index = 0.0f;
+        p.filterOn = false;
+
+        // The operators are silent and let go instantly, so the VA is the only thing
+        // left sounding once the key is released - which is the situation the bug
+        // needs.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            p.carrier[i] = false;
+            p.decay[i] = 0.0f;
+            p.sustain[i] = 0.0f;
+            p.release[i] = 0.0f;
+        }
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 1;
+        poly.unison = 1;
+
+        MiXXVoiceManager vm;
+        vm.prepare (sr);
+
+        juce::AudioBuffer<float> buf (2, shortBlock);
+        juce::MidiBuffer noteOn, noteOff, nothing;
+        noteOn.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        noteOff.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+
+        for (int i = 0; i < 8; ++i)
+        {
+            buf.clear();
+            vm.renderBlock (buf, i == 0 ? noteOn : nothing, p, mod, poly);
+        }
+
+        buf.clear();
+        vm.renderBlock (buf, noteOff, p, mod, poly);
+
+        // About 0.23 s of tail, so a 1 s release is barely a quarter done at the end.
+        double tailRms = 0.0;
+        float worstJump = 0.0f;
+
+        for (int b = 0; b < 20; ++b)
+        {
+            buf.clear();
+            vm.renderBlock (buf, nothing, p, mod, poly);
+
+            tailRms = rmsOf (buf, 0, shortBlock);
+
+            const auto* d = buf.getReadPointer (0);
+
+            for (int i = 1; i < shortBlock; ++i)
+                worstJump = juce::jmax (worstJump, std::abs (d[i] - d[i - 1]));
+        }
+
+        ok = check (tailRms > 0.01, "a long VA release survives the operators ending",
+                    tailRms) && ok;
+
+        // And it fades rather than stopping: an input at 261 Hz has a sample-to-sample
+        // slope of about 0.037, so anything near full scale is a hard cut, not a fade.
+        ok = check (worstJump < 0.05f, "a long VA release fades instead of cutting",
+                    worstJump) && ok;
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }

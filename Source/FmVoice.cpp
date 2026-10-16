@@ -55,6 +55,20 @@ bool MiXXFmVoice::isActive() const
         if (op.envState.stage != 0)
             return true;
 
+    // The VA layer has its own envelope and its own release, and nothing above this
+    // can see either. Without this the voice is declared finished the moment the
+    // OPERATORS' envelopes end, which cuts the VA's release off mid-waveform - an
+    // early cut-off and a loud click whenever the VA's release is longer than the
+    // operators'. The VA and the sub die together because they share this envelope,
+    // which is the signature of the bug.
+    //
+    // Gated on the layer having been audible rather than on the envelope merely
+    // running: the VA envelope runs on every note whether the VA is used or not, so
+    // counting it unconditionally would hold every voice open - including a patch
+    // with the VA switched off entirely - for the VA's release time.
+    if (vaWasAudible && vaEnvState.stage != 0)
+        return true;
+
     return false;
 }
 
@@ -184,6 +198,10 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel, float phaseOffset01)
     vaLevelSm = 0.0f;
     vaSubLevelSm = 0.0f;
     vaNoiseLevelSm = 0.0f;
+
+    // A new note has not made a sound yet, so a stale true here would keep a voice
+    // alive for the previous note's VA release.
+    vaWasAudible = false;
 
     for (auto& op : ops)
     {
@@ -490,6 +508,10 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 
         if (vaLevelSm > 0.0f || vaSubLevelSm > 0.0f || vaNoiseLevelSm > 0.0f)
         {
+            // Remembered for isActive(), which cannot see these parameters. See the
+            // comment there.
+            vaWasAudible = true;
+
             vaPhase += vaInc;
 
             if (vaPhase >= 1.0)
