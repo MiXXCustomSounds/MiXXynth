@@ -1171,6 +1171,8 @@ public:
 
         b.removeFromTop (6);
 
+        const bool routing = viewSwitch.getSelected() == 1;
+
         constexpr int numRows = MiXXFmVoice::numOps + 1;  // header row + one per operator
         constexpr int gap = 3;
 
@@ -1225,7 +1227,20 @@ public:
                                       (b.getWidth() - 2 * dividerGap - gap * acrossGaps)
                                         / acrossSquares));
 
-        const int gridW = gridSquares * square + (gridSquares - 1) * gap;
+        // The grid's footprint is whichever view is SHOWING, not the wider of the two.
+        //
+        // It used to reserve the routing view's width always, so that the operator column
+        // could not shift when you switched. That is right for the grid, but it left the
+        // values view two whole columns of nothing between its last control and the divider -
+        // and the envelope section had to sit beyond that hole, which is a long way from the
+        // grid it belongs to.
+        //
+        // Following the view buys a section that hugs the grid in both, and more room for the
+        // section's own controls than the routing view leaves. It costs a reflow when you
+        // switch, which is the price of not having a permanent hole.
+        const int gridColsShown = routing ? gridSquares : 5;
+
+        const int gridW = gridColsShown * square + (gridColsShown - 1) * gap;
         const int gridH = numRows * square + (numRows - 1) * gap;
 
         // The VA panel and the grid keep their square cells; the envelope section does not
@@ -1344,6 +1359,9 @@ public:
 
             adsrPages.setBounds (sectionCell (0, 0, 4).reduced (0, 2));
 
+            // Page one's envelopes are three columns wide, like the filter page's envelope, so
+            // the two pages' envelopes line up with each other. The rest of the section's width
+            // is deliberately left for something else rather than stretched to fill.
             for (int i = 0; i < adsrEditors.size(); ++i)
                 adsrEditors[i]->setBounds (sectionCell (i + 1, 0, 3).reduced (1));
 

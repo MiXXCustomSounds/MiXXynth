@@ -1737,26 +1737,31 @@ int main()
 
         if (op1Shape != nullptr && op1Ratio != nullptr)
         {
+            // A divider, not a cell gap: the section is set apart from the grid rather than
+            // continuing it. Measured off the grid's own last column, so it has to be wider
+            // than the gap between two cells.
             const int cellGap = op1Ratio->getX() - op1Shape->getRight();
+            const int dividerGapPx = op1Env != nullptr ? op1Env->getX() - op1Fbk->getRight() : 0;
 
-            check (op1Env == nullptr || op1Env->getX() > op1Fbk->getRight() + cellGap * 3,
+            check (dividerGapPx > cellGap,
                    "the envelope section is set apart by a divider, not a cell gap",
-                   juce::String (op1Env != nullptr ? op1Env->getX() - op1Fbk->getRight() : 0));
+                   juce::String (dividerGapPx) + " vs " + juce::String (cellGap));
         }
 
-        // Symmetry, checked rather than eyeballed. The space between the VA panel and the grid
-        // and the space between the grid and the envelope section are the same number: two
-        // gaps that are supposed to match are two gaps that can stop matching.
+        // Symmetry, checked rather than eyeballed: the space between the VA panel and the grid
+        // and the space between the grid and the envelope section are the same number.
+        //
+        // Measured against the VALUES view's right column, because that is the view the
+        // section follows - it tracks whichever view is showing, so measuring against the
+        // routing view's last column would report the section as overlapping the grid.
         {
             auto* vaNoise = cellFor ("vaNoiseLevel");
             auto* indexCell2 = cellFor ("fmIndex");
-            auto* lastRoutingCol = cellFor ("mtx16");
 
-            if (vaNoise != nullptr && indexCell2 != nullptr && lastRoutingCol != nullptr
-                  && op1Env != nullptr)
+            if (vaNoise != nullptr && indexCell2 != nullptr && op1Env != nullptr && op1Fbk != nullptr)
             {
                 const int leftGap  = indexCell2->getX() - vaNoise->getRight();
-                const int rightGap = op1Env->getX() - lastRoutingCol->getRight();
+                const int rightGap = op1Env->getX() - op1Fbk->getRight();
 
                 check (std::abs (leftGap - rightGap) <= 1,
                        "the grid is flanked symmetrically by its two sections",
