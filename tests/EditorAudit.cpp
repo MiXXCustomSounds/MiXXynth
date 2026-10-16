@@ -1536,6 +1536,7 @@ int main()
         int routingCount = 0;
         int vaCount = 0;
         int filterPageCount = 0;
+        int modDepthCount = 0;
 
         for (auto* k : miXXEditor->modTargets)
         {
@@ -1557,9 +1558,16 @@ int main()
                 ++vaCount;
             else if (id.contains ("flt"))
                 ++filterPageCount;
+            else if (id.startsWith ("mod"))
+                ++modDepthCount;
             else
                 fmCells.push_back (c);
         }
+
+        // The modulation matrix's depth column: one cell per slot.
+        check (modDepthCount == mixxynth::kNumModSlots,
+               "the modulation matrix built its depth cells",
+               juce::String (modDepthCount) + " of " + juce::String (mixxynth::kNumModSlots));
 
         // The VA view: six oscillator cells (shape, sub, noise, level, detune, octave) and
         // three filter cells (cutoff, resonance, drive).

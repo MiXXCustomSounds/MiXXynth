@@ -8,6 +8,7 @@
 #include "SquareCell.h"
 
 using mixxynth::ui::ModKnob;
+using mixxynth::ui::ModTarget;
 using mixxynth::ui::SquareCell;
 using mixxynth::ui::AdsrEditor;
 
@@ -641,7 +642,15 @@ namespace
             }
 
             auto* depthParam = ranged (p, "mod" + n + "depth");
-            depth = new ModKnob ("Depth", depthParam, mixxynth::dstOff, true);
+
+            // A cell, like every other value on the FM tab. It carries no label of its own:
+            // the column is headed "Mod Depth" once, rather than thirty-two times.
+            //
+            // And no value text either. A row here is 26px tall, so a number in the cell would
+            // be most of the cell and would sit on top of the fill - which is already showing
+            // the value. Dragging reports the number in the status line, where there is room
+            // for it.
+            depth = new SquareCell ("Mod Depth", depthParam, mixxynth::dstOff, false);
             addAndMakeVisible (depth);
 
             clear.setButtonText ("x");
@@ -722,23 +731,50 @@ namespace
         void resized() override
         {
             auto b = getLocalBounds().reduced (2);
-            label.setBounds (b.removeFromLeft (52));
-            src.setBounds (b.removeFromLeft (110).reduced (2));
-            dst.setBounds (b.removeFromLeft (150).reduced (2));
-            depth->setBounds (b.removeFromLeft (72));
-            clear.setBounds (b.removeFromLeft (26).reduced (2, 6));
+            label.setBounds (b.removeFromLeft (labelWidth));
+            src.setBounds (b.removeFromLeft (srcWidth).reduced (2));
+            clear.setBounds (b.removeFromRight (clearWidth).reduced (2, 8));
+
+            // The depth cell takes the row's height, so it is square and as large as the row
+            // allows - which is what the taller rows are for.
+            auto depthArea = b.removeFromRight (depthWidth);
+            const int side = juce::jmin (depthArea.getHeight(), depthArea.getWidth());
+
+            depth->setBounds (depthArea.withSizeKeepingCentre (side, side));
+
+            // The destination takes whatever is left, so the row FILLS its width. With the
+            // columns at fixed widths the row used to end short and leave a strip of nothing
+            // before the clear button.
+            dst.setBounds (b.reduced (2));
         }
 
         std::function<void()> onChanged;
 
-        ModKnob* getDepthKnob() const { return depth; }
+        ModTarget* getDepthTarget() const { return depth; }
+
+        // Where the depth column sits, measured from the row's RIGHT edge - it is anchored
+        // there now that the destination column is the one that stretches.
+        //
+        // The header above it needs this, and only the row knows it. A header positioned by a
+        // number repeated elsewhere lines up until someone changes a column width, and then
+        // quietly does not.
+        static constexpr int depthColumnRightOffset() { return 2 + clearWidth + depthWidth; }
+
+        static constexpr int depthColumnWidth() { return depthWidth; }
 
     private:
+        // The row's column widths, named so the header above the depth column can be placed
+        // from the same numbers the row lays itself out with.
+        static constexpr int labelWidth = 52;
+        static constexpr int srcWidth = 110;
+        static constexpr int depthWidth = 48;
+        static constexpr int clearWidth = 26;
+
         juce::Label label;
         juce::ComboBox src, dst;
         juce::AudioParameterChoice* srcParam = nullptr;
         juce::AudioParameterChoice* dstParam = nullptr;
-        ModKnob* depth = nullptr;
+        SquareCell* depth = nullptr;
         juce::TextButton clear;
     };
 }
@@ -967,12 +1003,20 @@ public:
             row->onChanged = [this] { ed.refreshModRings(); };
             modContent.addAndMakeVisible (row);
             modRows.add (row);
-            ed.modTargets.push_back (row->getDepthKnob());
+            ed.modTargets.push_back (row->getDepthTarget());
         }
 
         modViewport.setViewedComponent (&modContent, false);
         modViewport.setScrollBarsShown (true, false);
         addChildComponent (modViewport);
+
+        // The depth column's heading. It sits on the header row above the rows rather than
+        // inside the scrolled content, so it stays put while the slots scroll under it.
+        modDepthHeader.setText ("Mod Depth", juce::dontSendNotification);
+        modDepthHeader.setJustificationType (juce::Justification::centred);
+        modDepthHeader.setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
+        modDepthHeader.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        addChildComponent (modDepthHeader);
 
         // ---- the routing view ----
         // The header row's first cell names the row axis, because this grid reads as
@@ -1563,6 +1607,15 @@ public:
 
                 for (auto* row : modRows)
                     row->setBounds (area.removeFromTop (modRowHeight));
+
+                // The depth column's heading, on the header row above it. Placed from the
+                // row's own column widths, measured from the right because that is where the
+                // depth column is anchored now - so it cannot drift out of line.
+                modDepthHeader.setBounds (modViewport.getX() + modContent.getWidth()
+                                            - SlotRow::depthColumnRightOffset(),
+                                          originY,
+                                          SlotRow::depthColumnWidth(),
+                                          square);
             }
 
             // Page two, in reading order: the filter's envelope, then what the filter is, then
@@ -1831,8 +1884,11 @@ private:
             b->setVisible (! volume);
 
         // The matrix shares the volume page: it takes the columns that page's envelopes
-        // leave, and the filter page needs that space for its own controls.
+        // leave, and the filter page needs that space for its own controls. The heading goes
+        // with it, or the column would be unlabelled on the page it belongs to and labelled
+        // on the page it is not on.
         modViewport.setVisible (volume);
+        modDepthHeader.setVisible (volume);
     }
 
     // Shows one view's contents and hides the others'. The operator cells and the toolbar
@@ -1938,9 +1994,10 @@ private:
     // look and feel has to come first to outlive every combo pointing at it.
     CompactComboLookAndFeel compactComboLook;
 
-    // The modulation matrix's row height. The same as the Mod tab's used to be, so a slot
-    // reads the same way it always did.
-    static constexpr int modRowHeight = 26;
+    // The modulation matrix's row height. Taller than the old Mod tab's rows were: this list
+    // scrolls, so a short row saves nothing, and a slot that looks like the rest of the tab is
+    // worth more than two more of them on screen.
+    static constexpr int modRowHeight = 44;
 
     DiceButton diceButton;
     ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing" } };
@@ -1981,6 +2038,9 @@ private:
     juce::Viewport modViewport;
     juce::Component modContent;
     juce::OwnedArray<SlotRow> modRows;
+
+    // One heading for the depth column, rather than the word "Depth" on thirty-two knobs.
+    juce::Label modDepthHeader;
 
     // ---- the routing view -------------------------------------------------
     // One cell per ordered operator pair, so the grid is 6x6 with no holes: the 30
