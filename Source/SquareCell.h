@@ -40,6 +40,7 @@ public:
     juce::RangedAudioParameter* getParam() const override { return source.p; }
     juce::String getLabelText() const override { return text; }
     void repaintForMod() override { repaint(); }
+    void refreshFromParam() override { repaint(); }
 
     // ---- live modulation ---------------------------------------------------
     // The modulated value, pushed by the editor's timer. Negative means the cell

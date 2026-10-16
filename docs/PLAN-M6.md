@@ -173,10 +173,8 @@ needed so the grid never becomes unreadable. Squares stay square at every size.
    also carries the white depth lines, the depth-edge drag, the live-value hook
    and the drop target, because a cell without those is not a cell. The
    `ModTarget` extraction came with it.
-2. **Migrate `ModKnob` onto `ModTarget`.** Not in the original list; it is a
-   prerequisite that only became visible once the extraction was done. `ModKnob`
-   still carries its own copy of the drag-drop and menu logic, so the duplication
-   is real until this lands.
+2. ~~Migrate `ModKnob` onto `ModTarget`~~ — **done.** The duplicate drag-drop,
+   menu and depth-drag logic is gone; `ModKnob` is now only the dial and the arcs.
 3. The grid layout: header icons, operator cells, toolbar, dice icon.
 4. The live shape cell, via published operator phases.
 5. The live modulated fill, via the published-value path.
@@ -188,7 +186,14 @@ Each step keeps the plugin buildable and the tests passing.
 
 ## Progress
 
-**Step 1 complete** (`fabaa53`, 158 audit checks, 0 failures). `SquareCell` and
-`ModTarget` exist, build, and are tested. Note that **nothing is visible in the
-plugin yet** — `SquareCell` is not referenced by `PluginEditor.cpp`, so the FM tab
-still looks exactly as it did. Step 1 was the component and its contract.
+**Steps 1 and 2 complete.** 158 audit checks, 0 failures; pluginval strictness 5
+SUCCESS; smoke OK.
+
+- **Step 1** (`fabaa53`): `SquareCell` and `ModTarget` exist, build and are tested.
+- **Step 2**: `ModKnob` derives from `ModTarget`, and its duplicate drag-drop, menu
+  and depth-drag logic is deleted. **The audit suite passed unchanged**, which is
+  the evidence that nothing moved rather than a claim that it did not.
+
+**Nothing is visible in the plugin yet.** `SquareCell` is not referenced by
+`PluginEditor.cpp`, so the FM tab still looks exactly as it did. The first visible
+change comes at step 3.

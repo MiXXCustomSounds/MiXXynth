@@ -6,7 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <sst/jucegui/components/Knob.h>
 
-#include "ParamSources.h"
+#include "ModTarget.h"
 
 namespace mixxynth::ui
 {
@@ -20,19 +20,16 @@ namespace mixxynth::ui
     //
     // A knob whose dest is dstOff cannot be a modulation target, so a drop on it
     // is rejected with a visible flash instead of silently doing nothing.
+    //
+    // M6: everything a drop, a menu or a depth drag DOES now lives in ModTarget,
+    // because SquareCell has to behave identically. What is left here is what is
+    // genuinely a knob: the dial, and the arcs drawn around it.
     class ModKnob : public juce::Component,
                     public juce::DragAndDropTarget,
-                    public sst::jucegui::data::Continuous::DataListener,
-                    private juce::Timer
+                    public ModTarget,
+                    public sst::jucegui::data::Continuous::DataListener
     {
     public:
-        // One modulation source aimed at this knob, with its signed depth.
-        struct Assignment
-        {
-            int source = 0;
-            float depth = 0.0f;
-        };
-
         ModKnob (const juce::String& labelText,
                  juce::RangedAudioParameter* param,
                  int destIndex,
@@ -47,8 +44,6 @@ namespace mixxynth::ui
         void itemDragExit (const SourceDetails&) override;
         void itemDropped (const SourceDetails&) override;
 
-        int getDestIndex() const { return dest; }
-
         // The modulation arcs are drawn by THIS component, outside the bounds of the
         // sst knob child, so repainting only the child leaves them stale. That is
         // why the arcs are anchored to the knob's value now: a stale arc used to be
@@ -56,16 +51,16 @@ namespace mixxynth::ui
         void dataChanged() override { repaint(); }
         void sourceVanished (sst::jucegui::data::Continuous*) override {}
 
-        // True when this knob is a valid modulation destination.
-        bool isModTarget() const { return dest != 0; }
+        // ---- ModTarget -------------------------------------------------------
+        juce::RangedAudioParameter* getParam() const override { return source.p; }
+        juce::String getLabelText() const override { return text; }
+        void repaintForMod() override { repaint(); }
 
         // The parameter this knob drives (used by the editor audit).
-        juce::RangedAudioParameter* getParam() const { return source.p; }
         juce::String getParamID() const
         {
             return source.p != nullptr ? source.p->getParameterID() : juce::String {};
         }
-        const juce::String& getLabelText() const { return text; }
 
         void setLabelText (const juce::String& t)
         {
@@ -75,14 +70,6 @@ namespace mixxynth::ui
                 repaint();
             }
         }
-
-        // Total signed modulation depth currently aimed at this knob.
-        void setModDepth (float d);
-        float getModDepth() const { return modDepth; }
-
-        // The full assignment list, pushed by the editor whenever slots change.
-        void setModAssignments (std::vector<Assignment> a);
-        int getNumAssignments() const { return static_cast<int> (assignments.size()); }
 
         // True while the ring is being dragged, so the editor can avoid
         // overwriting the in-progress value.
@@ -109,13 +96,10 @@ namespace mixxynth::ui
         // angle instead.
         std::pair<float, float> arcAnglesForTest (int index) const;
 
-        std::function<void (int srcIndex, int destIndex)> onSourceDropped;
-        std::function<void (int destIndex)> onClearRequested;
-        std::function<void (int srcIndex, int destIndex, float depth)> onModDepthChanged;
-        std::function<void (int srcIndex, int destIndex)> onModRemoveRequested;
-        std::function<void (const juce::String&)> onStatus;
+        // The assignment list, the total depth and the five mod callbacks are all
+        // inherited from ModTarget. Only the drawing and the ring dragging are ours.
 
-        void refreshFromParam();
+        void refreshFromParam() override;
 
     private:
         void mouseDown (const juce::MouseEvent&) override;
@@ -123,11 +107,7 @@ namespace mixxynth::ui
         void mouseUp (const juce::MouseEvent&) override;
         void mouseMove (const juce::MouseEvent&) override;
         void mouseExit (const juce::MouseEvent&) override;
-        void timerCallback() override;
 
-        void flashRejected();
-        void showMenu();
-        void handleMenuResult (int result);
         juce::Rectangle<float> dialArea() const;
 
         // Index into `assignments` of the arc under this point, or -1.
@@ -160,13 +140,6 @@ namespace mixxynth::ui
         sst::jucegui::components::Knob knob;
         ContinuousSource source;
         juce::String text;
-        int dest = 0;
-
-        float modDepth = 0.0f;
-        std::vector<Assignment> assignments;
-
-        bool dragOver = false;
-        bool rejectFlash = false;
         bool labelVisible = true;
 
         // Which arc the pointer is over, or -1. Replaces a bool, because more than
@@ -182,7 +155,6 @@ namespace mixxynth::ui
 
         static constexpr int labelHeight = 14;
         static constexpr int ringWidth = 13;
-        static constexpr int numAmountPresets = 8;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModKnob)
     };

@@ -45,6 +45,11 @@ public:
     // Repaint hook, so this class can change what is drawn without knowing how.
     virtual void repaintForMod() = 0;
 
+    // Re-read the parameter and repaint. The editor calls this after a preset load
+    // or a dice roll, so a control shows the value that is actually there rather
+    // than the one it last painted.
+    virtual void refreshFromParam() = 0;
+
     // ---- shared state ------------------------------------------------------
     int getDestIndex() const noexcept { return dest; }
 
