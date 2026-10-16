@@ -169,13 +169,26 @@ needed so the grid never becomes unreadable. Squares stay square at every size.
 
 ## Order of work
 
-1. `SquareCell` — fill, value, drag, black/orange states. No mod yet.
-2. The grid layout: header icons, operator cells, toolbar, dice icon.
-3. The live shape cell, via published operator phases.
-4. The white depth lines, and extracting the shared assignment logic.
+1. ~~`SquareCell`~~ — **done** (`fabaa53`). Delivered more than planned: the cell
+   also carries the white depth lines, the depth-edge drag, the live-value hook
+   and the drop target, because a cell without those is not a cell. The
+   `ModTarget` extraction came with it.
+2. **Migrate `ModKnob` onto `ModTarget`.** Not in the original list; it is a
+   prerequisite that only became visible once the extraction was done. `ModKnob`
+   still carries its own copy of the drag-drop and menu logic, so the duplication
+   is real until this lands.
+3. The grid layout: header icons, operator cells, toolbar, dice icon.
+4. The live shape cell, via published operator phases.
 5. The live modulated fill, via the published-value path.
 6. The ADSR column, via `ShapeEditorComponent`.
 7. Remove the algorithm section; pin the parameter to Free.
 8. Audit checks and a visual pass.
 
 Each step keeps the plugin buildable and the tests passing.
+
+## Progress
+
+**Step 1 complete** (`fabaa53`, 158 audit checks, 0 failures). `SquareCell` and
+`ModTarget` exist, build, and are tested. Note that **nothing is visible in the
+plugin yet** — `SquareCell` is not referenced by `PluginEditor.cpp`, so the FM tab
+still looks exactly as it did. Step 1 was the component and its contract.
