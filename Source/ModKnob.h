@@ -55,12 +55,7 @@ namespace mixxynth::ui
         juce::RangedAudioParameter* getParam() const override { return source.p; }
         juce::String getLabelText() const override { return text; }
         void repaintForMod() override { repaint(); }
-
-        // The parameter this knob drives (used by the editor audit).
-        juce::String getParamID() const
-        {
-            return source.p != nullptr ? source.p->getParameterID() : juce::String {};
-        }
+        bool isAdjusting() const noexcept override { return draggingRing; }
 
         void setLabelText (const juce::String& t)
         {

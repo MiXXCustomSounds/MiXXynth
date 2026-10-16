@@ -184,7 +184,7 @@ int main()
     std::map<juce::String, int> knobDest;
     juce::StringArray nullParams, badDests, mismatches;
 
-    for (auto* k : miXXEditor->modKnobs)
+    for (auto* k : miXXEditor->modTargets)
     {
         if (k->getParam() == nullptr)
         {
@@ -242,13 +242,13 @@ int main()
 
     check (unreachable.isEmpty(), "every parameter reachable from UI", unreachable.joinIntoString (", "));
     std::printf ("     params=%d knobs=%d\n", totalParams,
-                 static_cast<int> (miXXEditor->modKnobs.size()));
+                 static_cast<int> (miXXEditor->modTargets.size()));
 
     // ---- 4. Non-modulatable knobs are correctly identified ----
     int wrongTargetFlags = 0;
     int modTargetKnobs = 0, offKnobs = 0;
 
-    for (auto* k : miXXEditor->modKnobs)
+    for (auto* k : miXXEditor->modTargets)
     {
         if (k->isModTarget() != (k->getDestIndex() != mixxynth::dstOff))
             ++wrongTargetFlags;
@@ -341,7 +341,7 @@ int main()
     {
         float v = 0.0f;
 
-        for (auto* k : miXXEditor->modKnobs)
+        for (auto* k : miXXEditor->modTargets)
             if (k->getDestIndex() == mixxynth::dstMaster)
                 v = k->getModDepth();
 
@@ -404,11 +404,13 @@ int main()
         miXXEditor->assignModSlot (mixxynth::srcMacro1, mixxynth::dstFmIndex);
         miXXEditor->refreshModRings();
 
+        // The arc geometry is a ModKnob property, not something every modulation
+        // control has, so this asks for a knob specifically.
         mixxynth::ui::ModKnob* knob = nullptr;
 
-        for (auto* k : miXXEditor->modKnobs)
+        for (auto* k : miXXEditor->modTargets)
             if (k->getParamID() == "fmIndex" && k->getNumAssignments() == 2)
-                knob = k;
+                knob = dynamic_cast<mixxynth::ui::ModKnob*> (k);
 
         check (knob != nullptr, "the FM Index knob collected both sources", "");
 

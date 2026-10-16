@@ -50,6 +50,19 @@ public:
     // than the one it last painted.
     virtual void refreshFromParam() = 0;
 
+    // True while the user is mid-drag on this control. The editor's refresh uses
+    // this to leave the control alone rather than fighting the user for the
+    // parameter, and it is the one piece of drag state the base cannot know.
+    virtual bool isAdjusting() const noexcept { return false; }
+
+    // The parameter's ID, or empty when there is no parameter. Used by the audit
+    // and by status messages.
+    juce::String getParamID() const
+    {
+        auto* p = getParam();
+        return p != nullptr ? p->getParameterID() : juce::String {};
+    }
+
     // ---- shared state ------------------------------------------------------
     int getDestIndex() const noexcept { return dest; }
 

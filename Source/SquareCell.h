@@ -41,6 +41,7 @@ public:
     juce::String getLabelText() const override { return text; }
     void repaintForMod() override { repaint(); }
     void refreshFromParam() override { repaint(); }
+    bool isAdjusting() const noexcept override { return draggingValue || draggingDepth; }
 
     // ---- live modulation ---------------------------------------------------
     // The modulated value, pushed by the editor's timer. Negative means the cell

@@ -55,8 +55,10 @@ public:
     int getNumShapeModules() const;
     int getNumLfoModules() const;
 
-    // Wires the shared drag-drop and modulation-ring callbacks onto a knob.
-    void wireModKnob (mixxynth::ui::ModKnob& k);
+    // Wires the shared drag-drop and depth callbacks onto any modulation control.
+    // Knobs and cells both inherit ModTarget, so this is one function rather than
+    // one per control kind.
+    void wireModTarget (mixxynth::ui::ModTarget& k);
 
     // Sets the amount of the modulation linking (source, destination), creating
     // the slot if the pair is not assigned yet. Backs the draggable depth ring.
@@ -86,8 +88,8 @@ public:
 
     MiXXynthProcessor& processor() { return proc; }
 
-    // Every modulatable knob, so depth rings can be refreshed from the slots.
-    std::vector<mixxynth::ui::ModKnob*> modKnobs;
+    // Every modulatable control, so assignments can be refreshed from the slots.
+    std::vector<mixxynth::ui::ModTarget*> modTargets;
 
     // Read-only tab access for the editor audit.
     // getTabNames() returns by value because TabbedComponent builds a fresh

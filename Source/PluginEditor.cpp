@@ -659,9 +659,9 @@ private:
     void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
     {
         auto* k = new ModKnob (label, param, dest, true);
-        ed.wireModKnob (*k);
+        ed.wireModTarget (*k);
         addAndMakeVisible (k);
-        ed.modKnobs.push_back (k);
+        ed.modTargets.push_back (k);
         owned.add (k);
         knobs.add (k);
     }
@@ -698,9 +698,9 @@ public:
                 const juce::String id = "mtx" + juce::String (s + 1) + juce::String (d + 1);
 
                 auto* k = new ModKnob (label, ranged (p, id), matrixDestFor (s, d), true);
-                ed.wireModKnob (*k);
+                ed.wireModTarget (*k);
                 addAndMakeVisible (k);
-                ed.modKnobs.push_back (k);
+                ed.modTargets.push_back (k);
                 owned.add (k);
                 knobs.add (k);
                 mtxIds.add (id);
@@ -1091,7 +1091,7 @@ namespace
                     dst.setSelectedId (id, juce::dontSendNotification);
             }
 
-            if (depth != nullptr && ! depth->isAdjustingRing())
+            if (depth != nullptr && ! depth->isAdjusting())
                 depth->refreshFromParam();
         }
 
@@ -1149,7 +1149,7 @@ public:
             row->onChanged = [this] { ed.refreshModRings(); };
             content.addAndMakeVisible (row);
             rows.add (row);
-            ed.modKnobs.push_back (row->getDepthKnob());
+            ed.modTargets.push_back (row->getDepthKnob());
         }
 
         content.setSize (420, mixxynth::kNumModSlots * rowHeight);
@@ -1346,9 +1346,9 @@ private:
     void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
     {
         auto* k = new ModKnob (label, param, dest, true);
-        ed.wireModKnob (*k);
+        ed.wireModTarget (*k);
         addAndMakeVisible (k);
-        ed.modKnobs.push_back (k);
+        ed.modTargets.push_back (k);
         owned.add (k);
 
         if (knobs.size() < 4)
@@ -1491,7 +1491,7 @@ private:
         // Voice settings are not modulation destinations.
         auto* k = new ModKnob (label, param, mixxynth::dstOff, true);
         addAndMakeVisible (k);
-        ed.modKnobs.push_back (k);
+        ed.modTargets.push_back (k);
         owned.add (k);
         knobs.add (k);
     }
@@ -1635,7 +1635,7 @@ public:
                 // a dropped chip is rejected with a flash rather than ignored.
                 auto* k = new ModKnob (info.name, proc.apvts.getParameter (id),
                                        mixxynth::dstOff, true);
-                owner.ed.wireModKnob (*k);
+                owner.ed.wireModTarget (*k);
                 addAndMakeVisible (k);
                 owned.add (k);
                 knobs.add (k);
@@ -2179,13 +2179,13 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
                                mixxynth::dstOff, true);
         bar.addAndMakeVisible (k);
         macroKnobs.add (k);
-        modKnobs.push_back (k);
+        modTargets.push_back (k);
     }
 
     auto* master = new ModKnob ("Master", ranged (proc, "masterGain"), mixxynth::dstMaster, true);
-    wireModKnob (*master);
+    wireModTarget (*master);
     bar.addAndMakeVisible (master);
-    modKnobs.push_back (master);
+    modTargets.push_back (master);
     macroKnobs.add (master); // owned alongside the macros
 
     // Performance bar: on-screen keyboard plus pitch and mod wheels. The
@@ -2688,7 +2688,7 @@ void MiXXynthEditor::refreshModRings()
 {
     // Collect every slot's (source, depth) per destination, so each knob can
     // draw one arc per source and let the ring be dragged to change the amount.
-    std::array<std::vector<mixxynth::ui::ModKnob::Assignment>, mixxynth::kNumModDests> byDest;
+    std::array<std::vector<mixxynth::ui::ModTarget::Assignment>, mixxynth::kNumModDests> byDest;
 
     // Cheap signature so the 30 Hz timer does not rebuild 121 assignment vectors
     // when nothing has moved.
@@ -2732,9 +2732,9 @@ void MiXXynthEditor::refreshModRings()
 
     bool anyAdjusting = false;
 
-    for (auto* k : modKnobs)
+    for (auto* k : modTargets)
     {
-        if (k->isAdjustingRing())
+        if (k->isAdjusting())
         {
             anyAdjusting = true;
             break;
@@ -2749,18 +2749,18 @@ void MiXXynthEditor::refreshModRings()
 
     // While a ring is being dragged the knob owns its own value, so leave it be
     // rather than fighting the user for the parameter.
-    for (auto* k : modKnobs)
+    for (auto* k : modTargets)
     {
         const int dest = k->getDestIndex();
 
-        if (dest < 0 || dest >= mixxynth::kNumModDests || k->isAdjustingRing())
+        if (dest < 0 || dest >= mixxynth::kNumModDests || k->isAdjusting())
             continue;
 
         k->setModAssignments (byDest[static_cast<size_t> (dest)]);
     }
 }
 
-void MiXXynthEditor::wireModKnob (mixxynth::ui::ModKnob& k)
+void MiXXynthEditor::wireModTarget (mixxynth::ui::ModTarget& k)
 {
     k.onSourceDropped = [this] (int s, int d) { assignModSlot (s, d); };
     k.onClearRequested = [this] (int d) { clearModDest (d); };
