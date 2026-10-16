@@ -1,0 +1,122 @@
+{
+  "title": "Choose the visual world",
+  "question": "The roll assigned Broadcast Test Card. Keep it, take an alternate, or re-roll.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Broadcast Test Card",
+      "kicker": "THE ROLL",
+      "lineage": "1967-80 transmitted test cards and calibration slides",
+      "thesis": "A transmitted calibration image, which is what a complex signal looks like when somebody has already made it legible.",
+      "palette": ["#0e1116", "#e8e2d4", "#d8332a", "#e0b23c", "#3fa06a"],
+      "materials": ["phosphor ground", "saturated bar primaries", "one warm caption white"],
+      "viewport": "The FM tab. An 88px calibration strip across the top holds the live scope trace and the limiter's gain reduction as bar segments; below it the six operator columns, envelope section and mod matrix sit on phosphor ground, with the sidebar as a tinted rail.",
+      "risk": "Test cards are a strong, dated graphic. If the bars are decorative rather than carrying state, it reads as a novelty wallpaper.",
+      "raised": [
+        { "from": "challenger-variable-font-specimen", "raise": "The calibration strip re-solves continuously: scope trace, bar segments and operator columns all respond live to one held note, so the screen proves it is an instrument before you touch it." },
+        { "from": "challenger-doujin-event-catalog", "raise": "Every operator cell is a live thumbnail in a packed grid at full density, not six wide panels with air between them." },
+        { "from": "challenger-rw-centre-rail", "raise": "The modulation spine is the one moving part: a single rail between the operator grid and the mod matrix carrying the routing keys, and the only thing that relocates." },
+        { "from": "challenger-monochrome-marketing", "raise": "Every value sits directly beside the control that produces it, paired rather than listed, so a reading is never separated from its cause." },
+        { "from": "challenger-crouwel-grid-specimen", "raise": "The construction grid is visible as the armature: the operator matrix and the mod matrix share one measurable cell, drawn rather than implied." }
+      ],
+      "html": ".impeccable/mocks/decision/assigned.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "model-pick",
+      "label": "The Folded Schematic",
+      "kicker": "IMPECCABLE'S PICK",
+      "lineage": "fold-out service-manual schematics and drafting standards",
+      "thesis": "The document that explains the machine, which is the whole promise of the product.",
+      "palette": ["#1b2430", "#c8d4e0", "#e0a63c", "#8fa8c0"],
+      "materials": ["drafting stock", "signal-line ink", "annotation amber"],
+      "viewport": "The FM tab as a schematic sheet: operators as labelled blocks, the routing matrix as the drawn signal path, modulation sources annotated in the margin.",
+      "risk": "It is the direction most runs in this category land on: engineering-blue as a safe skin.",
+      "html": ".impeccable/mocks/decision/model-pick.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "challenger-cassette-j-card",
+      "label": "The Mixtape J-Card",
+      "verdict": "competitive",
+      "lineage": "hand-lettered cassette inlay cards",
+      "thesis": "The object where a personal recording becomes something you keep.",
+      "palette": ["#f4efe4", "#1d2a5c", "#8a8a8a", "#c8322b"],
+      "materials": ["inlay stock", "ballpoint", "brand stripe"],
+      "viewport": "Patches as an inked tracklist, running times right-aligned, sides as hard halves.",
+      "case": "Fuses cleanly and wins audience identification outright: this is exactly the culture the user is in. It loses on product clarity, because the screen becomes a tracklist rather than a working instrument.",
+      "risk": "Deeply nostalgic, and it makes the synth look like a thing you listen to rather than play.",
+      "html": ".impeccable/mocks/decision/challenger-cassette-j-card.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "challenger-variable-font-specimen",
+      "label": "The Variable Specimen",
+      "verdict": "declined",
+      "lineage": "interactive type specimens",
+      "thesis": "One axis, dragged, remaps an entire field of glyphs live.",
+      "palette": ["#fbfbf9", "#111111", "#d4462c"],
+      "materials": ["paper", "ink", "flat planes"],
+      "case": "Fuses poorly: the audience is type people, and a specimen is not a working instrument. Declined on both axes.",
+      "kept": "Live continuous remapping, one drag re-solving the whole field with no intermediate state."
+    },
+    {
+      "id": "challenger-doujin-event-catalog",
+      "label": "The Event Catalog",
+      "verdict": "declined",
+      "lineage": "convention circle catalogs on newsprint",
+      "thesis": "Eight hundred thumbnails on one sheet, every one the size of a stamp, each keyed to a place.",
+      "palette": ["#e8e4d8", "#141414", "#c1272d"],
+      "materials": ["newsprint", "single-ink black", "one spot colour"],
+      "case": "Fuses poorly: the screen becomes a catalogue to browse, not an instrument to play. Declined on both axes.",
+      "kept": "Total density courage: a whole-page live grid where every cell carries real content at postage-stamp size."
+    },
+    {
+      "id": "challenger-rw-centre-rail",
+      "label": "The Centre Rail",
+      "verdict": "declined",
+      "lineage": "ruling-engine reference settings",
+      "thesis": "Two dense columns twinned around a hairline rail of keys, everything drawn at one device pixel.",
+      "palette": ["#efe7d6", "#1c1a17", "#c0392b"],
+      "materials": ["unbleached bone stock", "iron-black ink", "rubric vermilion"],
+      "case": "Fuses poorly: it reads as a printed book page, and its apparatus marks are not affordances a player already knows. Declined on both axes.",
+      "kept": "The one moving part: a single centre rail carries every key and detent, and nothing else in the layout relocates."
+    },
+    {
+      "id": "challenger-monochrome-marketing",
+      "label": "The Monochrome Claim",
+      "verdict": "declined",
+      "lineage": "monochrome product marketing surfaces",
+      "thesis": "A fine neutral scale, one accent used four times, every claim paired with its proof.",
+      "palette": ["#fafafa", "#171717", "#2563eb"],
+      "materials": ["neutral scale", "framed screenshots", "soft gradients"],
+      "case": "Fuses poorly: it is a marketing page, and a grey screen with one accent is the category default without the category's polish. Declined on both axes.",
+      "kept": "Claim and proof in strict adjacency: a reading never appears apart from the control that produced it."
+    },
+    {
+      "id": "challenger-crouwel-grid-specimen",
+      "label": "The Visible Armature",
+      "verdict": "declined",
+      "lineage": "Wim Crouwel gridded type specimens",
+      "thesis": "Letterforms assembled cell by cell on a construction grid that stays visible as the design.",
+      "palette": ["#f2f2f0", "#141414", "#1f4fd8"],
+      "materials": ["construction hairlines", "one saturated ground", "neutral grotesk"],
+      "case": "Fuses poorly: a specimen poster is not a working instrument, and the grid becomes ornament the moment nothing is measured by it. Declined on both axes.",
+      "kept": "The grid as literal, drawn armature rather than an implied one."
+    }
+  ],
+  "reroll": { "registers": ["safer", "bolder"] },
+  "buildPath": { "value": "code" },
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "What a synth plugin ships, executed impeccably.",
+    "palette": ["#2b2b2b", "#e6e6e6", "#4a9eff"],
+    "materials": ["flat panels", "hairline dividers", "one accent"],
+    "viewport": "Dark grey panel, top tab bar, operator columns of identical knobs, one blue accent on the selected state.",
+    "risk": "Indistinguishable from the competition by design.",
+    "html": ".impeccable/mocks/decision/canon.html",
+    "htmlFrame": "1440x900"
+  },
+  "steer": true
+}

@@ -88,6 +88,7 @@ Binding material constraints the author named directly, recorded as given and no
 - decorative silver screws at the edges of faceplate panels
 - FX tab: silver metal rack rails with holes, modules sitting on them, dark cloth behind
 - the VA section and the ADSR section stylised as each other
+- exposed wires and circuitry in some places, used very sparingly
 
 ## Evidence on Hand
 

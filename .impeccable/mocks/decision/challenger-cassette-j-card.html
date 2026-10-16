@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>MiXXynth — The Mixtape J-Card</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{background:#e6e1d4;color:#1d2a5c;font-family:'Archivo',sans-serif;
+  background-image:repeating-linear-gradient(0deg,#e6e1d4 0 26px,#ddd7c8 26px 27px)}
+.mono{font-family:'IBM Plex Mono',monospace}
+.card{position:absolute;inset:34px 60px;background:#f4efe4;
+  border:1px solid #c9c0ac;box-shadow:0 3px 14px rgba(0,0,0,.22);padding:22px 26px}
+.stripe{position:absolute;left:0;top:0;width:12px;height:100%;background:#c8322b}
+.hd{display:flex;align-items:baseline;gap:16px;border-bottom:2px solid #1d2a5c;
+  padding-bottom:9px;margin-bottom:14px}
+.hd .t{font-size:23px;font-weight:700}
+.hd .sub{font-size:10.5px;letter-spacing:.2em;color:#8a8a8a;font-weight:600}
+.hd .sp{flex:1}
+.hd .meta{font-size:10.5px;letter-spacing:.06em}
+.cols{display:flex;gap:34px}
+.col{flex:1}
+.side{font-size:12px;font-weight:700;letter-spacing:.24em;text-decoration:underline;
+  text-underline-offset:4px;margin-bottom:9px}
+.tr{display:flex;align-items:baseline;gap:9px;padding:5px 0;
+  border-bottom:1px dotted #b8b0a0}
+.tr .n{font-size:10px;color:#8a8a8a;width:20px}
+.tr .nm{font-size:13px;font-weight:600}
+.tr .d{font-size:10.5px;color:#8a8a8a}
+.tr .tm{font-size:12px;margin-left:auto;font-weight:500}
+.tr .k{font-size:9px;letter-spacing:.12em;color:#c8322b;font-weight:600}
+.tape{position:absolute;right:26px;bottom:20px;width:190px;height:88px;
+  border:2px solid #1d2a5c;border-radius:4px;background:#f8f4ea}
+.tape .win{position:absolute;left:22px;top:20px;width:146px;height:40px;
+  border:1px solid #1d2a5c;border-radius:3px;background:#f4efe4}
+.tape .hub{position:absolute;top:28px;width:22px;height:22px;border-radius:50%;
+  border:2px solid #1d2a5c}
+.tape .h1{left:38px}.tape .h2{left:128px}
+.tape .lab{position:absolute;left:0;bottom:5px;width:100%;text-align:center;
+  font-size:9px;letter-spacing:.2em;color:#8a8a8a;font-weight:600}
+.bar{position:absolute;left:0;top:100px;width:100%;height:5px;
+  background:linear-gradient(90deg,#c8322b 0 33%,#1d2a5c 33% 66%,#e0b23c 66% 100%)}
+</style></head>
+<body>
+<div class="card">
+  <div class="stripe"></div>
+  <div class="bar"></div>
+  <div class="hd">
+    <span class="t">MiXXynth</span>
+    <span class="sub">MIXTAPE &middot; SIDE A</span>
+    <span class="sp"></span>
+    <span class="meta mono">6-OP FM &middot; 16 VOICES &middot; 45:00</span>
+  </div>
+  <div class="cols">
+    <div class="col">
+      <div class="side">PATCHES</div>
+      <div class="tr"><span class="n mono">01</span><span class="nm">Glass Bell</span>
+        <span class="d">OP 1&rarr;OUT, ENV 3 &rarr; cutoff</span><span class="tm mono">4:12</span></div>
+      <div class="tr"><span class="n mono">02</span><span class="nm">Copper Bass</span>
+        <span class="d">OP 2&rarr;OP 1, VA sub 34</span><span class="tm mono">6:38</span></div>
+      <div class="tr"><span class="n mono">03</span><span class="nm">Tape Choir</span>
+        <span class="d">6-op stack, drift 22%</span><span class="tm mono">5:04</span></div>
+      <div class="tr"><span class="n mono">04</span><span class="nm">FM Rhodes</span>
+        <span class="d">OP 4&rarr;OP 1, vel &rarr; level</span><span class="tm mono">3:47</span></div>
+      <div class="tr"><span class="n mono">05</span><span class="nm">Juno Pad</span>
+        <span class="d">VA only, chorus on</span><span class="tm mono">7:21</span></div>
+      <div class="tr"><span class="n mono">06</span><span class="nm">Metal Rain</span>
+        <span class="d">OP 6 ratio 11, LFO 1</span><span class="tm mono">2:55</span></div>
+      <div class="tr"><span class="n mono">07</span><span class="nm">Sub Drop</span>
+        <span class="d">OP 1 + noise, glide 80ms</span><span class="tm mono">4:30</span></div>
+      <div class="tr"><span class="n mono">08</span><span class="nm">Weird Verb Bed</span>
+        <span class="d">WeirdVerb 62%, macro 1</span><span class="tm mono">5:58</span></div>
+      <div class="tr" style="border-bottom:none"><span class="n mono">09</span>
+        <span class="nm">Broken Radio</span>
+        <span class="d">drift 88%, distortion</span><span class="tm mono">3:30</span></div>
+    </div>
+    <div class="col">
+      <div class="side">SIDE B &middot; LIVE</div>
+      <div class="tr"><span class="n mono">10</span><span class="nm">Rack Rattle</span>
+        <span class="d">flanger &rarr; ping-pong</span><span class="tm mono">6:14</span></div>
+      <div class="tr"><span class="n mono">11</span><span class="nm">OTT Everything</span>
+        <span class="d">multiband 74%, limiter on</span><span class="tm mono">4:48</span></div>
+      <div class="tr"><span class="n mono">12</span><span class="nm">Phaser Sweep</span>
+        <span class="d">LFO 2 &rarr; phaser rate</span><span class="tm mono">5:36</span></div>
+      <div class="tr"><span class="n mono">13</span><span class="nm">Convolution Room</span>
+        <span class="d">Convolution 41%, EQ tilt</span><span class="tm mono">7:02</span></div>
+      <div class="tr"><span class="n mono">14</span><span class="nm">Graphic Smile</span>
+        <span class="d">Graphic EQ 8-band</span><span class="tm mono">3:19</span></div>
+      <div class="tr" style="border-bottom:none"><span class="n mono">15</span>
+        <span class="nm">Screaming Comp</span>
+        <span class="d">compressor 8:1, GR 1.8 dB</span><span class="tm mono">4:55</span></div>
+      <div style="margin-top:22px;font-size:11px;color:#8a8a8a;line-height:1.8">
+        <span class="k mono">TIMED WITH A WRISTWATCH</span><br>
+        Side A ends clean at 44:30. Recorded 4-track,<br>
+        bounced to cassette, played back too loud.<br><br>
+        <span style="color:#1d2a5c;font-weight:600">miXXynth &middot; 12 modules &middot; 32 mod slots</span>
+      </div>
+    </div>
+  </div>
+  <div class="tape">
+    <div class="win"></div><div class="hub h1"></div><div class="hub h2"></div>
+    <div class="lab mono">SIDE A &middot; 44:30</div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>MiXXynth — The Folded Schematic</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{background:#1b2430;color:#c8d4e0;font-family:'Barlow Condensed',sans-serif;
+  background-image:linear-gradient(#1b2430,#161e28)}
+.mono{font-family:'IBM Plex Mono',monospace}
+.top{height:42px;display:flex;align-items:center;gap:20px;padding:0 16px;
+  border-bottom:1px solid #2c3a49;background:#141c25}
+.mark{font-weight:700;font-size:16px;letter-spacing:.2em}
+.tab{font-size:11px;font-weight:600;letter-spacing:.14em;padding:6px 18px;
+  border:1px solid #2c3a49;color:#7e8fa1}
+.tab.on{color:#141c25;background:#c8d4e0;border-color:#c8d4e0}
+.spacer{flex:1}
+.pill{font-size:10px;font-weight:600;letter-spacing:.1em;padding:5px 10px;
+  border:1px solid #2c3a49;color:#8fa8c0}
+/* annotation margin */
+.body{height:858px;display:flex}
+.margin{flex:0 0 232px;border-right:1px solid #2c3a49;padding:14px;
+  background:#18212b}
+.margin h4{font-size:9px;letter-spacing:.18em;color:#5f7285;font-weight:600;margin-bottom:10px}
+.note{border-left:2px solid #e0a63c;padding:5px 0 5px 9px;margin-bottom:11px}
+.note .a{font-size:9px;letter-spacing:.14em;color:#e0a63c;font-weight:600}
+.note .b{font-size:10.5px;color:#93a7bb;line-height:1.35}
+.sheet{flex:1;padding:16px 20px;position:relative}
+.sechd{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.sechd h3{font-size:10px;letter-spacing:.2em;color:#7e8fa1;font-weight:600}
+.rule{flex:1;height:1px;background:#2c3a49}
+/* operators as blocks on a drawn path */
+.chain{display:flex;align-items:center;gap:0;margin-bottom:16px}
+.blk{flex:1;border:1px solid #3d4d5e;background:#1f2a36;padding:8px 9px;position:relative}
+.blk.hot{border-color:#e0a63c;background:#242a28}
+.blk .n{font-size:11px;font-weight:700;letter-spacing:.1em}
+.blk.hot .n{color:#e0a63c}
+.blk .r{font-size:10px;color:#7e8fa1;margin-top:3px}
+.blk .w{margin-top:6px;height:22px;border:1px solid #2c3a49;background:#141c25;position:relative;overflow:hidden}
+.blk .w svg{position:absolute;inset:0;width:100%;height:100%}
+.arrow{flex:0 0 26px;text-align:center;color:#5f7285;font-size:14px}
+.out{border:1px solid #3d4d5e;padding:8px 14px;font-size:11px;letter-spacing:.14em;
+  font-weight:600;color:#93a7bb;background:#1a232e}
+/* the drawn signal path */
+.path{margin:6px 0 16px;height:64px;position:relative}
+.path svg{position:absolute;inset:0;width:100%;height:100%}
+.path .lbl{position:absolute;font-size:9px;letter-spacing:.12em;color:#5f7285;font-weight:600}
+/* mod sources annotated inline */
+.mods{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.mo{border:1px solid #2c3a49;background:#1a232e;padding:8px 10px}
+.mo .k{font-size:9px;letter-spacing:.14em;color:#5f7285;font-weight:600}
+.mo .v{font-size:15px;font-weight:600;color:#c8d4e0}
+.mo .s{font-size:9.5px;color:#8fa8c0}
+/* matrix as a drawn table */
+.tbl{width:100%;border-collapse:collapse;font-size:10.5px}
+.tbl th{font-size:8.5px;letter-spacing:.14em;color:#5f7285;font-weight:600;
+  text-align:left;padding:6px 8px;border-bottom:1px solid #2c3a49}
+.tbl td{padding:6px 8px;border-bottom:1px solid #232f3c;color:#a8bccd}
+.tbl td.d{text-align:right;color:#e0a63c}
+</style></head>
+<body>
+<div class="top">
+  <div class="mark">MiXXynth</div>
+  <div class="tab on">FM</div><div class="tab">FX</div>
+  <div class="spacer"></div>
+  <div class="pill">SNAP</div><div class="pill">MPE</div><div class="pill">DICE</div>
+</div>
+<div class="body">
+  <div class="margin">
+    <h4>ANNOTATION</h4>
+    <div class="note"><div class="a">A1 &middot; LFO 1</div>
+      <div class="b">1.30 Hz sine &rarr; OP 1 level, depth +42. Breakpoint shape edited.</div></div>
+    <div class="note"><div class="a">A2 &middot; ENV 3</div>
+      <div class="b">Filter cutoff on OP 1, depth +63. 4-stage, 380 ms attack.</div></div>
+    <div class="note"><div class="a">A3 &middot; DRIFT</div>
+      <div class="b">Per-op slow random walk. OP 3 fine, depth +9.</div></div>
+    <div class="note" style="border-color:#5f7285"><div class="a" style="color:#5f7285">A4 &middot; VA LAYER</div>
+      <div class="b">Sub 34, Noise 12, Cutoff 61. Envelope shared with ENV 1.</div></div>
+    <h4 style="margin-top:16px">VOICE</h4>
+    <div class="b" style="font-size:10.5px;color:#93a7bb;line-height:1.7">
+      Poly 16 &middot; Glide 0.08 s<br>Bend &plusmn;2 st &middot; Drift 22%<br>MPE enabled</div>
+  </div>
+
+  <div class="sheet">
+    <div class="sechd"><h3>OPERATOR CHAIN</h3><div class="rule"></div>
+      <span class="mono" style="font-size:9.5px;color:#5f7285">6-OP FM &middot; FREE ROUTING</span></div>
+    <div class="chain">
+      <div class="blk hot"><div class="n">OP 1</div><div class="r mono">1.00 &middot; fine 0</div>
+        <div class="w"><svg viewBox="0 0 60 22"><path d="M0 11 Q15 -4 30 11 Q45 26 60 11" fill="none" stroke="#e0a63c" stroke-width="1.3"/></svg></div></div>
+      <div class="arrow">&larr;</div>
+      <div class="blk"><div class="n">OP 2</div><div class="r mono">2.00 &middot; fine -3</div>
+        <div class="w"><svg viewBox="0 0 60 22"><path d="M0 5 H60 M0 17 H60" fill="none" stroke="#8fa8c0" stroke-width="1.3"/></svg></div></div>
+      <div class="arrow">&larr;</div>
+      <div class="blk"><div class="n">OP 3</div><div class="r mono">3.00 &middot; fine +7</div>
+        <div class="w"><svg viewBox="0 0 60 22"><path d="M0 11 L15 3 L30 11 L45 3 L60 11" fill="none" stroke="#8fa8c0" stroke-width="1.3"/></svg></div></div>
+      <div class="arrow">&larr;</div>
+      <div class="blk"><div class="n">OP 4</div><div class="r mono">7.00 &middot; fine 0</div>
+        <div class="w"><svg viewBox="0 0 60 22"><path d="M0 18 L10 3 L20 18 L30 3 L40 18 L50 3 L60 18" fill="none" stroke="#8fa8c0" stroke-width="1.3"/></svg></div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="out">OUT</div>
+    </div>
+
+    <div class="path">
+      <span class="lbl" style="left:0;top:0">SIGNAL PATH &middot; OP 5 &rarr; OP 3</span>
+      <svg viewBox="0 0 900 64" preserveAspectRatio="none">
+        <path d="M20 46 L120 46 L120 20 L300 20 L300 46 L470 46 L470 24 L640 24 L640 46 L860 46"
+              fill="none" stroke="#8fa8c0" stroke-width="1.3"/>
+        <path d="M700 46 L700 58 L860 58" fill="none" stroke="#e0a63c" stroke-width="1.3" stroke-dasharray="4 3"/>
+        <circle cx="120" cy="20" r="3" fill="#8fa8c0"/><circle cx="470" cy="24" r="3" fill="#8fa8c0"/>
+        <circle cx="700" cy="58" r="3" fill="#e0a63c"/>
+      </svg>
+      <span class="lbl" style="left:126px;top:4px">OP 5 &middot; 1.41</span>
+      <span class="lbl" style="left:476px;top:8px">OP 6 &middot; 11.00</span>
+      <span class="lbl" style="left:706px;bottom:2px;color:#e0a63c">OP 1 filter &middot; ENV 3</span>
+    </div>
+
+    <div class="sechd"><h3>MODULATION SOURCES</h3><div class="rule"></div>
+      <span class="mono" style="font-size:9.5px;color:#5f7285">4 LFO &middot; 3 ENV &middot; 4 MACRO</span></div>
+    <div class="mods" style="margin-bottom:16px">
+      <div class="mo"><div class="k">LFO 1</div><div class="v mono">1.30 Hz</div><div class="s">sine &middot; 9 slots</div></div>
+      <div class="mo"><div class="k">LFO 2</div><div class="v mono">0.14 Hz</div><div class="s">tri &middot; breakpoint</div></div>
+      <div class="mo"><div class="k">ENV 2</div><div class="v mono">1.20 s</div><div class="s">A 4 &middot; D 210 &middot; S 62</div></div>
+      <div class="mo"><div class="k">ENV 3</div><div class="v mono">380 ms</div><div class="s">4-stage &middot; edited</div></div>
+      <div class="mo"><div class="k">MACRO 1</div><div class="v mono">55%</div><div class="s">&rarr; VA cutoff</div></div>
+      <div class="mo"><div class="k">DRIFT</div><div class="v mono">22%</div><div class="s">per-op walk</div></div>
+    </div>
+
+    <div class="sechd"><h3>ROUTING TABLE</h3><div class="rule"></div>
+      <span class="mono" style="font-size:9.5px;color:#5f7285">32 SLOTS</span></div>
+    <table class="tbl">
+      <tr><th>SOURCE</th><th>DESTINATION</th><th style="text-align:right">DEPTH</th><th>SHAPE</th></tr>
+      <tr><td>LFO 1</td><td>OP 1 &middot; Level</td><td class="d mono">+42</td><td>breakpoint</td></tr>
+      <tr><td>LFO 1</td><td>OP 2 &middot; Ratio</td><td class="d mono">+18</td><td>breakpoint</td></tr>
+      <tr><td>ENV 3</td><td>OP 1 &middot; Filter Cutoff</td><td class="d mono">+63</td><td>edit</td></tr>
+      <tr><td>ENV 2</td><td>OP 4 &middot; Level</td><td class="d mono">-24</td><td>edit</td></tr>
+      <tr><td>MACRO 1</td><td>VA &middot; Cutoff</td><td class="d mono">+55</td><td>edit</td></tr>
+      <tr><td>VELOCITY</td><td>OP 1 &middot; Level</td><td class="d mono">+38</td><td>&mdash;</td></tr>
+      <tr><td>DRIFT</td><td>OP 3 &middot; Fine</td><td class="d mono">+9</td><td>&mdash;</td></tr>
+    </table>
+  </div>
+</div>
+</body></html>
