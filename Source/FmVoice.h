@@ -68,6 +68,33 @@ public:
         float vaSustain = 1.0f;
         float vaRelease = 0.05f;
 
+        // M6: a filter per operator, each with its own envelope and its own routing choice.
+        //
+        // Per operator rather than one global filter because filtering a MODULATOR and
+        // filtering a CARRIER are different sounds, and the whole point of a per-operator
+        // filter is being able to do both at once. The routing below decides which of the
+        // two paths each operator's filter sits on.
+        bool  opFilterOn[numOps]     = {};
+        int   opFilterType[numOps]   = {};   // 0 LP, 1 HP, 2 BP
+        float opFilterCutoff[numOps] = {};
+        float opFilterReso[numOps]   = {};
+        float opFilterDrive[numOps]  = {};
+
+        // The filter's OWN envelope, which sweeps its cutoff. It is a separate envelope
+        // rather than the amplitude one, because a filter that could only sweep in step
+        // with the level could not do the one thing filter envelopes are for.
+        float opFilterAttack[numOps]  = {};
+        float opFilterDecay[numOps]   = {};
+        float opFilterSustain[numOps] = {};
+        float opFilterRelease[numOps] = {};
+
+        // Where the filter sits: 0 = the operator's output, 1 = its modulation, 2 = both.
+        // Defaults to Both, so switching a filter on does the obvious thing.
+        int opFilterRouting[numOps] = { 2, 2, 2, 2, 2, 2 };
+
+        // The one global filter, which the VA panel drives. Separate from the per-operator
+        // filters above and staying where it was: it sits across the whole voice rather than
+        // inside one operator's signal path.
         bool  filterOn    = false;
         int   filterType  = 0;       // 0 LP, 1 HP, 2 BP
         float cutoff      = 12000.0f;
@@ -131,15 +158,22 @@ public:
     float getVelocity() const { return velocity; }
 
 private:
-    struct Op
+    // One envelope's state. Its own type rather than a few fields on Op, because an
+    // operator now runs TWO envelopes - the amplitude one and its filter's - and a stage
+    // machine should exist once rather than twice. Two copies drift; one cannot.
+    struct EnvState
     {
-        double phase = 0.0;
         float env = 0.0f;
         int stage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
         float releaseFrom = 0.0f;
-        float prevOut = 0.0f; // previous-sample output (feedback + backward edges)
-        float curOut = 0.0f;  // current-sample output
-        float fbSmooth = 0.0f; // smoothed feedback amount (zipper-free)
+    };
+
+    struct Op
+    {
+        double phase = 0.0;
+        EnvState envState;      // the amplitude envelope
+        float prevOut = 0.0f;   // previous-sample output (feedback + backward edges)
+        float curOut = 0.0f;    // current-sample output
 
         // Drift: where this operator's pitch wander currently is, and where it is
         // heading. Two values rather than one, because the walk moves the target and
@@ -147,10 +181,20 @@ private:
         // wander instead of stepping.
         float drift = 0.0f;
         float driftTarget = 0.0f;
+        float fbSmooth = 0.0f; // smoothed feedback amount (zipper-free)
+
+        // The operator's filter: its own SVF state, its own cached coefficients and its own
+        // envelope. The envelope is separate from the amplitude one because a filter that
+        // could only sweep in step with the level could not do the one thing filter
+        // envelopes are for.
+        EnvState fltEnvState;
+        float fltIc1 = 0.0f, fltIc2 = 0.0f;
+        float fltA1 = 0.0f, fltA2 = 0.0f, fltA3 = 0.0f, fltK = 2.0f;
+        float fltLastCutoff = -1.0f, fltLastReso = -1.0f;
     };
 
     void renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const VoiceParams& params);
-    static float updateEnvelope (Op& op, float a, float d, float s, float r, double sampleRate);
+    static float updateEnvelope (EnvState& e, float a, float d, float s, float r, double sampleRate);
 
     // Drift. `updateDrift` advances every operator's walk and the VA's by one block;
     // `nextDriftRandom` is the deterministic source the walk is built from.
@@ -167,7 +211,7 @@ private:
     //
     // This replaced a one-pole gate follower, which had a fixed attack and release and no
     // sustain control. Stage transitions are now driven by the gate edge instead.
-    Op vaEnvState;
+    EnvState vaEnvState;
     bool vaGateLast = false;
     float vaEnv = 0.0f;
     juce::uint32 noiseState = 0x2545f491u;

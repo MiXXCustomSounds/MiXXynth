@@ -2140,6 +2140,147 @@ int main()
                     published[static_cast<size_t> (mixxynth::dstOp3Level)]) && ok;
     }
 
+    // --- Per-operator filters (M6) ---
+    //
+    // The routing is the part worth testing hardest. It decides whether the filter shapes
+    // what you HEAR or what the operator DOES, and getting it backwards still produces
+    // sound - just the wrong sound, which is the hardest kind of bug to notice by ear.
+    {
+        auto maxDiff2 = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+        {
+            float d = 0.0f;
+
+            for (int ch = 0; ch < a.getNumChannels(); ++ch)
+                for (int i = 0; i < a.getNumSamples(); ++i)
+                    d = juce::jmax (d, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+
+            return d;
+        };
+
+        auto windowDiff2 = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b,
+                               int from, int len)
+        {
+            float d = 0.0f;
+
+            for (int ch = 0; ch < a.getNumChannels(); ++ch)
+                for (int i = from; i < from + len; ++i)
+                    d = juce::jmax (d, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+
+            return d;
+        };
+
+        // A two-operator pair: op 1 modulates op 2, op 2 is the carrier.
+        auto fmPair = []
+        {
+            MiXXFmVoice::VoiceParams p;
+            p.mod[0][1] = 0.9f;
+            p.level[1] = 0.8f;
+            p.index = 4.0f;
+            p.master = 0.8f;
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                p.ratio[i] = 1.0f;
+                p.carrier[i] = (i == 1);
+            }
+
+            return p;
+        };
+
+        auto renderPatch = [&] (const MiXXFmVoice::VoiceParams& base)
+        {
+            MiXXFmVoice v;
+            v.setSampleRate (sr);
+            v.noteOn (69, 1.0f);
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+            v.renderAdd (buf, 0, blockLen, base);
+            return buf;
+        };
+
+        // Holds the filter open, so the measurement is of the filter and not of the sweep.
+        auto lowPassHeld = [] (MiXXFmVoice::VoiceParams& p, int op)
+        {
+            p.opFilterOn[op] = true;
+            p.opFilterType[op] = 0;
+            p.opFilterCutoff[op] = 200.0f;
+            p.opFilterReso[op] = 0.2f;
+            p.opFilterSustain[op] = 1.0f;
+        };
+
+        const auto plain = renderPatch (fmPair());
+
+        auto modFiltered = fmPair();
+        lowPassHeld (modFiltered, 0);
+        modFiltered.opFilterRouting[0] = 1;   // the modulator only
+
+        const auto filteredMod = renderPatch (modFiltered);
+
+        ok = check (maxDiff2 (plain, filteredMod) > 0.01f,
+                    "filter on a modulator changes the tone",
+                    maxDiff2 (plain, filteredMod)) && ok;
+
+        auto outFiltered = fmPair();
+        lowPassHeld (outFiltered, 1);
+        outFiltered.opFilterRouting[1] = 0;   // the output only
+
+        const auto filteredOut = renderPatch (outFiltered);
+
+        ok = check (maxDiff2 (plain, filteredOut) > 0.01f,
+                    "filter on a carrier output changes the tone",
+                    maxDiff2 (plain, filteredOut)) && ok;
+
+        // The two must not be the same thing. If routing were ignored they would be, and
+        // the control would be decorative.
+        ok = check (maxDiff2 (filteredMod, filteredOut) > 0.01f,
+                    "Out and Mod are genuinely different routes",
+                    maxDiff2 (filteredMod, filteredOut)) && ok;
+
+        // An operator that is neither a carrier nor a modulator of anything downstream has
+        // no path to the output, so its filter cannot be audible. This is the check that
+        // catches a filter being applied somewhere it does not belong.
+        auto idleFiltered = fmPair();
+        lowPassHeld (idleFiltered, 5);
+
+        ok = check (maxDiff2 (plain, renderPatch (idleFiltered)) == 0.0f,
+                    "an idle operator's filter cannot be heard",
+                    maxDiff2 (plain, renderPatch (idleFiltered))) && ok;
+
+        // And the envelope must actually move the cutoff, which means moving the BRIGHTNESS.
+        //
+        // Measured in zero crossings, not in how much the render differs from the plain one:
+        // a darker filter removes more of the signal, so it differs MORE, and using
+        // difference as a proxy for brightness gets the answer exactly backwards. Zero
+        // crossings measure the thing itself and do not care about amplitude.
+        auto zeroCrossings = [] (const juce::AudioBuffer<float>& b, int from, int len)
+        {
+            int n = 0;
+
+            for (int i = from + 1; i < from + len; ++i)
+                if ((b.getSample (0, i - 1) < 0.0f) != (b.getSample (0, i) < 0.0f))
+                    ++n;
+
+            return n;
+        };
+
+        auto swept = fmPair();
+        swept.opFilterOn[0] = true;
+        swept.opFilterType[0] = 0;
+        swept.opFilterCutoff[0] = 150.0f;
+        swept.opFilterAttack[0] = 0.4f;
+        swept.opFilterSustain[0] = 1.0f;
+        swept.opFilterRouting[0] = 1;
+
+        const auto sweptBuf = renderPatch (swept);
+        const int earlyBright = zeroCrossings (sweptBuf, 0, static_cast<int> (sr * 0.05));
+        const int lateBright  = zeroCrossings (sweptBuf, static_cast<int> (sr * 0.7),
+                                               static_cast<int> (sr * 0.2));
+
+        ok = check (lateBright > earlyBright, "the filter envelope sweeps the cutoff open",
+                    lateBright / juce::jmax (1.0, static_cast<double> (earlyBright))) && ok;
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }

@@ -24,6 +24,11 @@ namespace
     // an oscillator warming up and starts sounding like an LFO.
     constexpr float kDriftSlewSeconds = 0.6f;
 
+    // How far a filter's envelope sweeps its cutoff, in octaves, at full envelope. Four is
+    // the usual amount: enough to go from closed to bright without the top of the sweep
+    // disappearing past what the ear can follow.
+    constexpr float kFilterEnvOctaves = 4.0f;
+
     double centsToRatio (double cents)
     {
         return std::pow (2.0, cents / 1200.0);
@@ -43,7 +48,7 @@ bool MiXXFmVoice::isActive() const
         return true;
 
     for (const auto& op : ops)
-        if (op.stage != 0)
+        if (op.envState.stage != 0)
             return true;
 
     return false;
@@ -86,14 +91,23 @@ void MiXXFmVoice::reset()
     for (auto& op : ops)
     {
         op.phase = 0.0;
-        op.env = 0.0f;
-        op.stage = 0;
-        op.releaseFrom = 0.0f;
+        op.envState.env = 0.0f;
+        op.envState.stage = 0;
+        op.envState.releaseFrom = 0.0f;
         op.prevOut = 0.0f;
         op.curOut = 0.0f;
         op.fbSmooth = 0.0f;
         op.drift = 0.0f;
         op.driftTarget = 0.0f;
+
+        // The filter's own state, for the same reason as the amplitude envelope: a stale
+        // envelope or a stale SVF integrator from the last note is a click at the start of
+        // this one.
+        op.fltEnvState = EnvState {};
+        op.fltIc1 = 0.0f;
+        op.fltIc2 = 0.0f;
+        op.fltLastCutoff = -1.0f;
+        op.fltLastReso = -1.0f;
     }
 }
 
@@ -162,12 +176,19 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel, float phaseOffset01)
     for (auto& op : ops)
     {
         op.phase = startPhase;
-        op.env = 0.0f;
-        op.stage = 1;
-        op.releaseFrom = 0.0f;
+        op.envState.env = 0.0f;
+        op.envState.stage = 1;
+        op.envState.releaseFrom = 0.0f;
         op.prevOut = 0.0f;
         op.curOut = 0.0f;
         op.fbSmooth = 0.0f;
+
+        // The filter's envelope starts with the note, so a swept filter sweeps from the
+        // note rather than from wherever it happened to be left.
+        op.fltEnvState = EnvState {};
+        op.fltEnvState.stage = 1;
+        op.fltIc1 = 0.0f;
+        op.fltIc2 = 0.0f;
     }
 }
 
@@ -180,47 +201,53 @@ void MiXXFmVoice::noteOff (int noteNumber)
 
     for (auto& op : ops)
     {
-        if (op.stage != 0 && op.stage != 4)
+        if (op.envState.stage != 0 && op.envState.stage != 4)
         {
-            op.stage = 4;
-            op.releaseFrom = op.env;
+            op.envState.stage = 4;
+            op.envState.releaseFrom = op.envState.env;
+        }
+
+        if (op.fltEnvState.stage != 0 && op.fltEnvState.stage != 4)
+        {
+            op.fltEnvState.stage = 4;
+            op.fltEnvState.releaseFrom = op.fltEnvState.env;
         }
     }
 }
 
-float MiXXFmVoice::updateEnvelope (Op& op, float a, float d, float s, float r, double sr)
+float MiXXFmVoice::updateEnvelope (EnvState& e, float a, float d, float s, float r, double sr)
 {
     const float sampleRateF = static_cast<float> (sr);
 
-    switch (op.stage)
+    switch (e.stage)
     {
         case 1: // attack
         {
-            op.env += 1.0f / juce::jmax (1.0f, a * sampleRateF);
-            if (op.env >= 1.0f) { op.env = 1.0f; op.stage = 2; }
+            e.env += 1.0f / juce::jmax (1.0f, a * sampleRateF);
+            if (e.env >= 1.0f) { e.env = 1.0f; e.stage = 2; }
             break;
         }
         case 2: // decay
         {
-            op.env -= (1.0f - s) / juce::jmax (1.0f, d * sampleRateF);
-            if (op.env <= s) { op.env = s; op.stage = 3; }
+            e.env -= (1.0f - s) / juce::jmax (1.0f, d * sampleRateF);
+            if (e.env <= s) { e.env = s; e.stage = 3; }
             break;
         }
         case 3: // sustain
-            op.env = s;
+            e.env = s;
             break;
         case 4: // release
         {
-            op.env -= op.releaseFrom / juce::jmax (1.0f, r * sampleRateF);
-            if (op.env <= 0.0f) { op.env = 0.0f; op.stage = 0; }
+            e.env -= e.releaseFrom / juce::jmax (1.0f, r * sampleRateF);
+            if (e.env <= 0.0f) { e.env = 0.0f; e.stage = 0; }
             break;
         }
         default:
-            op.env = 0.0f;
+            e.env = 0.0f;
             break;
     }
 
-    return op.env;
+    return e.env;
 }
 
 void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const VoiceParams& p)
@@ -293,7 +320,7 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         {
             auto& op = ops[static_cast<size_t> (dst)];
 
-            updateEnvelope (op, p.attack[dst], p.decay[dst], p.sustain[dst], p.release[dst], sampleRate);
+            updateEnvelope (op.envState, p.attack[dst], p.decay[dst], p.sustain[dst], p.release[dst], sampleRate);
             op.fbSmooth += (p.feedback[dst] - op.fbSmooth) * 0.001f;
 
             double modSum = 0.0;
@@ -322,11 +349,82 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
                                 ? mixxynth::OpWaveTables::read (cursors[static_cast<size_t> (dst)], ph01)
                                 : 0.0f;
 
-            const float s = raw * op.env;
-            op.curOut = s;
+            const float amp = raw * op.envState.env;
+            op.curOut = amp;
+
+            // The operator's filter, if it has one. Filtered ONCE and then routed, rather
+            // than filtered twice for the two paths: it is one filter, so running it twice
+            // would mean two sets of state that can disagree about the same signal - and
+            // "Both" would not be the sum of the two, it would be a third thing.
+            float filtered = amp;
+
+            const bool filterOn = p.opFilterOn[dst];
+            const int route = p.opFilterRouting[dst];
+
+            if (filterOn)
+            {
+                updateEnvelope (op.fltEnvState, p.opFilterAttack[dst], p.opFilterDecay[dst],
+                                p.opFilterSustain[dst], p.opFilterRelease[dst], sampleRate);
+
+                // The coefficients are refreshed every 32 samples, not every sample. The
+                // envelope itself is cheap (an add and a compare) but a tan() per operator
+                // per sample would be the most expensive thing in the voice by a wide
+                // margin, and the cutoff cannot move far in 0.7 ms.
+                //
+                // The envelope sweeps the cutoff UP from where the control is set, which is
+                // the one thing a filter envelope is for: set the cutoff low and the
+                // envelope opens it, set it high and the envelope has nowhere to go.
+                if ((n % 32) == 0)
+                {
+                    const float target = juce::jlimit (20.0f, 20000.0f,
+                        p.opFilterCutoff[dst]
+                          * std::pow (2.0f, op.fltEnvState.env * kFilterEnvOctaves));
+
+                    if (std::abs (target - op.fltLastCutoff) > 0.01f
+                          || std::abs (p.opFilterReso[dst] - op.fltLastReso) > 0.0005f)
+                    {
+                        const float sr = static_cast<float> (sampleRate);
+                        const float fc = juce::jlimit (20.0f, sr * 0.45f, target);
+                        const float g = std::tan (juce::MathConstants<float>::pi * fc / sr);
+
+                        op.fltK = 2.0f - 2.0f * juce::jlimit (0.0f, 0.98f, p.opFilterReso[dst]);
+                        op.fltA1 = 1.0f / (1.0f + g * (g + op.fltK));
+                        op.fltA2 = g * op.fltA1;
+                        op.fltA3 = g * op.fltA2;
+                        op.fltLastCutoff = target;
+                        op.fltLastReso = p.opFilterReso[dst];
+                    }
+                }
+
+                float in = amp;
+
+                if (p.opFilterDrive[dst] > 0.0f)
+                    in = std::tanh (in * (1.0f + p.opFilterDrive[dst] * 8.0f));
+
+                const float v3 = in - op.fltIc2;
+                const float v1 = op.fltA1 * op.fltIc1 + op.fltA2 * v3;
+                const float v2 = op.fltIc2 + op.fltA2 * op.fltIc1 + op.fltA3 * v3;
+                op.fltIc1 = 2.0f * v1 - op.fltIc1;
+                op.fltIc2 = 2.0f * v2 - op.fltIc2;
+
+                if (p.opFilterType[dst] == 1)       filtered = in - op.fltK * v1 - v2;
+                else if (p.opFilterType[dst] == 2)  filtered = v1;
+                else                                filtered = v2;
+            }
+
+            // Routing: 0 = the output, 1 = the modulation, 2 = both.
+            //
+            // The modulation path is what downstream operators READ, so this decides whether
+            // the filter shapes what you HEAR or what the operator DOES - which is the whole
+            // reason the filter is per operator rather than once across the voice.
+            if (filterOn && route != 0)
+                op.curOut = filtered;
 
             if (p.carrier[dst])
-                sum += s * p.level[dst];
+            {
+                const float toOutput = (filterOn && route == 1) ? amp : filtered;
+                sum += toOutput * p.level[dst];
+            }
 
             op.phase += opInc[static_cast<size_t> (dst)];
             if (op.phase >= 1.0)

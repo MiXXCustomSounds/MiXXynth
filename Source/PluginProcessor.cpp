@@ -300,6 +300,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "filterDrive", "Filter Drive",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
+    // The per-operator filters live in VoiceParams but have no APVTS parameters yet, and
+    // deliberately so: the audit refuses a parameter with no control, and their controls are
+    // part of the ADSR section restructure rather than a separate change. The voice defaults
+    // them all off, so nothing about the sound depends on this waiting.
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "masterGain", "Master Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
