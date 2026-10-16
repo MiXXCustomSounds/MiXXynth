@@ -53,6 +53,12 @@ namespace
     {
         MiXXFmVoice::VoiceParams p;
 
+        // The band-limited morph tables, shared by every test. Without this the VA layer
+        // renders NOTHING, so a test that sets vaLevel and expects to hear the VA is silently
+        // measuring the FM carriers instead - and passing for a reason it does not claim.
+        static mixxynth::OpWaveTables tables;
+        p.waveTables = &tables;
+
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         {
             p.ratio[i] = 1.0f;

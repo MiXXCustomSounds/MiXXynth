@@ -24,7 +24,10 @@
 namespace mixxynth
 {
     constexpr int kNumModSources = 26;
-    constexpr int kNumModDests   = 51;
+    // The destination list's length is DERIVED from the enum, below. It was a literal 51, and
+    // adding eighteen per-operator filter destinations left it stale - which the audit caught,
+    // but only because the audit compares the name list against it. Deriving it means the two
+    // cannot disagree in the first place.
     constexpr int kNumModSlots   = 32;
     constexpr int kNumMacros     = 4;
 
@@ -47,8 +50,34 @@ namespace mixxynth
         dstMaster,
         // M3b: VA layer and filter.
         dstVaLevel, dstVaDetune, dstVaPulseWidth, dstFilterCutoff, dstFilterReso, dstFilterDrive,
+        // M3b: the per-operator filters, three per operator.
+        //
+        // APPENDED after everything else rather than slotted in beside the operator
+        // destinations, because a destination's index is saved in a preset - inserting one
+        // would silently repoint every existing patch's routing at the wrong thing.
+        //
+        // These were the gap: the filter cells existed and worked, but nothing could drive
+        // them, so an LFO or an envelope could reach the per-voice filter and not an
+        // operator's own.
+        dstOp1FilterCutoff, dstOp2FilterCutoff, dstOp3FilterCutoff,
+        dstOp4FilterCutoff, dstOp5FilterCutoff, dstOp6FilterCutoff,
+        dstOp1FilterReso, dstOp2FilterReso, dstOp3FilterReso,
+        dstOp4FilterReso, dstOp5FilterReso, dstOp6FilterReso,
+        dstOp1FilterDrive, dstOp2FilterDrive, dstOp3FilterDrive,
+        dstOp4FilterDrive, dstOp5FilterDrive, dstOp6FilterDrive,
         dstMtxFirst // 30 matrix depths follow
     };
+
+    // The destination list's length, DERIVED from the enum rather than counted by hand.
+    //
+    // It was a literal 51, and adding eighteen per-operator filter destinations left it stale -
+    // which the audit caught, but only because the audit compares the name list against it.
+    // Deriving it makes "add a destination" a one-place change instead of a two-place one with
+    // a silent failure mode.
+    //
+    // The matrix's own depths are the last block, so the total is where they start plus how
+    // many there are: six operators, five other operators each.
+    constexpr int kNumModDests = dstMtxFirst + MiXXFmVoice::numOps * (MiXXFmVoice::numOps - 1);
 
     struct ModSlot
     {

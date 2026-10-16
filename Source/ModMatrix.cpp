@@ -245,6 +245,15 @@ void publishModulatedValues (const MiXXFmVoice::VoiceParams& vp,
     out[static_cast<size_t> (dstFilterReso)]   = vp.resonance;
     out[static_cast<size_t> (dstFilterDrive)]  = vp.drive;
 
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+    {
+        const auto o = static_cast<size_t> (i);
+
+        out[static_cast<size_t> (dstOp1FilterCutoff + i)] = vp.opFilterCutoff[o];
+        out[static_cast<size_t> (dstOp1FilterReso + i)]   = vp.opFilterReso[o];
+        out[static_cast<size_t> (dstOp1FilterDrive + i)]  = vp.opFilterDrive[o];
+    }
+
     // The 30 matrix depths, walked in the same order mtxIndexToPair walks them. That shared
     // order IS the contract between a slot's destination index and this write: get it wrong
     // in one place and every routing readout is silently off by one pair.
@@ -315,6 +324,30 @@ void applyModulation (const std::array<float, kNumModDests>& totals,
         else if (dest == dstFilterReso)
         {
             vp.resonance = juce::jlimit (0.0f, 0.98f, vp.resonance + amt);
+        }
+        else if (dest >= dstOp1FilterCutoff && dest <= dstOp6FilterCutoff)
+        {
+            // Exponential, like the per-voice filter's cutoff and for the same reason: a
+            // linear sweep of a cutoff in hertz spends most of its travel in the top octave
+            // where almost nothing is audible.
+            const int i = dest - dstOp1FilterCutoff;
+            auto& c = vp.opFilterCutoff[static_cast<size_t> (i)];
+
+            c = juce::jlimit (20.0f, 20000.0f, c * std::pow (2.0f, amt * 4.0f));
+        }
+        else if (dest >= dstOp1FilterReso && dest <= dstOp6FilterReso)
+        {
+            const int i = dest - dstOp1FilterReso;
+            auto& r = vp.opFilterReso[static_cast<size_t> (i)];
+
+            r = juce::jlimit (0.0f, 0.98f, r + amt);
+        }
+        else if (dest >= dstOp1FilterDrive && dest <= dstOp6FilterDrive)
+        {
+            const int i = dest - dstOp1FilterDrive;
+            auto& d = vp.opFilterDrive[static_cast<size_t> (i)];
+
+            d = juce::jlimit (0.0f, 1.0f, d + amt);
         }
         else if (dest == dstFilterDrive)
         {

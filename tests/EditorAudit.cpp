@@ -65,6 +65,13 @@ namespace
 
             if (id == "op" + n + "ratio") return mixxynth::dstOp1Ratio + i;
             if (id == "op" + n + "level") return mixxynth::dstOp1Level + i;
+
+            // The per-operator filter cells. They were dstOff until eighteen destinations were
+            // added for them, so this is the audit being told the gap has closed rather than
+            // the audit being relaxed.
+            if (id == "op" + n + "fltCutoff") return mixxynth::dstOp1FilterCutoff + i;
+            if (id == "op" + n + "fltReso")   return mixxynth::dstOp1FilterReso + i;
+            if (id == "op" + n + "fltDrive")  return mixxynth::dstOp1FilterDrive + i;
         }
 
         for (int s = 0; s < MiXXFmVoice::numOps; ++s)

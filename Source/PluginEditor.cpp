@@ -995,16 +995,18 @@ public:
             filterTypeBoxes.add (type);
             addChildComponent (type);
 
-            // Not modulation destinations: making eighteen more of them would mean eighteen
-            // more destination slots, and the global filter's cutoff is already one for the
-            // cases that need it. dstOff says so, and makes a dropped chip flash rather than
-            // silently do nothing.
+            // Real modulation destinations, which they were not before: the cells existed and
+            // worked, but nothing could drive them, so an LFO could reach the per-voice filter
+            // and not an operator's own. Eighteen destinations were added for this.
             filterCutoffCell[static_cast<size_t> (i)] =
-                addFilterCell (ranged (p, "op" + n + "fltCutoff"), mixxynth::dstOff, "Cutoff");
+                addFilterCell (ranged (p, "op" + n + "fltCutoff"),
+                               mixxynth::dstOp1FilterCutoff + i, "Cutoff");
             filterResoCell[static_cast<size_t> (i)] =
-                addFilterCell (ranged (p, "op" + n + "fltReso"), mixxynth::dstOff, "Reso");
+                addFilterCell (ranged (p, "op" + n + "fltReso"),
+                               mixxynth::dstOp1FilterReso + i, "Reso");
             filterDriveCell[static_cast<size_t> (i)] =
-                addFilterCell (ranged (p, "op" + n + "fltDrive"), mixxynth::dstOff, "Drive");
+                addFilterCell (ranged (p, "op" + n + "fltDrive"),
+                               mixxynth::dstOp1FilterDrive + i, "Drive");
 
             addRouteButtons (ranged (p, "op" + n + "fltRoute"), i);
         }
@@ -1395,8 +1397,8 @@ public:
                             ? "Each cell sends its row's operator into its column's operator. The diagonal is that "
                               "operator's own output, not feedback - feedback is the Fb column back in Values."
                             : "Drag a cell up or down to set its value. Drop a modulation source onto one to modulate it, "
-                              "then drag the white line to set how far the modulation reaches. The VA panel holds "
-                              "the VA oscillator and the filter.",
+                              "then drag the white line to set how far it reaches. The VA panel holds the oscillator "
+                              "and the filter; the modulation matrix is in the envelope section's Volume page.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 

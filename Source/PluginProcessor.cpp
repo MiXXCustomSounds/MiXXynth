@@ -183,6 +183,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     modDests.add ("Filter Reso");
     modDests.add ("Filter Drive");
 
+    // The per-operator filters, in the same order as the enum. The audit checks this list
+    // against the enum, which is what makes a mistake here loud rather than silent.
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        modDests.add ("Op" + juce::String (i + 1) + " Filter Cutoff");
+
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        modDests.add ("Op" + juce::String (i + 1) + " Filter Reso");
+
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        modDests.add ("Op" + juce::String (i + 1) + " Filter Drive");
+
     for (int s = 0; s < MiXXFmVoice::numOps; ++s)
         for (int d = 0; d < MiXXFmVoice::numOps; ++d)
             if (s != d)
