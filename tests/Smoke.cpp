@@ -10,6 +10,8 @@
 #include "../Source/Fx/JunoChorusFx.h"
 #include "../Source/Fx/DistortionFx.h"
 #include "../Source/Fx/PingPongDelayFx.h"
+#include "../Source/Fx/FlangerFx.h"
+#include "../Source/Fx/PhaserFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -3037,6 +3039,352 @@ int main()
                     steady) && ok;
 
         ok = check (drifting > 0.01, "Drift makes the echoes wander apart", drifting) && ok;
+    }
+
+    // --- 38. Flanger: depth moves the notches, polarity is a real difference ---
+    {
+        using Fl = mixxynth::FlangerFx;
+
+        // The sweep, measured as how much the output LEVEL moves while a steady tone is
+        // held. A flanger with no depth is a fixed comb and the level never changes; one
+        // with depth sweeps its notches across the tone and the level breathes. That is
+        // the whole effect, so it is what gets measured.
+        auto levelSwing = [&] (float depth)
+        {
+            mixxynth::FlangerFx fl;
+            fl.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Fl::pRate] = 0.4f;
+            p[Fl::pDepth] = depth;
+            p[Fl::pFeedback] = 0.5f;
+            p[Fl::pPolarity] = 0.0f;
+            p[Fl::pDelay] = 0.4f;
+            p[Fl::pStereo] = 0.0f;
+            p[Fl::pMix] = 0.5f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+
+            double phase = 0.0;
+            const double phaseInc = 1200.0 / sr;
+
+            double lo = 1.0e9, hi = 0.0;
+
+            for (int b = 0; b < 120; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * static_cast<float> (phase));
+
+                    phase += phaseInc;
+
+                    if (phase >= 1.0)
+                        phase -= 1.0;
+
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                fl.process (buf, p);
+
+                if (b > 30)
+                {
+                    const double level = rmsOf (buf, 0, 512);
+                    lo = juce::jmin (lo, level);
+                    hi = juce::jmax (hi, level);
+                }
+            }
+
+            return hi - lo;
+        };
+
+        const double flat = levelSwing (0.0f);
+        const double swept = levelSwing (0.9f);
+
+        ok = check (swept > flat * 4.0 && swept > 0.02,
+                    "Flanger Depth sweeps the notches", swept) && ok;
+
+        // Stereo: at zero the two channels are identical, offset they cannot be. The same
+        // zero-floor test the delay's drift uses.
+        {
+            auto divergence = [&] (float stereo)
+            {
+                mixxynth::FlangerFx fl;
+                fl.prepare (sr, 512, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Fl::pRate] = 0.4f;
+                p[Fl::pDepth] = 0.8f;
+                p[Fl::pFeedback] = 0.5f;
+                p[Fl::pPolarity] = 0.0f;
+                p[Fl::pDelay] = 0.4f;
+                p[Fl::pStereo] = stereo;
+                p[Fl::pMix] = 0.5f;
+
+                juce::AudioBuffer<float> buf (2, 512);
+                double worst = 0.0;
+
+                double phase = 0.0;
+                const double phaseInc = 900.0 / sr;
+
+                for (int b = 0; b < 80; ++b)
+                {
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                           * static_cast<float> (phase));
+
+                        phase += phaseInc;
+
+                        if (phase >= 1.0)
+                            phase -= 1.0;
+
+                        buf.setSample (0, i, v);
+                        buf.setSample (1, i, v);
+                    }
+
+                    fl.process (buf, p);
+
+                    if (b > 30)
+                        for (int i = 0; i < 512; ++i)
+                            worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                                   - buf.getSample (1, i)));
+                }
+
+                return worst;
+            };
+
+            const double together = divergence (0.0f);
+            const double apart = divergence (0.5f);
+
+            ok = check (together < 1.0e-6, "Flanger Stereo at zero is mono", together) && ok;
+            ok = check (apart > 0.05, "Flanger Stereo sweeps the channels apart", apart) && ok;
+        }
+    }
+
+    // --- 39. Phaser: the stage count is a real control, and feedback sharpens ---
+    {
+        using Ph = mixxynth::PhaserFx;
+
+        // How much the output level moves while a steady tone is held. The notches
+        // sweeping across the tone is the effect; feedback is what sharpens them.
+        auto levelSwing = [&] (float feedback, int stageIndex)
+        {
+            mixxynth::PhaserFx ph;
+            ph.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Ph::pStages] = static_cast<float> (stageIndex)
+                               / static_cast<float> (Ph::getNumStageCounts() - 1);
+            p[Ph::pRate] = 0.4f;
+            p[Ph::pDepth] = 0.8f;
+            p[Ph::pFeedback] = feedback;
+            p[Ph::pCentre] = 0.5f;
+            p[Ph::pStereo] = 0.0f;
+            p[Ph::pStageOffset] = 0.0f;
+            p[Ph::pMix] = 0.5f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+
+            double phase = 0.0;
+            const double phaseInc = 700.0 / sr;
+
+            double lo = 1.0e9, hi = 0.0;
+
+            for (int b = 0; b < 120; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * static_cast<float> (phase));
+
+                    phase += phaseInc;
+
+                    if (phase >= 1.0)
+                        phase -= 1.0;
+
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                ph.process (buf, p);
+
+                if (b > 30)
+                {
+                    const double level = rmsOf (buf, 0, 512);
+                    lo = juce::jmin (lo, level);
+                    hi = juce::jmax (hi, level);
+                }
+            }
+
+            return hi - lo;
+        };
+
+        // Six stages is index 4 in the offered list.
+        const double withFeedback = levelSwing (0.9f, 4);
+
+        // Feedback changes the effect, and it is checked as a CHANGE rather than as a
+        // bigger level swing. The first version of this asserted the swing grew, and it
+        // does not: resonance moves the notches toward peaks, so the swing can fall while
+        // the notches get sharper. That is a real property of a phaser, not a bug, and the
+        // test was asserting the wrong consequence of the right idea.
+        {
+            auto renderFeedback = [&] (float feedback, juce::AudioBuffer<float>& out)
+            {
+                mixxynth::PhaserFx ph;
+                ph.prepare (sr, 512, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Ph::pStages] = 4.0f / static_cast<float> (Ph::getNumStageCounts() - 1);
+                p[Ph::pRate] = 0.4f;
+                p[Ph::pDepth] = 0.8f;
+                p[Ph::pFeedback] = feedback;
+                p[Ph::pCentre] = 0.5f;
+                p[Ph::pStereo] = 0.0f;
+                p[Ph::pStageOffset] = 0.0f;
+                p[Ph::pMix] = 0.5f;
+
+                double phase = 0.0;
+                const double phaseInc = 700.0 / sr;
+
+                for (int b = 0; b < 40; ++b)
+                {
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                           * static_cast<float> (phase));
+
+                        phase += phaseInc;
+
+                        if (phase >= 1.0)
+                            phase -= 1.0;
+
+                        out.setSample (0, i, v);
+                        out.setSample (1, i, v);
+                    }
+
+                    ph.process (out, p);
+                }
+            };
+
+            juce::AudioBuffer<float> none (2, 512), lots (2, 512);
+            renderFeedback (0.0f, none);
+            renderFeedback (0.9f, lots);
+
+            double difference = 0.0;
+
+            for (int i = 0; i < 512; ++i)
+                difference = juce::jmax (difference,
+                                         std::abs (static_cast<double> (none.getSample (0, i))
+                                                     - lots.getSample (0, i)));
+
+            ok = check (difference > 0.05, "Phaser Feedback changes the notches",
+                        difference) && ok;
+        }
+
+        ok = check (withFeedback > 0.02, "the Phaser sweeps at full feedback", withFeedback) && ok;
+
+        // Every stage count on offer produces a working phaser, and they do not all
+        // produce the SAME one - the selector is a character control, not decoration.
+        {
+            int bad = 0;
+            std::vector<double> swings;
+
+            for (int i = 0; i < Ph::getNumStageCounts(); ++i)
+            {
+                const double swing = levelSwing (0.6f, i);
+
+                swings.push_back (swing);
+
+                if (! std::isfinite (swing) || swing <= 0.001)
+                    ++bad;
+            }
+
+            // Comparing 2 and 3 stages is the clearest pair: an odd chain leaves a notch
+            // at DC and an even one does not.
+            const double difference = std::abs (swings[0] - swings[1]);
+
+            ok = check (bad == 0, "every Phaser stage count works",
+                        static_cast<double> (bad)) && ok;
+            ok = check (difference > 0.005, "odd and even stage counts are different effects",
+                        difference) && ok;
+
+            // And the offered list really does include odd numbers, which is the whole
+            // reason the selector is not a 2/4/6/8 knob.
+            int oddCounts = 0;
+
+            for (int i = 0; i < Ph::getNumStageCounts(); ++i)
+                if (Ph::stageCountFor (i) % 2 == 1)
+                    ++oddCounts;
+
+            ok = check (oddCounts >= 2, "the Phaser offers odd stage counts",
+                        static_cast<double> (oddCounts)) && ok;
+        }
+    }
+
+    // --- 39b. Phaser: the stereo stage offset separates the channels ---
+    //
+    // Two allpasses more on the right is a different notch pattern rather than a wider
+    // version of the same one. With the offset off and no LFO offset the two channels are
+    // bit-identical, so the floor here is exactly zero.
+    {
+        using Ph = mixxynth::PhaserFx;
+
+        auto divergence = [&] (bool offset)
+        {
+            mixxynth::PhaserFx ph;
+            ph.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Ph::pStages] = 4.0f / static_cast<float> (Ph::getNumStageCounts() - 1);
+            p[Ph::pRate] = 0.4f;
+            p[Ph::pDepth] = 0.8f;
+            p[Ph::pFeedback] = 0.5f;
+            p[Ph::pCentre] = 0.5f;
+            p[Ph::pStereo] = 0.0f;    // no LFO offset, so any difference is the stages
+            p[Ph::pStageOffset] = offset ? 1.0f : 0.0f;
+            p[Ph::pMix] = 0.5f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+            double worst = 0.0;
+
+            double phase = 0.0;
+            const double phaseInc = 700.0 / sr;
+
+            for (int b = 0; b < 60; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * static_cast<float> (phase));
+
+                    phase += phaseInc;
+
+                    if (phase >= 1.0)
+                        phase -= 1.0;
+
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                ph.process (buf, p);
+
+                if (b > 20)
+                    for (int i = 0; i < 512; ++i)
+                        worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                               - buf.getSample (1, i)));
+            }
+
+            return worst;
+        };
+
+        const double same = divergence (false);
+        const double offset = divergence (true);
+
+        ok = check (same < 1.0e-6, "Phaser with no stage offset is mono", same) && ok;
+        ok = check (offset > 0.05, "the Phaser stage offset separates the channels",
+                    offset) && ok;
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

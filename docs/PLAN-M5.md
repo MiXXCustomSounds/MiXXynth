@@ -222,6 +222,67 @@ curve plus its own pre/post emphasis; they are not one curve with more gain.
 
 Controls: Mode, Drive, Bias, Tone, Low Cut, Mix, Output, Oversample.
 
+**DONE** (`Source/Fx/DistortionFx.{h,cpp}`). All four oversampling factors are built and
+initialised at prepare time, so the Oversample control selects one rather than reloading
+one — initialising a `juce::dsp::Oversampling` allocates, and that cannot happen on the
+audio thread. The emphasis shelves run *inside* the oversampled region, which they have
+to: they boost the highs before the curve, and a boosted high that then aliases is the
+exact sound this module exists to avoid.
+
+Two curves were wrong when first written from memory, and the tests caught both:
+
+- **Diode** drove its negative half to **+1.67**, so a negative input came out positive
+  and the curve stopped being monotonic. Both halves are now bounded to ±1 and differ in
+  *how fast* they get there, which is what a diode actually does.
+- **Crush** did not saturate, because a quantiser does not. At this module's drive it
+  returned 7.2 for a 0.4 input and the output stage hit 2.58 instead of 1.0. Clamped.
+
+---
+
+## Workstream 5 — delay, with stereo ping-pong
+
+**DONE** (`Source/Fx/PingPongDelayFx.{h,cpp}`). Cross-feedback is a control rather than a
+switch, so the range runs from two independent delays (0), through partial bouncing, to
+strict L/R/L/R (1). Damping sits in the feedback path; the time is modulated; width and
+mix behave as elsewhere.
+
+**Tempo sync needed one addition to the module interface**: a `setTempo` hook, defaulting
+to a no-op, forwarded by the rack, fed from the same host BPM the processor already reads
+for LFO sync. It reuses `syncDivisionCyclesPerBeat()`, so a synced delay and a synced LFO
+offer the same divisions and mean the same thing by them.
+
+**The drift, which is the feature worth having.** Each channel's delay time wanders slowly
+and independently, so repeats come back very slightly sharp or flat and the two sides pull
+apart — tape wow and flutter. The amount is a fraction of the delay time rather than a
+fixed time, so the pitch shift is the same at any delay length. A fixed offset would drift
+imperceptibly at 50 ms and wildly at 1 s, which is the wrong way round.
+
+---
+
+## Workstream 8 — flanger
+
+**DONE** (`Source/Fx/FlangerFx.{h,cpp}`). A short modulated delay with signed feedback.
+Polarity is a control because positive and negative feedback are different effects rather
+than different amounts of one. Stereo offsets the LFO between the channels.
+
+---
+
+## Workstream 9 — phaser
+
+**DONE** (`Source/Fx/PhaserFx.{h,cpp}`). 2 to 12 stages, even and odd both, as a selector
+rather than a knob — "5.3 stages" is not a thing. Feedback around the chain. Centre places
+the sweep. Stereo offers both an LFO phase offset and a stage-count offset between the
+channels.
+
+The coefficient is swept linearly in `a` rather than in frequency. `a` is monotonic in the
+break frequency, so sweeping it directly avoids a `tan()` per sample for a difference
+nobody can hear.
+
+**One test premise was wrong and is worth recording.** Feedback was asserted to *increase*
+the level swing, on the reasoning that it sharpens the notches. It does not: resonance
+moves the notches toward peaks, so the swing can fall while the notches get sharper. The
+test now checks that feedback *changes* the effect, which is the honest claim.
+
 ---
 
 ## Workstream 5 — delay, with stereo ping-pong

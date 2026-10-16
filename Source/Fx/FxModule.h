@@ -41,6 +41,8 @@ namespace mixxynth
         fxJunoChorus,
         fxDistortion,
         fxPingPongDelay,
+        fxFlanger,
+        fxPhaser,
         kNumFxTypes
     };
 

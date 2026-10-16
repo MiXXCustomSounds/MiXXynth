@@ -5,6 +5,8 @@
 #include "JunoChorusFx.h"
 #include "DistortionFx.h"
 #include "PingPongDelayFx.h"
+#include "FlangerFx.h"
+#include "PhaserFx.h"
 
 namespace mixxynth
 {
@@ -18,6 +20,8 @@ namespace mixxynth
             case fxJunoChorus:  return "Juno Chorus";
             case fxDistortion:  return "Distortion";
             case fxPingPongDelay: return "Ping-Pong Delay";
+            case fxFlanger:     return "Flanger";
+            case fxPhaser:      return "Phaser";
             default:            break;
         }
 
@@ -33,6 +37,8 @@ namespace mixxynth
             case fxJunoChorus:  return JunoChorusFx::descriptor();
             case fxDistortion:  return DistortionFx::descriptor();
             case fxPingPongDelay: return PingPongDelayFx::descriptor();
+            case fxFlanger:     return FlangerFx::descriptor();
+            case fxPhaser:      return PhaserFx::descriptor();
             default:            break;
         }
 
@@ -71,6 +77,8 @@ namespace mixxynth
                 case fxJunoChorus:  module = std::make_unique<JunoChorusFx>(); break;
                 case fxDistortion:  module = std::make_unique<DistortionFx>(); break;
                 case fxPingPongDelay: module = std::make_unique<PingPongDelayFx>(); break;
+                case fxFlanger:     module = std::make_unique<FlangerFx>(); break;
+                case fxPhaser:      module = std::make_unique<PhaserFx>(); break;
                 default:            return nullptr;
             }
 

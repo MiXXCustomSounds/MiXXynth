@@ -198,7 +198,7 @@ needed so the grid never becomes unreadable. Squares stay square at every size.
 - Merging Matrix, VA/Filt and Voice into this tab.
 - The graphical filter, filter modes, filter routing and the mixing functions
   from the previous round of questions — all still wanted, all after this.
-- M5's remaining feature workstreams (distortion, presets).
+- M5's remaining feature workstream (presets).
 
 ## Order of work
 
