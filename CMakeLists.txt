@@ -75,6 +75,8 @@ target_sources(MiXXynth PRIVATE
     Source/Fx/WeirdVerbFx.h
     Source/Fx/ConvolutionFx.cpp
     Source/Fx/ConvolutionFx.h
+    Source/Fx/JunoChorusFx.cpp
+    Source/Fx/JunoChorusFx.h
     Source/Algorithms.h
 )
 
@@ -114,6 +116,7 @@ add_executable(MiXXynthSmoke
     Source/Fx/FxRack.cpp
     Source/Fx/WeirdVerbFx.cpp
     Source/Fx/ConvolutionFx.cpp
+    Source/Fx/JunoChorusFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -158,6 +161,7 @@ add_executable(MiXXynthEditorAudit
     Source/Fx/FxRack.cpp
     Source/Fx/WeirdVerbFx.cpp
     Source/Fx/ConvolutionFx.cpp
+    Source/Fx/JunoChorusFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils

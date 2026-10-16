@@ -5,8 +5,9 @@ The routing matrix and the VA/filter are views and a panel of the FM tab, and th
 controls live in the sidebar above the modulation section, so the editor is **FM, Mod,
 FX**. The per-operator filters are the remaining work.
 Supersedes the ordering of M5's remaining workstreams. M5 workstreams 1-3 (modulation
-UX, the WeirdVerb rename, convolution) are done; M5's *feature* workstreams (distortion,
-chorus, presets) are deferred until this is finished, because this is depth on what
+UX, the WeirdVerb rename, convolution) are done, and so is M5 workstream 6 (the Juno
+chorus, `Source/Fx/JunoChorusFx.{h,cpp}`). M5's *feature* workstreams (distortion,
+presets) are deferred until this is finished, because this is depth on what
 already exists rather than new modules.
 
 ## Goal
@@ -197,7 +198,7 @@ needed so the grid never becomes unreadable. Squares stay square at every size.
 - Merging Matrix, VA/Filt and Voice into this tab.
 - The graphical filter, filter modes, filter routing and the mixing functions
   from the previous round of questions — all still wanted, all after this.
-- M5's remaining feature workstreams (distortion, chorus, presets).
+- M5's remaining feature workstreams (distortion, presets).
 
 ## Order of work
 

@@ -2,6 +2,7 @@
 
 #include "WeirdVerbFx.h"
 #include "ConvolutionFx.h"
+#include "JunoChorusFx.h"
 
 namespace mixxynth
 {
@@ -12,6 +13,7 @@ namespace mixxynth
             case fxOff:         return "Off";
             case fxWeirdVerb:   return "WeirdVerb";
             case fxConvolution: return "Convolution";
+            case fxJunoChorus:  return "Juno Chorus";
             default:            break;
         }
 
@@ -24,6 +26,7 @@ namespace mixxynth
         {
             case fxWeirdVerb:   return WeirdVerbFx::descriptor();
             case fxConvolution: return ConvolutionFx::descriptor();
+            case fxJunoChorus:  return JunoChorusFx::descriptor();
             default:            break;
         }
 
@@ -59,6 +62,7 @@ namespace mixxynth
             {
                 case fxWeirdVerb:   module = std::make_unique<WeirdVerbFx>(); break;
                 case fxConvolution: module = std::make_unique<ConvolutionFx>(); break;
+                case fxJunoChorus:  module = std::make_unique<JunoChorusFx>(); break;
                 default:            return nullptr;
             }
 

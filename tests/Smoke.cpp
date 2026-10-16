@@ -7,6 +7,7 @@
 #include "../Source/Fx/FxRack.h"
 #include "../Source/Fx/WeirdVerbFx.h"
 #include "../Source/Fx/ConvolutionFx.h"
+#include "../Source/Fx/JunoChorusFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -2279,6 +2280,326 @@ int main()
 
         ok = check (lateBright > earlyBright, "the filter envelope sweeps the cutoff open",
                     lateBright / juce::jmax (1.0, static_cast<double> (earlyBright))) && ok;
+    }
+
+    // --- 28. Juno chorus: the LFO is a triangle, not a cosine ---
+    //
+    // The single most important detail in the effect, and the one a corner check
+    // cannot see: a triangle and a cosine pass through exactly the same four
+    // points at phase 0, 0.25, 0.5 and 0.75 (+1, 0, -1, 0). They differ in the
+    // MIDDLE of each segment, where the triangle is straight and the cosine is not.
+    // So the corners are checked too, but the midpoints are the real test.
+    {
+        const float corners = std::abs (mixxynth::JunoChorusFx::triangle (0.0f) - 1.0f)
+                                + std::abs (mixxynth::JunoChorusFx::triangle (0.25f))
+                                + std::abs (mixxynth::JunoChorusFx::triangle (0.5f) + 1.0f)
+                                + std::abs (mixxynth::JunoChorusFx::triangle (0.75f));
+
+        ok = check (corners < 1.0e-5f, "Juno LFO corners at +1, 0, -1, 0", corners) && ok;
+
+        // A triangle is at 0.5 halfway from +1 to 0; a cosine is at 0.707.
+        const float mid = mixxynth::JunoChorusFx::triangle (0.125f);
+        const float cosine = std::cos (2.0f * juce::MathConstants<float>::pi * 0.125f);
+
+        ok = check (std::abs (mid - 0.5f) < 1.0e-5f && std::abs (cosine - mid) > 0.2f,
+                    "Juno LFO is straight between the corners, not a cosine", mid) && ok;
+    }
+
+    // --- 29. Juno chorus: the mode table is the measured hardware ---
+    //
+    // These are the numbers the emulation stands on, so they are asserted rather
+    // than trusted. The relationships matter as much as the values: I and II share
+    // a depth and differ only in rate, and I+II is different in EVERY column.
+    {
+        using Chorus = mixxynth::JunoChorusFx;
+
+        const auto& one = Chorus::specFor (Chorus::modeI);
+        const auto& two = Chorus::specFor (Chorus::modeII);
+        const auto& both = Chorus::specFor (Chorus::modeBoth);
+
+        ok = check (std::abs (one.rateHz - 0.513f) < 1.0e-5f
+                      && std::abs (two.rateHz - 0.863f) < 1.0e-5f
+                      && std::abs (both.rateHz - 9.75f) < 1.0e-4f,
+                    "Juno mode rates are the measured ones", one.rateHz) && ok;
+
+        // 1.66 to 5.35 ms is a centre of 3.505 with a depth of 1.845.
+        ok = check (std::abs (one.centreMs - 3.505f) < 1.0e-4f
+                      && std::abs (one.depthMs - 1.845f) < 1.0e-4f
+                      && std::abs (one.centreMs - one.depthMs - 1.66f) < 1.0e-3f
+                      && std::abs (one.centreMs + one.depthMs - 5.35f) < 1.0e-3f,
+                    "Juno mode I sweeps 1.66 to 5.35 ms", one.centreMs) && ok;
+
+        ok = check (std::abs (one.depthMs - two.depthMs) < 1.0e-6f && two.rateHz > one.rateHz,
+                    "I and II share a depth and differ in rate", two.rateHz) && ok;
+
+        ok = check (both.rateHz > two.rateHz * 5.0f
+                      && both.depthMs < two.depthMs * 0.2f
+                      && both.mono && ! one.mono && ! two.mono,
+                    "I+II is faster, shallower and mono", both.depthMs) && ok;
+    }
+
+    // --- 30. Juno chorus: I and II widen, I+II cannot ---
+    //
+    // The measurement the naive implementation fails. On the hardware the two BBD
+    // lines share one triangle LFO with the right channel's modulation INVERTED, so
+    // modes I and II widen the signal. Mode I+II moves both lines together, so it
+    // cannot widen at all - which is why the hardware's own documentation calls it
+    // mono, and why it sounds like a rotary speaker rather than a chorus.
+    //
+    // Feeding both channels the same signal makes that directly observable: with
+    // anti-phase modulation the two channels are delayed by different amounts and
+    // diverge; in mono they are delayed identically and stay bit-identical.
+    {
+        auto spreadFor = [&] (int mode)
+        {
+            mixxynth::JunoChorusFx chorus;
+            chorus.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::JunoChorusFx::pMode] = static_cast<float> (mode) / 2.0f;
+            p[mixxynth::JunoChorusFx::pRate] = 0.5f;   // 1.0x - the hardware rate
+            p[mixxynth::JunoChorusFx::pDepth] = 0.5f;  // 1.0x - the hardware depth
+            p[mixxynth::JunoChorusFx::pTone] = 0.70f;
+            p[mixxynth::JunoChorusFx::pMix] = 1.0f;    // wet only
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            double worst = 0.0;
+
+            // Several blocks, so the LFO has run and the delay slew has settled. The
+            // LFO starts at +1, so the two lines are already at opposite extremes of
+            // the sweep from the first sample - the divergence does not need time to
+            // develop, but the mono case needs time to prove it stays at zero.
+            for (int b = 0; b < 16; ++b)
+            {
+                for (int i = 0; i < blockLen; ++i)
+                {
+                    const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * 220.0f * static_cast<float> (i)
+                                                       / static_cast<float> (sr));
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                chorus.process (buf, p);
+
+                for (int i = 0; i < blockLen; ++i)
+                    worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                           - buf.getSample (1, i)));
+            }
+
+            return worst;
+        };
+
+        const double spreadOne = spreadFor (mixxynth::JunoChorusFx::modeI);
+        const double spreadTwo = spreadFor (mixxynth::JunoChorusFx::modeII);
+        const double spreadBoth = spreadFor (mixxynth::JunoChorusFx::modeBoth);
+
+        ok = check (spreadOne > 0.01 && spreadTwo > 0.01,
+                    "Juno I and II widen: the two lines are anti-phase", spreadOne) && ok;
+
+        // Bit-identical, not merely similar: in mono both lines get the same input,
+        // the same delay and the same filter, so nothing can make them differ.
+        ok = check (spreadBoth < 1.0e-9,
+                    "Juno I+II is mono: both lines move together", spreadBoth) && ok;
+    }
+
+    // --- 31. Juno chorus: every mode is bounded and audible ---
+    {
+        const char* names[3] = { "Juno mode I audible and bounded",
+                                 "Juno mode II audible and bounded",
+                                 "Juno mode I+II audible and bounded" };
+
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            mixxynth::JunoChorusFx chorus;
+            chorus.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::JunoChorusFx::pMode] = static_cast<float> (mode) / 2.0f;
+            p[mixxynth::JunoChorusFx::pRate] = 0.5f;
+            p[mixxynth::JunoChorusFx::pDepth] = 0.5f;
+            p[mixxynth::JunoChorusFx::pTone] = 0.70f;
+            p[mixxynth::JunoChorusFx::pMix] = 1.0f; // wet only
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            float peak = 0.0f;
+
+            for (int b = 0; b < 8; ++b)
+            {
+                for (int i = 0; i < blockLen; ++i)
+                {
+                    const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * 330.0f * static_cast<float> (i)
+                                                       / static_cast<float> (sr));
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                chorus.process (buf, p);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+            }
+
+            // Bounded: a chorus has no feedback, so it cannot grow.
+            ok = check (std::isfinite (peak) && peak > 0.05f && peak <= 1.0f,
+                        names[mode], peak) && ok;
+        }
+    }
+
+    // --- 32. Juno chorus: Tone darkens the wet path, and mode changes do not step ---
+    {
+        // Tone at the bottom should pass noticeably less high frequency than at the
+        // top.
+        //
+        // Measured as the total CURVATURE of the output - the sum of the second
+        // difference, |x[n] - 2x[n-1] + x[n-2]|. Not zero crossings, which was the
+        // first attempt and does not work: a low-passed square still crosses zero
+        // twice per cycle, so the crossings are set by the fundamental and barely
+        // move. Not the first difference either, which is worse than it looks - the
+        // total variation of a square and of its own fundamental are both 4*f*A, so
+        // it cannot tell them apart at all. Curvature is what distinguishes a sharp
+        // edge from a rounded one, which is exactly what Tone does.
+        auto curvatureForTone = [&] (float tone)
+        {
+            mixxynth::JunoChorusFx chorus;
+            chorus.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::JunoChorusFx::pMode] = 0.0f;
+            p[mixxynth::JunoChorusFx::pRate] = 0.5f;
+            p[mixxynth::JunoChorusFx::pDepth] = 0.5f;
+            p[mixxynth::JunoChorusFx::pTone] = tone;
+            p[mixxynth::JunoChorusFx::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            double curvature = 0.0;
+
+            for (int b = 0; b < 6; ++b)
+            {
+                for (int i = 0; i < blockLen; ++i)
+                {
+                    // A square-ish input: lots of high frequency to lose.
+                    const float phase = std::fmod (660.0f * static_cast<float> (i)
+                                                     / static_cast<float> (sr), 1.0f);
+                    const float v = phase < 0.5f ? 0.35f : -0.35f;
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                chorus.process (buf, p);
+
+                if (b >= 4)
+                {
+                    const auto* d = buf.getReadPointer (0);
+
+                    for (int i = 2; i < blockLen; ++i)
+                        curvature += std::abs (static_cast<double> (d[i])
+                                                 - 2.0 * static_cast<double> (d[i - 1])
+                                                 + static_cast<double> (d[i - 2]));
+                }
+            }
+
+            return curvature;
+        };
+
+        const double dark = curvatureForTone (0.0f);
+        const double bright = curvatureForTone (1.0f);
+
+        ok = check (dark < bright * 0.5, "Juno Tone darkens the BBD wet path",
+                    dark / juce::jmax (1.0, bright)) && ok;
+    }
+
+    // --- 33. Juno chorus: a mode change does not step the delay ---
+    //
+    // Switching I to I+II moves the centre barely at all but drops the depth by a
+    // factor of nine. An unslewed depth jump moves the read head 70-odd samples in
+    // one step, which is a full-scale discontinuity rather than a slope.
+    {
+        mixxynth::JunoChorusFx chorus;
+        chorus.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::JunoChorusFx::pMode] = 0.0f;  // start on I
+        p[mixxynth::JunoChorusFx::pRate] = 0.5f;
+        p[mixxynth::JunoChorusFx::pDepth] = 0.5f;
+        p[mixxynth::JunoChorusFx::pTone] = 0.70f;
+        p[mixxynth::JunoChorusFx::pMix] = 1.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+
+        auto fill = [&]
+        {
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                   * 220.0f * static_cast<float> (i)
+                                                   / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+        };
+
+        // Settle on I.
+        for (int b = 0; b < 8; ++b)
+        {
+            fill();
+            chorus.process (buf, p);
+        }
+
+        p[mixxynth::JunoChorusFx::pMode] = 1.0f;
+
+        float worstJump = 0.0f;
+
+        for (int b = 0; b < 8; ++b)
+        {
+            fill();
+            chorus.process (buf, p);
+
+            const auto* d = buf.getReadPointer (0);
+
+            for (int i = 1; i < blockLen; ++i)
+                worstJump = juce::jmax (worstJump, std::abs (d[i] - d[i - 1]));
+        }
+
+        // The input's own slope at 220 Hz is about 0.0125, so this leaves room for
+        // the slope plus the slew while still failing a hard step.
+        ok = check (worstJump < 0.05f, "a Juno mode change does not step the delay",
+                    worstJump) && ok;
+    }
+
+    // --- 34. Juno chorus: the rack builds it, and its descriptor is well formed ---
+    {
+        const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxJunoChorus);
+
+        ok = check (juce::String (desc.name) == "Juno Chorus"
+                      && desc.numParams == mixxynth::JunoChorusFx::kNumParams
+                      && desc.params[mixxynth::JunoChorusFx::pMode].isChoice
+                      && desc.params[mixxynth::JunoChorusFx::pMode].choices.size() == 3
+                      && ! desc.hasFile,
+                    "the Juno chorus descriptor is complete",
+                    static_cast<double> (desc.numParams)) && ok;
+
+        // Both trims default to the centre, which is exactly 1.0x - the hardware
+        // value. That is what makes a freshly loaded module the emulation rather
+        // than a chorus that happens to be nearby.
+        ok = check (std::abs (desc.params[mixxynth::JunoChorusFx::pRate].defaultValue - 0.5f) < 1.0e-6f
+                      && std::abs (desc.params[mixxynth::JunoChorusFx::pDepth].defaultValue - 0.5f) < 1.0e-6f,
+                    "the Juno trims default to the hardware value",
+                    desc.params[mixxynth::JunoChorusFx::pRate].defaultValue) && ok;
+
+        // And the type name the choice parameter shows matches the enum's order,
+        // which is what the slot's saved index depends on.
+        ok = check (juce::String (mixxynth::fxTypeName (mixxynth::fxJunoChorus)) == "Juno Chorus",
+                    "the Juno type name matches its enum", 1.0) && ok;
+
+        mixxynth::FxRack rack;
+        rack.prepare (sr, blockLen, 2);
+        rack.setSlotType (0, mixxynth::fxJunoChorus);
+
+        ok = check (rack.hasInstance (0, mixxynth::fxJunoChorus)
+                      && rack.getSlotType (0) == mixxynth::fxJunoChorus,
+                    "the rack builds the Juno chorus on demand", 1.0) && ok;
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

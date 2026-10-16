@@ -242,27 +242,56 @@ Controls: Sync, Time L, Time R, Feedback, Ping-Pong, Damping, Mod, Width, Mix.
 
 ---
 
-## Workstream 6 — Juno chorus (ensemble)
+## Workstream 6 — Juno chorus (ensemble) — **DONE**
 
 First, a correction to the premise, because it changes the design: **the Juno
 chorus is not an ensemble.** The Roland Juno-6 / 60 / 106 chorus is a *single*
-bucket-brigade delay line with a **triangle** LFO and a fixed delay of roughly
-5 ms. A true ensemble effect (Solina, ARP) uses *three* delay lines with
-phase-offset LFOs. The Juno's modes are I (slow, deeper), II (faster) and, on the
-106, I+II.
+triangle LFO driving **two** bucket-brigade delay lines — one per channel — with
+the right channel's modulation **inverted**, so the two sweep in opposite
+directions. A true ensemble effect (Solina, ARP) uses *three* delay lines with
+phase-offset LFOs. Two lines, one LFO, opposite polarity.
 
 What actually gives it its sound, and what the implementation has to get right:
 
 - **A triangle LFO, not a sine.** This matters more than anything else. A sine
   gives a generic chorus; a triangle gives *that* Juno shimmer.
-- **A short fixed delay (~5 ms) with no feedback.** Feedback turns it into a
-  flanger.
-- **A dark wet path.** The BBD's bandwidth is roughly 6–8 kHz, and the compander
-  around it adds a characteristic softness.
+- **A short delay with no feedback.** Feedback turns it into a flanger.
+- **A dark wet path.** The BBD's bandwidth is roughly 6–8 kHz, a 12 dB/oct
+  low-pass in front of the delay line.
 - **Mode-dependent rate and depth**, not a free rate knob, if we want the actual
   Juno behaviour rather than a chorus that happens to be blue.
 
-Controls: Mode (I / II / I+II), Rate, Depth, Tone, Mix.
+### What the measurements changed
+
+The implementation is built on measured hardware values, and measuring them
+corrected this workstream on three points:
+
+| Mode | Rate     | Delay sweep    | Stereo | Character                  |
+|------|----------|----------------|--------|----------------------------|
+| I    | 0.513 Hz | 1.66 – 5.35 ms | yes    | mild chorus                |
+| II   | 0.863 Hz | 1.66 – 5.35 ms | yes    | deeper, richer chorus      |
+| I+II | 9.75 Hz  | 3.30 – 3.70 ms | **no** | Leslie-like, fast and thin |
+
+1. **It is two delay lines, not one.** The original note here said "a *single*
+   bucket-brigade delay line". It is two, and the anti-phase pair is the whole
+   reason a Juno sounds wide — a single line cannot produce it at all.
+2. **The delay is not fixed at ~5 ms.** It sweeps 1.66 ms to 5.35 ms in modes I
+   and II, so 5.35 ms is the *top* of the sweep and the centre is about 3.5 ms.
+3. **I+II is not "I and II at once".** It is the odd one out in every column:
+   eleven times the rate, a ninth of the depth, and **mono** — both lines move
+   together, so it cannot widen. That is why it is the one people describe as a
+   rotary speaker. Treating it as the other two combined is the natural guess and
+   it is wrong.
+
+Controls: Mode (I / II / I+II), Rate, Depth, Tone, Mix. Rate and Depth are
+**trims** on the mode, both defaulting to exactly 1.0x — the hardware value — so
+a freshly loaded module is the emulation and moving either control takes it away
+from that.
+
+**Done** (`Source/Fx/JunoChorusFx.{h,cpp}`). 18 smoke checks, including the one
+that matters most: modes I and II diverge between channels while I+II stays
+bit-identical, which is the anti-phase behaviour stated as a measurement rather
+than as an intention. Verified to fail when the anti-phase is removed.
 
 ---
 

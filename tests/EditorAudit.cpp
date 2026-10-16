@@ -1928,6 +1928,50 @@ int main()
         }
     }
 
+    // ---- 16b. The Juno chorus builds a card like any other module ----
+    //
+    // Section 16 proves the generic card builder works for WeirdVerb. This proves it
+    // for the newest module too, and it needs proving separately because FX slot
+    // parameters are exempt from the reachability check in section 3 - so a module
+    // whose card failed to build would be the one thing in the editor that nothing
+    // looked at.
+    //
+    // The rack is emptied first so the dump describes only this module, and emptied
+    // again afterwards so nothing downstream sees a changed rack.
+    {
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+            miXXEditor->fxRemoveModule (s);
+
+        miXXEditor->fxAddModule (mixxynth::fxJunoChorus);
+        miXXEditor->fxRebuildCards();
+
+        const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxJunoChorus);
+        const auto dump = miXXEditor->fxDebug();
+
+        int combos = 0, knobs = 0;
+
+        for (int p = 0; p < desc.numParams; ++p)
+            (desc.params[static_cast<size_t> (p)].isChoice ? combos : knobs) += 1;
+
+        check (dump.contains ("cards=1"), "the Juno chorus builds exactly one card", dump);
+
+        check (dump.contains ("combos=" + juce::String (combos)
+                                + " knobs=" + juce::String (knobs)),
+               "the Juno chorus card has one control per declared parameter", dump);
+
+        check (dump.contains ("zeros=0"), "no Juno chorus control has zero bounds", dump);
+
+        // A combo whose selection never lands renders blank while looking perfectly
+        // healthy in the model, so check the visible text too. The first choice is "I".
+        check (dump.contains ("comboText=I"), "the Juno mode combo shows its choice", dump);
+
+        for (int s = 0; s < mixxynth::kMaxFxSlots; ++s)
+            miXXEditor->fxRemoveModule (s);
+
+        miXXEditor->fxRebuildCards();
+    }
+
+
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);
     return failures == 0 ? 0 : 1;
 }

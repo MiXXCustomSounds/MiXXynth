@@ -29,11 +29,16 @@ namespace mixxynth
 
     // Fixed type list. Order must match `fxTypeName` and the choice parameter's
     // item list; the audit checks that it does.
+    //
+    // APPEND ONLY. A slot's type is saved as this index, so inserting a type in the
+    // middle would silently repoint every existing patch's slots at the wrong
+    // module.
     enum FxType
     {
         fxOff = 0,
         fxWeirdVerb,
         fxConvolution,
+        fxJunoChorus,
         kNumFxTypes
     };
 
