@@ -60,7 +60,7 @@ namespace mixxynth
 
         // The most recent gain reduction, for a meter. Relaxed atomic, same contract as the
         // limiter's.
-        float getGainReductionDb() const noexcept { return reportedGrDb; }
+        float getGainReductionDb() const noexcept override { return reportedGrDb; }
 
         void prepare (double sampleRate, int maxBlockSize, int numChannels) override;
         void reset() override;

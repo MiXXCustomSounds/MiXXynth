@@ -186,6 +186,16 @@ namespace mixxynth
                 module->setTempo (bpm);
     }
 
+    float FxRack::getSlotGainReductionDb (int slot) const
+    {
+        if (slot < 0 || slot >= kMaxFxSlots)
+            return 0.0f;
+
+        auto* module = active[static_cast<size_t> (slot)].load (std::memory_order_acquire);
+
+        return module != nullptr ? module->getGainReductionDb() : 0.0f;
+    }
+
     void FxRack::process (juce::AudioBuffer<float>& buffer,
                           const int* types,
                           const bool* bypass,

@@ -89,6 +89,8 @@ namespace mixxynth
             desc.params[pMix].name = "Mix";
             desc.params[pMix].defaultValue = 1.0f;
 
+            desc.hasGainReduction = true;
+
             return desc;
         }();
 

@@ -58,6 +58,11 @@ namespace mixxynth
         // with a sync control can follow it. Modules that do not care ignore it.
         void setTempo (double bpm);
 
+        // The slot's gain reduction in dB (negative), for a card's meter. Zero when the
+        // slot is empty or its module has no compressor in it. Audio thread writes it, UI
+        // reads it, so the usual relaxed contract applies.
+        float getSlotGainReductionDb (int slot) const;
+
         static FxDescriptor descriptorFor (int type);
 
         // Number of instances created so far (tests).

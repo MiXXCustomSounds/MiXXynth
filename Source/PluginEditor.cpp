@@ -2271,6 +2271,14 @@ public:
             // A module that declares a graph gets a curve above its knobs, drawn from the
             // same coefficients the audio path uses so the picture cannot drift from the
             // sound.
+            // A module with gain reduction to show gets a meter. Same timer as the graph, for the
+            // same reason: the card draws from values it has to poll for.
+            if (desc.hasGainReduction)
+            {
+                hasGrMeter = true;
+                startTimerHz (20);
+            }
+
             if (desc.drawGraph != nullptr)
             {
                 hasGraphFn = true;
@@ -2398,6 +2406,9 @@ public:
 
             if (hasGraphFn && ! graphArea.isEmpty())
                 drawGraphCurve (g);
+
+            if (hasGrMeter)
+                drawGainReduction (g);
         }
 
     private:
@@ -2462,8 +2473,39 @@ public:
             g.drawText (graphLabel, area.reduced (5.0f, 2.0f), juce::Justification::topLeft);
         }
 
+        // The gain-reduction meter, in the top-right corner where the slot number is not.
+        //
+        // Twelve dB of scale, which is about the range a working compressor should be
+        // showing. Beyond that the number stops being informative and starts being an alarm.
+        void drawGainReduction (juce::Graphics& g)
+        {
+            const float db = owner.ed.processor().fxRack().getSlotGainReductionDb (slot);
+
+            auto area = getLocalBounds().removeFromTop (24).removeFromRight (150).reduced (4, 6);
+
+            g.setColour (juce::Colour (0xff141414));
+            g.fillRoundedRectangle (area.toFloat(), 3.0f);
+
+            const float amount = juce::jlimit (0.0f, 1.0f, -db / 12.0f);
+
+            if (amount > 0.001f)
+            {
+                auto fill = area.toFloat().reduced (1.0f);
+                fill = fill.removeFromLeft (fill.getWidth() * amount);
+
+                g.setColour (juce::Colour (0xffe08a3c));
+                g.fillRoundedRectangle (fill, 2.0f);
+            }
+
+            g.setColour (juce::Colour (0xff5a6570));
+            g.setFont (9.0f);
+            g.drawText (db < -0.05f ? juce::String (db, 1) + " dB" : juce::String ("GR"),
+                        area, juce::Justification::centred);
+        }
+
         void timerCallback() override { repaint(); }
 
+        bool hasGrMeter = false;
         bool hasGraphFn = false;
         float (*graphFn) (const float*, float, double) = nullptr;
         juce::String graphLabel;

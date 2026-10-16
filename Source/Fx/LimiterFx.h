@@ -45,7 +45,7 @@ namespace mixxynth
         static float softClip (float x, float amount) noexcept;
 
         // The most recent gain reduction in dB, for a meter.
-        float getGainReductionDb() const noexcept { return limiter.getGainReductionDb(); }
+        float getGainReductionDb() const noexcept override { return limiter.getGainReductionDb(); }
 
         void prepare (double sampleRate, int maxBlockSize, int numChannels) override;
         void reset() override;

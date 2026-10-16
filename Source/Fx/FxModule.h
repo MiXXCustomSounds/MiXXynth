@@ -68,6 +68,11 @@ namespace mixxynth
         int numParams = 0;
         std::array<FxParamInfo, kMaxFxParams> params {};
 
+        // True when the module has gain reduction to show, so the card draws a meter for it.
+        // A flag rather than "ask the module", because the card draws from the descriptor and
+        // never touches the audio-side instance.
+        bool hasGainReduction = false;
+
         // A module that needs a file declares it here - currently only the
         // convolution reverb, for its impulse response.
         //
@@ -150,6 +155,9 @@ namespace mixxynth
         //
         // A default no-op rather than pure virtual: most modules have no use for it,
         // and making every one implement an empty method to say so would be noise.
+        // Gain reduction in dB (negative), for a card that shows a meter. Zero means "not'reducing", which is also what a module with no compressor in it reports - so a module that does not override this simply has no meter to draw.
+        virtual float getGainReductionDb() const { return 0.0f; }
+
         virtual void setTempo (double bpm)
         {
             juce::ignoreUnused (bpm);
