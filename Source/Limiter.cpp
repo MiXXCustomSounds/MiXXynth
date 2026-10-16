@@ -67,7 +67,7 @@ namespace mixxynth
             for (int ch = 0; ch < numCh; ++ch)
                 peak = juce::jmax (peak, std::abs (buffer.getSample (ch, i)));
 
-            const float target = peak > kThreshold ? kThreshold / peak : 1.0f;
+            const float target = peak > threshold ? threshold / peak : 1.0f;
 
             // Instant down, slow up. An instantaneous release would let a peak through
             // again on the very next sample; an instantaneous attack is what guarantees

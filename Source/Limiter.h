@@ -58,6 +58,13 @@ namespace mixxynth
         // In place. Below the threshold this is a delay and nothing else.
         void process (juce::AudioBuffer<float>& buffer);
 
+        // The threshold. The safety limiter leaves this alone, so it stays at
+        // kThreshold; the FX module sets it from its own control.
+        void setThreshold (float newThreshold) noexcept
+        {
+            threshold = juce::jlimit (0.05f, 1.0f, newThreshold);
+        }
+
         // The current gain reduction in dB, as a negative number, for a meter. Written on
         // the audio thread and read by the UI, so it is an atomic and relaxed is enough -
         // a meter one block stale is not a correctness problem.
@@ -70,6 +77,10 @@ namespace mixxynth
 
         float gain = 1.0f;
         float releaseCoeff = 0.0f;
+
+        // The working threshold. kThreshold by default, so the safety limiter is
+        // unchanged; the FX module moves it.
+        float threshold = kThreshold;
 
         double sampleRate = 44100.0;
         int channels = 2;

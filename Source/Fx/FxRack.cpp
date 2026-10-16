@@ -7,6 +7,8 @@
 #include "PingPongDelayFx.h"
 #include "FlangerFx.h"
 #include "PhaserFx.h"
+#include "CompressorFx.h"
+#include "LimiterFx.h"
 
 namespace mixxynth
 {
@@ -22,6 +24,8 @@ namespace mixxynth
             case fxPingPongDelay: return "Ping-Pong Delay";
             case fxFlanger:     return "Flanger";
             case fxPhaser:      return "Phaser";
+            case fxCompressor:  return "Compressor";
+            case fxLimiter:     return "Limiter";
             default:            break;
         }
 
@@ -39,6 +43,8 @@ namespace mixxynth
             case fxPingPongDelay: return PingPongDelayFx::descriptor();
             case fxFlanger:     return FlangerFx::descriptor();
             case fxPhaser:      return PhaserFx::descriptor();
+            case fxCompressor:  return CompressorFx::descriptor();
+            case fxLimiter:     return LimiterFx::descriptor();
             default:            break;
         }
 
@@ -79,6 +85,8 @@ namespace mixxynth
                 case fxPingPongDelay: module = std::make_unique<PingPongDelayFx>(); break;
                 case fxFlanger:     module = std::make_unique<FlangerFx>(); break;
                 case fxPhaser:      module = std::make_unique<PhaserFx>(); break;
+                case fxCompressor:  module = std::make_unique<CompressorFx>(); break;
+                case fxLimiter:     module = std::make_unique<LimiterFx>(); break;
                 default:            return nullptr;
             }
 

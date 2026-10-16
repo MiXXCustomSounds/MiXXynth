@@ -13,6 +13,8 @@
 #include "../Source/Fx/FlangerFx.h"
 #include "../Source/Fx/PhaserFx.h"
 #include "../Source/Limiter.h"
+#include "../Source/Fx/CompressorFx.h"
+#include "../Source/Fx/LimiterFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -3490,6 +3492,242 @@ int main()
             ok = check (lim.getGainReductionDb() > -0.01f,
                         "the limiter reports no reduction when it is not working",
                         lim.getGainReductionDb()) && ok;
+        }
+    }
+
+    // --- 41. Compressor: the knee, the ratio, and what the detector sees ---
+    //
+    // The curve is a pure function, so it is checked as one rather than inferred from
+    // audio - which is the difference between testing the maths and testing a coincidence.
+    {
+        using Comp = mixxynth::CompressorFx;
+
+        // Below the knee, nothing. At the threshold, half the slope. Above the knee, the
+        // full slope. A hard knee would step from 0 to full slope at the threshold, and
+        // that step is the whole reason a knee is worth having.
+        {
+            constexpr float threshold = -20.0f;
+            constexpr float ratio = 4.0f;
+            constexpr float knee = 12.0f;
+
+            const float below = Comp::gainReductionDb (-40.0f, threshold, ratio, knee);
+            const float atThreshold = Comp::gainReductionDb (threshold, threshold, ratio, knee);
+
+            ok = check (std::abs (below) < 1.0e-5f, "the compressor does nothing below the knee",
+                        below) && ok;
+
+            // At the threshold the knee is already part-way in - the quadratic spans the
+            // half-knee either side - so it is between nothing and the full slope, and it
+            // is LESS reduction than further up. Reduction grows as the level rises, so it
+            // is more negative above and less negative at the threshold.
+            const float justAbove = Comp::gainReductionDb (threshold + 6.0f, threshold, ratio, knee);
+            const float fullSlope = 6.0f * (1.0f - 1.0f / ratio);
+
+            ok = check (atThreshold < 0.0f && atThreshold > justAbove
+                          && std::abs (justAbove + fullSlope) < 0.01f,
+                        "the knee rises smoothly to the full slope", atThreshold) && ok;
+        }
+
+        // A 4:1 ratio makes a 24 dB input range into a much smaller output range. This is
+        // the whole job of a compressor, measured as a range rather than a level.
+        {
+            auto compressedRange = [&] (bool rms)
+            {
+                mixxynth::CompressorFx comp;
+                comp.prepare (sr, 512, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Comp::pDetector] = rms ? 1.0f : 0.0f;
+                p[Comp::pThreshold] = 0.67f;   // about -20 dB
+                p[Comp::pRatio] = 0.72f;       // high
+                p[Comp::pAttack] = 0.0f;       // fast, so the test measures the curve
+                p[Comp::pRelease] = 0.5f;
+                p[Comp::pKnee] = 0.0f;         // hard, so the maths is exact
+                p[Comp::pMakeup] = 1.0f / 3.0f; // unity
+                p[Comp::pMix] = 1.0f;
+
+                auto levelFor = [&] (float amplitude)
+                {
+                    juce::AudioBuffer<float> buf (2, 512);
+
+                    for (int b = 0; b < 30; ++b)
+                    {
+                        for (int i = 0; i < 512; ++i)
+                        {
+                            const float v = amplitude * std::sin (0.1f * static_cast<float> (i));
+                            buf.setSample (0, i, v);
+                            buf.setSample (1, i, v);
+                        }
+
+                        comp.process (buf, p);
+                    }
+
+                    return rmsOf (buf, 0, 512);
+                };
+
+                const double quiet = levelFor (0.01f);
+                const double loud = levelFor (0.5f);
+
+                return (loud - quiet) / juce::jmax (1.0e-9, quiet);
+            };
+
+            const double inputRange = (0.5 - 0.01) / 0.01;
+
+            for (int rms = 0; rms < 2; ++rms)
+            {
+                const double outRange = compressedRange (rms == 1);
+
+                ok = check (outRange < inputRange * 0.6,
+                            rms ? "RMS detection compresses the dynamic range"
+                                : "peak detection compresses the dynamic range",
+                            outRange) && ok;
+            }
+        }
+
+        // Mix at zero is dry, so parallel compression really is parallel.
+        {
+            mixxynth::CompressorFx comp;
+            comp.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Comp::pDetector] = 0.0f;
+            p[Comp::pThreshold] = 0.2f;
+            p[Comp::pRatio] = 1.0f;
+            p[Comp::pAttack] = 0.0f;
+            p[Comp::pRelease] = 0.5f;
+            p[Comp::pKnee] = 0.0f;
+            p[Comp::pMakeup] = 1.0f;
+            p[Comp::pMix] = 0.0f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+            juce::AudioBuffer<float> before (2, 512);
+
+            for (int i = 0; i < 512; ++i)
+            {
+                const float v = 0.4f * std::sin (0.1f * static_cast<float> (i));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+                before.setSample (0, i, v);
+                before.setSample (1, i, v);
+            }
+
+            comp.process (buf, p);
+
+            double worst = 0.0;
+
+            for (int i = 0; i < 512; ++i)
+                worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                       - before.getSample (0, i)));
+
+            ok = check (worst < 1.0e-6, "the compressor's Mix at zero is dry", worst) && ok;
+        }
+    }
+
+    // --- 42. Limiter module: the brickwall, and what soft clip does instead ---
+    {
+        using Lim = mixxynth::LimiterFx;
+
+        // The soft clipper as a pure curve. Zero must be exactly transparent - a control
+        // that colours the signal at its zero position is a bug - and the shape must stay
+        // monotonic and inside full scale, because a clipper that folds back would turn a
+        // loud passage into noise.
+        {
+            ok = check (std::abs (Lim::softClip (0.7f, 0.0f) - 0.7f) < 1.0e-7f,
+                        "soft clip at zero is transparent", Lim::softClip (0.7f, 0.0f)) && ok;
+
+            float worstPeak = 0.0f;
+            bool monotonic = true;
+            float previous = -2.0f;
+
+            for (int i = 0; i <= 400; ++i)
+            {
+                const float x = -2.0f + 4.0f * static_cast<float> (i) / 400.0f;
+                const float y = Lim::softClip (x, 1.0f);
+
+                worstPeak = juce::jmax (worstPeak, std::abs (y));
+
+                if (y < previous - 1.0e-6f)
+                    monotonic = false;
+
+                previous = y;
+            }
+
+            ok = check (monotonic && worstPeak <= 1.0f + 1.0e-5f,
+                        "soft clip is monotonic and inside full scale", worstPeak) && ok;
+        }
+
+        // The brickwall: with soft clip off, nothing above the threshold gets out.
+        {
+            mixxynth::LimiterFx lim;
+            lim.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Lim::pThreshold] = 0.5f;   // about -12 dB, so the limit is easy to see
+            p[Lim::pRelease] = 0.3f;
+            p[Lim::pSoftClip] = 0.0f;
+            p[Lim::pMix] = 1.0f;
+
+            const int len = 4096;
+            juce::AudioBuffer<float> buf (2, len);
+
+            for (int i = 0; i < len; ++i)
+            {
+                const float v = (i / 61) % 2 == 0 ? 8.0f : -8.0f;
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            lim.process (buf, p);
+
+            float peak = 0.0f;
+
+            for (int i = 0; i < len; ++i)
+                peak = juce::jmax (peak, std::abs (buf.getSample (0, i)));
+
+            const float expected = std::pow (10.0f, -12.0f / 20.0f);
+
+            ok = check (std::isfinite (peak) && peak <= expected + 0.01f,
+                        "the limiter module holds its threshold", peak) && ok;
+        }
+
+        // And the soft clipper changes what the peaks look like rather than how loud they
+        // are, which is the point of offering it.
+        {
+            auto renderSoft = [&] (float amount, juce::AudioBuffer<float>& out)
+            {
+                mixxynth::LimiterFx lim;
+                lim.prepare (sr, 512, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Lim::pThreshold] = 1.0f;   // out of the way, so this measures the clipper
+                p[Lim::pRelease] = 0.3f;
+                p[Lim::pSoftClip] = amount;
+                p[Lim::pMix] = 1.0f;
+
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.9f * std::sin (0.05f * static_cast<float> (i));
+                    out.setSample (0, i, v);
+                    out.setSample (1, i, v);
+                }
+
+                lim.process (out, p);
+            };
+
+            juce::AudioBuffer<float> off (2, 512), on (2, 512);
+            renderSoft (0.0f, off);
+            renderSoft (1.0f, on);
+
+            // Soft clipping a sine at 0.9 must change it - it is a non-linearity, and if it
+            // were inaudible at full amount it would not be doing anything.
+            double difference = 0.0;
+
+            for (int i = 0; i < 512; ++i)
+                difference = juce::jmax (difference, std::abs (static_cast<double> (off.getSample (0, i))
+                                                                - on.getSample (0, i)));
+
+            ok = check (difference > 0.01, "soft clip changes the shape of the peaks",
+                        difference) && ok;
         }
     }
 

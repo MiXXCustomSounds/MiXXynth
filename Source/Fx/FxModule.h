@@ -43,6 +43,8 @@ namespace mixxynth
         fxPingPongDelay,
         fxFlanger,
         fxPhaser,
+        fxCompressor,
+        fxLimiter,
         kNumFxTypes
     };
 
