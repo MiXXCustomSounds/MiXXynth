@@ -838,6 +838,79 @@ int main()
         check (found == 3, "drift and velocity each have a control", juce::String (found));
     }
 
+    // Switching views must not leave the previous view's controls behind.
+    //
+    // The operator cells did exactly that: they were the one list applyView did not know
+    // about, so a column of six operator boxes sat on top of the VA envelope and the
+    // filter row - in a view that has no operators in it at all.
+    //
+    // This is a generic overlap check rather than an assertion about a named list,
+    // because the bug WAS a list nobody remembered to add. A named assertion would have
+    // had exactly the same blind spot as the code it was guarding.
+    {
+        auto* fm = miXXEditor->getTabContentComponent (0);
+
+        check (fm != nullptr, "the FM tab has content to inspect",
+               juce::String (fm != nullptr ? 1 : 0));
+
+        if (fm != nullptr)
+        {
+            auto describe = [fm] (int idx) -> juce::String
+            {
+                auto* c = fm->getChildComponent (idx);
+
+                if (c == nullptr)
+                    return "#" + juce::String (idx);
+
+                // The parameter ID is the only thing that names a control usefully here:
+                // JUCE components carry no class name, and a cell or a knob is identified
+                // by what it drives rather than by its label.
+                if (auto* sc = dynamic_cast<mixxynth::ui::SquareCell*> (c))
+                    return sc->getParamID();
+
+                if (auto* mk = dynamic_cast<mixxynth::ui::ModKnob*> (c))
+                    return mk->getParamID();
+
+                if (auto* b = dynamic_cast<juce::Button*> (c))
+                    if (b->getButtonText().isNotEmpty())
+                        return b->getButtonText();
+
+                return "#" + juce::String (idx);
+            };
+
+            for (int v = 0; v < 3; ++v)
+            {
+                miXXEditor->setFmView (v);
+
+                juce::StringArray clashes;
+
+                for (int i = 0; i < fm->getNumChildComponents(); ++i)
+                {
+                    auto* a = fm->getChildComponent (i);
+
+                    if (a == nullptr || ! a->isVisible() || a->getBounds().isEmpty())
+                        continue;
+
+                    for (int j = i + 1; j < fm->getNumChildComponents(); ++j)
+                    {
+                        auto* b = fm->getChildComponent (j);
+
+                        if (b == nullptr || ! b->isVisible() || b->getBounds().isEmpty())
+                            continue;
+
+                        if (a->getBounds().intersects (b->getBounds()))
+                            clashes.add (describe (i) + "+" + describe (j));
+                    }
+                }
+
+                check (clashes.isEmpty(), "no controls overlap in an FM view",
+                       juce::String (v) + ": " + clashes.joinIntoString (", "));
+            }
+
+            miXXEditor->setFmView (0);
+        }
+    }
+
     for (int i = 0; i < miXXEditor->getNumTabs(); ++i)
     {
         auto* page = miXXEditor->getTabContentComponent (i);

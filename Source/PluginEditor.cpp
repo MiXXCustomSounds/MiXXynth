@@ -1252,6 +1252,16 @@ private:
 
         routingFrom.setVisible (routing);
 
+        // The operator cells are the shared axis: values and routing both label their rows
+        // with them, which is what makes switching between those two views move nothing.
+        // The VA view has no operator rows, so they have to go there.
+        //
+        // This list was the one applyView did not know about, and the operator cells sat
+        // on top of the VA envelope and the filter row because of it - a column of six
+        // green boxes down the middle of a view that has no operators in it.
+        for (auto* t : opOnToggles)
+            t->setVisible (values || routing);
+
         // indexCell is cells[0], so this covers it.
         for (auto* c : cells)
             c->setVisible (values);
@@ -1278,6 +1288,16 @@ private:
         resized();
         repaint();
     }
+
+public:
+    // Switches view programmatically. The audit uses this to walk every view's controls,
+    // which is how an overlap check can see the state a user sees rather than only the
+    // one the page happens to open on.
+    void setView (int v) { viewSwitch.setSelected (v); }
+
+    int getView() const { return viewSwitch.getSelected(); }
+
+private:
 
     MiXXynthEditor& ed;
     DiceButton diceButton;
@@ -2694,6 +2714,12 @@ void MiXXynthEditor::rollFmDice()
 {
     if (fmPage != nullptr)
         fmPage->rollDice();
+}
+
+void MiXXynthEditor::setFmView (int v)
+{
+    if (fmPage != nullptr)
+        fmPage->setView (v);
 }
 
 std::vector<mixxynth::ui::AdsrEditor*> MiXXynthEditor::getAdsrEditors() const

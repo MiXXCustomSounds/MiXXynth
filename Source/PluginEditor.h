@@ -107,6 +107,11 @@ public:
         return tabs.getTabContentComponent (index);
     }
 
+    // Switches the FM tab's view. The audit needs this to inspect all three views, and
+    // in particular to check that switching views does not leave the previous view's
+    // controls behind - which is a bug the page shipped once already.
+    void setFmView (int v);
+
     // Geometry dump for the editor audit (modulation sidebar).
     juce::String sidebarDebug() const;
 
