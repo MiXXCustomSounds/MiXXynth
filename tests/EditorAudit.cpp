@@ -940,6 +940,19 @@ int main()
                    juce::String (vaShape->getRight()) + " <= " + juce::String (indexCell->getX()));
     }
 
+    // Step 4: the shape cells draw the shape instead of naming it. Seven of them - one per
+    // operator plus the VA's, which is the same morph and should read as the same thing.
+    {
+        int waveformCells = 0;
+
+        for (auto* k : miXXEditor->modTargets)
+            if (auto* c = dynamic_cast<mixxynth::ui::SquareCell*> (k))
+                if (c->isShowingWaveform())
+                    ++waveformCells;
+
+        check (waveformCells == 7, "the shape cells draw waveforms", juce::String (waveformCells));
+    }
+
     for (int i = 0; i < miXXEditor->getNumTabs(); ++i)
     {
         auto* page = miXXEditor->getTabContentComponent (i);

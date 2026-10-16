@@ -104,6 +104,14 @@ public:
         return modValuesLive.load (std::memory_order_relaxed);
     }
 
+    // The shared band-limited morph tables, for the editor's shape cells to draw from.
+    //
+    // Safe to read off the audio thread. prepare() tracks into vectors that are already
+    // the right size, so it never reallocates, and `prepared` is only set once the tables
+    // are built - so a reader either sees a complete set or skips. The worst a re-prepare
+    // can do is show a half-rebuilt waveform for a single frame.
+    const mixxynth::OpWaveTables& getWaveTables() const { return waveTables; }
+
     // ---- FX rack (M4b workstream 4) ----------------------------------------
     // The rack sits at the end of processBlock, after the voice mix. An Off or
     // bypassed slot is skipped, so an empty rack is a bit-exact passthrough.

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "ModMatrix.h"
+#include "OpWave.h"
 
 namespace mixxynth::ui
 {
@@ -65,6 +66,12 @@ void SquareCell::setLiveValue01 (float v01)
         liveValue01 = clamped;
         repaint();
     }
+}
+
+void SquareCell::setWaveformDisplay (const mixxynth::OpWaveTables* tables)
+{
+    waveTables = tables;
+    repaint();
 }
 
 void SquareCell::setValueTextFunction (std::function<juce::String (float)> f)
@@ -186,12 +193,27 @@ void SquareCell::paint (juce::Graphics& g)
                               juce::Justification::centred, 1);
         }
 
-        // The parameter's own text unless something more legible was supplied: a
-        // shape cell wants to say "sine", not "0.000".
-        g.setColour (valueText);
-        g.setFont (11.0f);
-        g.drawFittedText (valueTextForTest(), textArea.reduced (3, 1),
-                          juce::Justification::centred, 1);
+        if (waveTables != nullptr)
+        {
+            // A shape cell draws the shape instead of naming it. The picture keeps telling
+            // you which shape you are on the whole way through the morph, which a name can
+            // only manage at the seven stops it happens to have words for.
+            auto waveArea = b.reduced (5.0f, 6.0f);
+
+            if (drawLabel)
+                waveArea = waveArea.withTrimmedTop (labelHeight);
+
+            paintWaveform (g, waveArea);
+        }
+        else
+        {
+            // The parameter's own text unless something more legible was supplied: a
+            // shape cell wants to say "sine", not "0.000".
+            g.setColour (valueText);
+            g.setFont (11.0f);
+            g.drawFittedText (valueTextForTest(), textArea.reduced (3, 1),
+                              juce::Justification::centred, 1);
+        }
     }
 
     // One 'T' per assignment: a stem from the value to where the modulation can push it,
@@ -245,6 +267,44 @@ void SquareCell::paint (juce::Graphics& g)
             g.fillRect (cx - barW * 0.5f, reachY - barH * 0.5f, barW, barH);
         }
     }
+}
+
+void SquareCell::paintWaveform (juce::Graphics& g, juce::Rectangle<float> area) const
+{
+    if (waveTables == nullptr || ! waveTables->isPrepared() || area.getWidth() < 8.0f)
+        return;
+
+    // One point per ~2.5 px, bounded at both ends: a wide cell should not spend hundreds of
+    // table reads on a thumbnail, and a narrow one should not degrade into a triangle.
+    const int n = juce::jlimit (24, 96, static_cast<int> (area.getWidth() / 2.5f));
+
+    juce::Path path;
+
+    for (int i = 0; i <= n; ++i)
+    {
+        const float phase = static_cast<float> (i) / static_cast<float> (n);
+
+        // Sampled at a low pitch so the drawing shows the shape ITSELF rather than the shape
+        // as band-limited at some arbitrary frequency. The mip bands exist so the audio does
+        // not alias; the picture wants the ideal waveform.
+        const float v = waveTables->sample (phase, value01(), 110.0);
+
+        const float x = area.getX() + area.getWidth() * phase;
+        const float y = area.getCentreY() - v * area.getHeight() * 0.5f;
+
+        if (i == 0)
+            path.startNewSubPath (x, y);
+        else
+            path.lineTo (x, y);
+    }
+
+    // Drawn over the fill, so it has to read against orange, blue and near-black alike. A
+    // dark underlay with a bright line over it does that; no single colour can.
+    g.setColour (juce::Colour (0xff0b0d10).withAlpha (0.65f));
+    g.strokePath (path, juce::PathStrokeType (3.0f));
+
+    g.setColour (valueText);
+    g.strokePath (path, juce::PathStrokeType (1.4f));
 }
 
 int SquareCell::depthEdgeAt (juce::Point<int> pos) const
@@ -344,7 +404,16 @@ void SquareCell::mouseDrag (const juce::MouseEvent& e)
     setParamFrom01 (v);
 
     if (onStatus != nullptr && source.p != nullptr)
-        onStatus (text + ": " + source.p->getText (v, 8));
+    {
+        // The cell's own wording when it has one. A shape cell wants to say "Square" while
+        // you drag through the morph, not "0.333" - and now that the cell DRAWS the shape
+        // rather than naming it, this is the only place the name appears at all.
+        const juce::String shown = valueTextFunction != nullptr
+                                     ? valueTextFunction (v)
+                                     : source.p->getText (v, 8);
+
+        onStatus (text + ": " + shown);
+    }
 
     repaint();
 }

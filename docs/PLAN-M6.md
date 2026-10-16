@@ -1,9 +1,9 @@
 # MiXXynth — M6: consolidation and depth
 
-Status: **in progress.** Steps 1-3, 5 and 6 are done, and the tabs are down to three.
+Status: **in progress.** Steps 1-6 are done, and the tabs are down to three.
 The routing matrix and the VA/filter are views and a panel of the FM tab, and the voice
 controls live in the sidebar above the modulation section, so the editor is **FM, Mod,
-FX**. Step 4 (the live shape graphic) remains, along with the per-operator filters.
+FX**. The per-operator filters are the remaining work.
 Supersedes the ordering of M5's remaining workstreams. M5 workstreams 1-3 (modulation
 UX, the WeirdVerb rename, convolution) are done; M5's *feature* workstreams (distortion,
 chorus, presets) are deferred until this is finished, because this is depth on what
@@ -236,6 +236,12 @@ audit checks, 0 failures; smoke OK; the build is warning-clean.
   was permanently 100% and unadjustable. `velToLevel` replaces it, defaulting to 1 -
   which is exactly the old behaviour, so no patch changed loudness. `velToIndex` is new
   and opt-in: it opens the FM index with touch, which is the expressive half.
+- **Step 4, the live shape graphic**: the shape cells draw the shape instead of naming it.
+  Seven of them - one per operator plus the VA's. The picture keeps saying which shape you
+  are on the whole way through the morph, which a name only managed at the seven stops it
+  had words for. Because the name is gone from the cell, the drag status line now uses the
+  cell's own wording, so dragging reports "Square" rather than "0.333".
+
 - **Step 5, the live modulated fill**: modulation totals are computed in their own pass and
   both the sound and the readout come from that one number; the published values are read
   back out of the VoiceParams rather than recomputed. The editor pushes them on its 30 Hz

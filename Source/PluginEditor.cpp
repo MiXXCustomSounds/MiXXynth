@@ -673,13 +673,16 @@ public:
             auto* shape = addCell (ranged (p, "op" + n + "wave"), mixxynth::dstOff,
                                    "Op" + n + " Shape");
 
-            // The morph is a continuous sweep through sine > triangle > saw > square,
-            // so the cell names the shape it is at rather than showing a bare number.
-            // Step 4 replaces this text with the actual waveform.
+            // The morph is a continuous sweep through sine > triangle > saw > square >
+            // pulses, so the cell draws the shape rather than naming it. The name is still
+            // what the status line reports while you drag, which is where a word is
+            // genuinely more use than a picture.
             shape->setValueTextFunction ([] (float v)
             {
                 return juce::String (mixxynth::OpWaveTables::shapeName (v));
             });
+
+            shape->setWaveformDisplay (&p.getWaveTables());
 
             addCell (ranged (p, "op" + n + "ratio"), mixxynth::dstOp1Ratio + i, "Op" + n + " Ratio");
             addCell (ranged (p, "op" + n + "level"), mixxynth::dstOp1Level + i, "Op" + n + " Level");
@@ -777,13 +780,16 @@ public:
         caption (vaEnvLabel, "ENVELOPE");
         caption (vaModeLabel, "FILTER TYPE");
 
-        // The shape is the same morph the operators use, so its cell names the shape
-        // exactly as the operator shape cells do.
+        // The shape is the same morph the operators use, so its cell draws the same
+        // waveform the operator shape cells do - and keeps its caption, because this cell
+        // is in a panel rather than under a column header.
         vaCells[0] = addVaCell (ranged (p, "vaShape"), mixxynth::dstVaPulseWidth, "VA Shape");
         vaCells[0]->setValueTextFunction ([] (float v)
         {
             return juce::String (mixxynth::OpWaveTables::shapeName (v));
         });
+
+        vaCells[0]->setWaveformDisplay (&p.getWaveTables());
 
         vaCells[1] = addVaCell (ranged (p, "vaSubLevel"), mixxynth::dstOff, "Sub");
         vaCells[2] = addVaCell (ranged (p, "vaNoiseLevel"), mixxynth::dstOff, "Noise");

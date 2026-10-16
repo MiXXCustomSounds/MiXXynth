@@ -6,6 +6,11 @@
 
 #include "ModTarget.h"
 
+// Forward declared rather than included: a cell only ever holds a pointer to the tables,
+// and pulling OpWave.h in here would drag their whole implementation into every file that
+// draws a cell.
+namespace mixxynth { class OpWaveTables; }
+
 namespace mixxynth::ui
 {
 // M6: a square grid cell that is both a value readout and a vertical slider.
@@ -56,6 +61,13 @@ public:
     // a mystery number.
     void setValueTextFunction (std::function<juce::String (float)> f);
 
+    // Draws the waveform for this cell's current value INSTEAD of its value text.
+    //
+    // The shape cells use this. A picture of the shape says which shape it is far better
+    // than its name does, and it goes on saying it while you drag through the morph - which
+    // a name only manages at the handful of stops it happens to have words for.
+    void setWaveformDisplay (const mixxynth::OpWaveTables* tables);
+
     // Draws the control's own name in a strip at the top of the cell.
     //
     // Opt-in, because the grid's cells are already named by their column headers and a
@@ -90,6 +102,10 @@ public:
     // What the cell is showing: the live value if modulated, else the parameter.
     float value01() const;
     bool isShowingLiveValue() const noexcept { return liveValue01 >= 0.0f; }
+
+    // True when the cell draws its value as a waveform rather than as text. The audit
+    // cannot see pixels, so it checks the mode is on and leaves the drawing to the eye.
+    bool isShowingWaveform() const noexcept { return waveTables != nullptr; }
     juce::Colour fillColour() const;
     juce::Rectangle<float> fillRect() const;
     float yForValue01 (float v01) const;
@@ -111,6 +127,9 @@ private:
     // Index of the assignment whose outer depth edge is under this point, or -1.
     int depthEdgeAt (juce::Point<int> pos) const;
 
+    // The value's waveform, for a cell whose value is a shape rather than a number.
+    void paintWaveform (juce::Graphics& g, juce::Rectangle<float> area) const;
+
     void setParamFrom01 (float v01);
 
     ContinuousSource source;
@@ -119,6 +138,7 @@ private:
     float liveValue01 = -1.0f;
     bool hideAtExtremes = false;
     bool showLabel = false;
+    const mixxynth::OpWaveTables* waveTables = nullptr;
     std::function<juce::String (float)> valueTextFunction;
 
     bool draggingValue = false;
