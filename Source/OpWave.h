@@ -7,12 +7,17 @@
 
 // Band-limited operator waveforms with continuous morphing.
 //
-// op{n}wave is a single 0..1 control sweeping sine -> triangle -> saw -> square.
+// op{n}wave is a single 0..1 control sweeping sine -> triangle -> saw -> square ->
+// pulse 25% -> pulse 12% -> pulse 6%. The tail of the sweep narrows the duty, so past
+// the square the control acts as a pulse width control rather than a shape selector,
+// and the shape knob ends up doing the job a separate PWM knob would have done.
+//
 // The morph happens in the HARMONIC domain: each shape is synthesised from its
 // Fourier series, and the control interpolates between adjacent shapes' tables.
 // That keeps the shapes phase-coherent, so morphing never produces the
 // cancellation notches a time-domain crossfade gives between, e.g., a saw and a
-// square.
+// square. It is also what makes the pulse stops interpolate smoothly: they are the
+// same series at different duties, so sweeping between them sweeps the duty.
 //
 // One table per shape per octave band, so a high-ratio operator does not alias.
 //
@@ -24,7 +29,10 @@ namespace mixxynth
     class OpWaveTables
     {
     public:
-        static constexpr int numShapes = 4;    // sine, triangle, saw, square
+        // sine, triangle, saw, square, then a pulse that narrows: 25%, 12%, 6%.
+        // The narrowing stops are the same Fourier series at different duties, which
+        // is exactly why the top of the sweep reads as a pulse width control.
+        static constexpr int numShapes = 7;
         static constexpr int numMips   = 8;    // one per octave from A0 up
         static constexpr int tableSize = 2048; // power of two: index masks, not modulo
 

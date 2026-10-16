@@ -12,8 +12,12 @@ namespace
     // The lowest fundamental the mip map has to cover.
     constexpr double kBaseFreq = 27.5; // A0
 
-    // Fourier series with unit peak for each shape. Square and saw will overshoot
-    // by the usual Gibbs amount once truncated, which is expected and standard.
+    // Duty of each shape, indexed by shape. The first four entries are unused: the
+    // one shape that is not a pulse is the saw, and the switch never reads them.
+    constexpr double kShapeDuty[] = { 0.5, 0.5, 0.5, 0.5, 0.25, 0.125, 0.0625 };
+
+    // Fourier series with unit peak for each shape. Saw and the pulses overshoot by the
+    // usual Gibbs amount once truncated, which is expected and standard.
     float harmonicAmp (int shape, int h)
     {
         switch (shape)
@@ -31,12 +35,54 @@ namespace
             case 2: // saw: all h, 1/h
                 return (2.0f / kPi) / static_cast<float> (h);
 
-            default: // square: odd h, 1/h
-                if ((h % 2) == 0)
-                    return 0.0f;
+            default: // pulses, including the square at duty 0.5
+            {
+                // b_n = 2(1 - cos(2*pi*n*d)) / (pi*n) for a bipolar pulse of duty d. At
+                // d = 0.5 it collapses to 4/(pi*n) for odd n and 0 for even n, which is
+                // the square this used to hard-code - so the square is now simply the
+                // first pulse rather than a special case, and the narrowing stops fall
+                // out of the same formula instead of needing their own series.
+                const int clampedShape = juce::jlimit (0, OpWaveTables::numShapes - 1, shape);
+                const double d = kShapeDuty[static_cast<size_t> (clampedShape)];
+                const double n = static_cast<double> (h);
 
-                return (4.0f / kPi) / static_cast<float> (h);
+                return static_cast<float> (2.0 * (1.0 - std::cos (kTwoPi * d * n))
+                                             / (kTwoPi * 0.5 * n));
+            }
         }
+    }
+
+    // Cosine coefficient for a shape. Zero for every shape that is odd about zero, which
+    // is all of sine, triangle and saw, so only the pulses use it.
+    //
+    // The pulses need it because a SINE series can only represent an odd-symmetric
+    // function. A pulse at duty 0.5 is odd-symmetric, which is why the square always
+    // worked, but a pulse at any other duty is not - so a sine-only series converges to
+    // the pulse's odd part, which is a square at double the intended rate. The first
+    // attempt at the narrowing stops did exactly that, and every one of them measured a
+    // duty of 0.5.
+    float harmonicAmpCos (int shape, int h)
+    {
+        if (shape < 3)
+            return 0.0f;
+
+        const int clampedShape = juce::jlimit (0, OpWaveTables::numShapes - 1, shape);
+        const double d = kShapeDuty[static_cast<size_t> (clampedShape)];
+        const double n = static_cast<double> (h);
+
+        // a_n = 2 sin(2*pi*n*d) / (pi*n)
+        return static_cast<float> (2.0 * std::sin (kTwoPi * d * n) / (kTwoPi * 0.5 * n));
+    }
+
+    // DC offset. A pulse is not centred on zero unless its duty is 0.5, and without this
+    // the narrow pulses would sit at the wrong mean level.
+    float harmonicDC (int shape)
+    {
+        if (shape < 3)
+            return 0.0f;
+
+        const int clampedShape = juce::jlimit (0, OpWaveTables::numShapes - 1, shape);
+        return static_cast<float> (2.0 * kShapeDuty[static_cast<size_t> (clampedShape)] - 1.0);
     }
 }
 
@@ -72,21 +118,39 @@ void OpWaveTables::buildShape (int shape, int mip, int harmonics)
     auto& table = tables[static_cast<size_t> (mip)][static_cast<size_t> (shape)];
     table.assign (static_cast<size_t> (tableSize), 0.0f);
 
+    // DC first. It is zero for every odd-symmetric shape and non-zero for a pulse away
+    // from duty 0.5, which is what keeps the narrow pulses centred on zero.
+    const float dc = harmonicDC (shape);
+
+    if (dc != 0.0f)
+        for (auto& s : table)
+            s = dc;
+
+    // cos(2*pi*x) is sin(2*pi*(x + 1/4)), so the cosine terms come from the same sine
+    // table at a quarter-period offset rather than needing a second lookup.
+    const int quarter = sineLutSize / 4;
+
     for (int h = 1; h <= harmonics; ++h)
     {
-        const float amp = harmonicAmp (shape, h);
+        const float sinAmp = harmonicAmp (shape, h);
+        const float cosAmp = harmonicAmpCos (shape, h);
 
-        if (amp == 0.0f)
+        if (sinAmp == 0.0f && cosAmp == 0.0f)
             continue;
 
-        // table[i] += amp * sin(2*pi*h*i/N)
+        // table[i] += sinAmp * sin(2*pi*h*i/N) + cosAmp * cos(2*pi*h*i/N)
         const int step = (h * sineLutSize) / tableSize;
         const int wrap = sineLutSize;
 
         for (int i = 0; i < tableSize; ++i)
         {
             const int idx = (i * step) % wrap;
-            table[static_cast<size_t> (i)] += amp * sineLut[static_cast<size_t> (idx)];
+
+            if (sinAmp != 0.0f)
+                table[static_cast<size_t> (i)] += sinAmp * sineLut[static_cast<size_t> (idx)];
+
+            if (cosAmp != 0.0f)
+                table[static_cast<size_t> (i)] += cosAmp * sineLut[static_cast<size_t> ((idx + quarter) % wrap)];
         }
     }
 }
@@ -143,7 +207,8 @@ float OpWaveTables::sample (float phase01, float wave01, double frequency) const
 
 const char* OpWaveTables::shapeName (float wave01)
 {
-    static const char* const names[] = { "Sine", "Triangle", "Saw", "Square" };
+    static const char* const names[] = { "Sine", "Triangle", "Saw", "Square",
+                                         "Pulse 25%", "Pulse 12%", "Pulse 6%" };
 
     const int i = juce::jlimit (0, numShapes - 1,
                                 static_cast<int> (std::lround (

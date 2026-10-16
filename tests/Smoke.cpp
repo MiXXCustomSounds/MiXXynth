@@ -688,18 +688,18 @@ int main()
             {
                 const float ph = static_cast<float> (i) / 256.0f;
                 sineVsSaw += std::abs (tables.sample (ph, 0.0f, 220.0)
-                                         - tables.sample (ph, 0.667f, 220.0));
-                sawVsSquare += std::abs (tables.sample (ph, 0.667f, 220.0)
-                                           - tables.sample (ph, 1.0f, 220.0));
+                                         - tables.sample (ph, 2.0f / 6.0f, 220.0));
+                sawVsSquare += std::abs (tables.sample (ph, 2.0f / 6.0f, 220.0)
+                                           - tables.sample (ph, 3.0f / 6.0f, 220.0));
             }
 
             ok = check (sineVsSaw > 20.0, "opwave: saw differs from sine", sineVsSaw) && ok;
             ok = check (sawVsSquare > 5.0, "opwave: square differs from saw", sawVsSquare) && ok;
         }
 
-        // Prove all four stops are genuinely distinct using harmonic energy above
-        // the 6th harmonic, which is a perceptual stand-in for brightness. This is
-        // the check that would catch a morph collapsing to two shapes.
+        // Prove every stop is genuinely distinct using harmonic energy above the 6th
+        // harmonic, which is a perceptual stand-in for brightness. This is the check
+        // that would catch a morph collapsing to two shapes.
         {
             auto highEnergy = [&tables] (float wave)
             {
@@ -725,10 +725,15 @@ int main()
                 return total;
             };
 
-            const double eSine = highEnergy (0.0f);
-            const double eTri = highEnergy (1.0f / 3.0f);
-            const double eSaw = highEnergy (2.0f / 3.0f);
-            const double eSqr = highEnergy (1.0f);
+            // Shape indices over the stop count, so extending the axis does not silently
+            // repoint these at different shapes - which is exactly what happened when the
+            // pulse tail was added.
+            const double eSine = highEnergy (0.0f / 6.0f);
+            const double eTri = highEnergy (1.0f / 6.0f);
+            const double eSaw = highEnergy (2.0f / 6.0f);
+            const double eSqr = highEnergy (3.0f / 6.0f);
+
+            // The pulse tail is checked separately below, by measuring its duty.
 
             ok = check (eSine < 1.0e-9, "opwave: sine has no upper harmonics", eSine) && ok;
             ok = check (eTri > 1.0e-6, "opwave: triangle adds upper harmonics", eTri) && ok;
@@ -736,6 +741,36 @@ int main()
                         eSaw / eTri) && ok;
             ok = check (eSqr > eTri * 5.0 && std::abs (eSqr - eSaw) > 1.0e-4,
                         "opwave: square differs from both", eSqr / eTri) && ok;
+
+            // The pulse tail has to actually narrow, which is the whole point of it: the
+            // duty is the property that makes the top of the sweep a pulse width control.
+            //
+            // Measuring the duty directly, rather than measuring brightness, because
+            // harmonic energy in a fixed band does NOT rise monotonically as a pulse
+            // narrows - the notches move as the duty changes, so the energy shifts up and
+            // then back down again. The first version of this check assumed otherwise and
+            // failed against correct code.
+            auto dutyAt = [&tables] (float wave)
+            {
+                constexpr int N = 2048;
+                int positive = 0;
+
+                for (int i = 0; i < N; ++i)
+                    if (tables.sample (static_cast<float> (i) / N, wave, 220.0) > 0.0f)
+                        ++positive;
+
+                return static_cast<double> (positive) / static_cast<double> (N);
+            };
+
+            const double duty50 = dutyAt (3.0f / 6.0f);
+            const double duty25 = dutyAt (4.0f / 6.0f);
+            const double duty12 = dutyAt (5.0f / 6.0f);
+            const double duty6 = dutyAt (1.0f);
+
+            ok = check (duty25 < duty50 && duty12 < duty25 && duty6 < duty12,
+                        "opwave: the pulse tail narrows monotonically", duty6 / duty50) && ok;
+            ok = check (std::abs (duty50 - 0.5) < 0.03 && std::abs (duty25 - 0.25) < 0.03,
+                        "opwave: the pulse duties land where they should", duty25) && ok;
         }
     }
 
