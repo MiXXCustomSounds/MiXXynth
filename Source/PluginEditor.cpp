@@ -1578,6 +1578,13 @@ public:
         addKnob (ranged (p, "unisonPhaseRand"), "Phase Random");
         addKnob (ranged (p, "pitchBendRange"), "Bend Range");
 
+        // Drift and velocity response. Both are properties of a voice rather than of an
+        // oscillator or the filter, so they belong here beside polyphony and unison
+        // rather than on the FM tab.
+        addKnob (ranged (p, "drift"), "Drift");
+        addKnob (ranged (p, "velToLevel"), "Vel to Level");
+        addKnob (ranged (p, "velToIndex"), "Vel to Index");
+
         mpeToggle = makeBoolToggle (p, "mpeEnabled", "MPE");
         addAndMakeVisible (mpeToggle);
 
@@ -1607,14 +1614,16 @@ public:
         g.setFont (11.5f);
         g.drawFittedText ("Polyphony is the maximum number of notes held at once; unison stacks detuned, "
                           "stereo-spread copies per note. They share a 64-voice pool, so a large unison "
-                          "reduces how many notes fit.",
-                          getLocalBounds().removeFromTop (34), juce::Justification::centredLeft, 2);
+                          "reduces how many notes fit. Drift is a slow per-operator pitch wander, so a "
+                          "single voice moves over time rather than sitting still. Vel to Level and Vel "
+                          "to Index set how much the keyboard's touch changes loudness and brightness.",
+                          getLocalBounds().removeFromTop (52), juce::Justification::centredLeft, 3);
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (10);
-        b.removeFromTop (38);
+        b.removeFromTop (56);
 
         auto row = b.removeFromTop (110);
 

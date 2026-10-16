@@ -224,8 +224,20 @@ Each step keeps the plugin buildable and the tests passing.
 
 ## Progress
 
-**Steps 1-3 and 6 complete, plus the tab consolidation.** 180 audit checks, 0
-failures; pluginval strictness 5 SUCCESS; smoke OK; the build is warning-clean.
+**Steps 1-3 and 6 complete, plus the tab consolidation, drift and velocity.** 181
+audit checks, 0 failures; smoke OK; the build is warning-clean.
+
+- **Drift**: a slow random walk per operator, in `FmVoice`. Deliberately not unison
+  detune - detune separates voices and does nothing at unison = 1, whereas drift moves
+  a single voice and is audible there. Each voice is seeded differently by the voice
+  manager, so a unison stack's voices wander apart instead of drifting as one.
+  `drift` = 0 is bit-identical whatever the seed, which the smoke test asserts.
+- **Velocity**: the voice applied a bare `* velocity` on its output, so the sensitivity
+  was permanently 100% and unadjustable. `velToLevel` replaces it, defaulting to 1 -
+  which is exactly the old behaviour, so no patch changed loudness. `velToIndex` is new
+  and opt-in: it opens the FM index with touch, which is the expressive half.
+- Both live on the **Voice tab** with polyphony and unison, because both are properties
+  of a voice rather than of an oscillator or a filter.
 
 - **Consolidation**: the VA/Filt tab is gone. The FM tab has three views -
   `Values | Routing | VA` - and `ViewSwitch` takes a list of segment names rather

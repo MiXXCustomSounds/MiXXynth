@@ -124,6 +124,29 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "unisonPhaseRand", "Phase Random",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
+    // M6: analog-style drift. A slow random walk per operator, so the pitch wanders
+    // over seconds instead of sitting still. It is a property of the voice rather than
+    // of the unison stack, which is the point: detune separates voices and does nothing
+    // at unison = 1, whereas drift moves a single voice and is audible there.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "drift", "Drift",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
+    // M6: velocity response. The voice applied velocity as a bare `* velocity` on its
+    // output, so the sensitivity was permanently 100% with no way to reduce it.
+    // velToLevel = 1 is exactly that behaviour, so the default leaves existing patches
+    // sounding as they did and the control only ever softens the response.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "velToLevel", "Velocity to Level",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
+
+    // How much velocity opens the FM index. Off by default, because this one changes
+    // the timbre with touch rather than the loudness - expressive, but not what an
+    // existing patch expects.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "velToIndex", "Velocity to Index",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
     // Pitch bend range in semitones, applied to the wheel and to incoming
     // MIDI pitch bend.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -696,6 +719,9 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     vp.cutoff       = getParam (apvts, "filterCutoff");
     vp.resonance    = getParam (apvts, "filterReso");
     vp.drive        = getParam (apvts, "filterDrive");
+    vp.drift        = getParam (apvts, "drift");
+    vp.velToLevel   = getParam (apvts, "velToLevel");
+    vp.velToIndex   = getParam (apvts, "velToIndex");
 
     const int algoIndex = static_cast<int> (getParam (apvts, "algorithm"));
 

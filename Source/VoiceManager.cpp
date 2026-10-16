@@ -7,9 +7,19 @@ void MiXXVoiceManager::prepare (double sr)
 {
     sampleRate = sr > 0.0 ? sr : 44100.0;
 
-    for (auto& s : slots)
+    for (size_t i = 0; i < slots.size(); ++i)
     {
+        auto& s = slots[i];
+
         s.voice.setSampleRate (sampleRate);
+
+        // Every voice gets its own drift trajectory. A shared seed would make a unison
+        // stack drift as a single voice, which turns the movement back into a fixed
+        // detune - the exact thing drift is meant to not be. The multiplier is a large
+        // odd number so adjacent slots land far apart in the walk rather than starting
+        // out correlated.
+        s.voice.setDriftSeed (static_cast<juce::uint32> (i + 1) * 2654435761u);
+
         s.voice.reset();
         s.modState.reset();
         s.note = -1;

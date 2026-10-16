@@ -74,6 +74,17 @@ public:
         float resonance   = 0.2f;
         float drive       = 0.0f;
 
+        // M6: analog-style drift, and velocity response.
+        //
+        // Drift is a slow random walk per operator, so the *relationships* between
+        // operators wander the way analog oscillators do. It is deliberately not the
+        // same thing as unison detune: detune is a fixed offset that separates voices,
+        // while drift is movement within a single voice over time - which is why it is
+        // audible at unison = 1, where detune does nothing at all.
+        float drift       = 0.0f;    // 0..1, scales the walk's range
+        float velToLevel  = 0.0f;    // 0..1, how much velocity scales the output
+        float velToIndex  = 0.0f;    // 0..1, how much velocity scales the FM index
+
         VoiceParams()
         {
             for (int i = 0; i < numOps; ++i)
@@ -94,6 +105,11 @@ public:
     // voice manager for unison stacks.
     void setDetune (float cents);
     void setPan (float pan); // -1 left .. +1 right
+
+    // Gives this voice its own drift trajectory. The voice manager seeds each slot
+    // differently so a unison stack's voices wander apart; the same seed always gives
+    // the same walk, which is what makes drift testable at all.
+    void setDriftSeed (juce::uint32 seed) { driftSeed = seed != 0u ? seed : 1u; }
 
     // `phaseOffset01` shifts every operator's start phase, which is how unison
     // voices (and repeated notes) are decorrelated from one another. 0 aligns
@@ -124,10 +140,22 @@ private:
         float prevOut = 0.0f; // previous-sample output (feedback + backward edges)
         float curOut = 0.0f;  // current-sample output
         float fbSmooth = 0.0f; // smoothed feedback amount (zipper-free)
+
+        // Drift: where this operator's pitch wander currently is, and where it is
+        // heading. Two values rather than one, because the walk moves the target and
+        // a slew moves the current value toward it - which is what makes the pitch
+        // wander instead of stepping.
+        float drift = 0.0f;
+        float driftTarget = 0.0f;
     };
 
     void renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const VoiceParams& params);
     static float updateEnvelope (Op& op, float a, float d, float s, float r, double sampleRate);
+
+    // Drift. `updateDrift` advances every operator's walk and the VA's by one block;
+    // `nextDriftRandom` is the deterministic source the walk is built from.
+    void updateDrift (const VoiceParams& params, int numSamples);
+    float nextDriftRandom();
 
     std::array<Op, numOps> ops;
 
@@ -143,6 +171,18 @@ private:
     bool vaGateLast = false;
     float vaEnv = 0.0f;
     juce::uint32 noiseState = 0x2545f491u;
+
+    // Drift state for the VA, kept separate from the operators so the VA wanders on
+    // its own trajectory rather than tracking a single operator.
+    float vaDrift = 0.0f;
+    float vaDriftTarget = 0.0f;
+
+    // Each voice needs its own drift walk. Seeded per slot by the voice manager,
+    // because a unison stack sharing one trajectory would drift as a single voice
+    // and the movement would collapse back into a fixed detune - which is exactly
+    // what drift is supposed to not be.
+    juce::uint32 driftSeed = 0x9e3779b9u;
+
     float svfIc1 = 0.0f;
     float svfIc2 = 0.0f;
 

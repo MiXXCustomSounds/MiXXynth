@@ -13,6 +13,21 @@ namespace
     {
         return 440.0f * std::pow (2.0f, static_cast<float> (note - 69) / 12.0f);
     }
+
+    // How far an operator's pitch wanders at full drift depth. Wide enough to hear as
+    // movement, narrow enough that a tuned patch still reads as in tune.
+    constexpr float kMaxDriftCents = 25.0f;
+
+    // Seconds for the drift slew to cover most of the distance to a new target. This is
+    // the number that decides whether drift reads as analog instability (seconds) or as
+    // vibrato (a fraction of a second). Below about half a second it stops sounding like
+    // an oscillator warming up and starts sounding like an LFO.
+    constexpr float kDriftSlewSeconds = 0.6f;
+
+    double centsToRatio (double cents)
+    {
+        return std::pow (2.0, cents / 1200.0);
+    }
 }
 
 MiXXFmVoice::MiXXFmVoice() = default;
@@ -61,6 +76,8 @@ void MiXXFmVoice::reset()
     vaSubPhase = 0.0;
     vaEnv = 0.0f;
     noiseState = 0x2545f491u;
+    vaDrift = 0.0f;
+    vaDriftTarget = 0.0f;
     svfIc1 = 0.0f;
     svfIc2 = 0.0f;
     svfLastCutoff = -1.0f;
@@ -75,7 +92,52 @@ void MiXXFmVoice::reset()
         op.prevOut = 0.0f;
         op.curOut = 0.0f;
         op.fbSmooth = 0.0f;
+        op.drift = 0.0f;
+        op.driftTarget = 0.0f;
     }
+}
+
+float MiXXFmVoice::nextDriftRandom()
+{
+    // xorshift32. Deterministic from the seed, which is what lets the tests assert that
+    // drift moves the pitch at all, and that two voices with different seeds do not move
+    // together - neither of which is checkable against a random source.
+    driftSeed ^= driftSeed << 13;
+    driftSeed ^= driftSeed >> 17;
+    driftSeed ^= driftSeed << 5;
+
+    return static_cast<float> (driftSeed & 0xffffffu) / static_cast<float> (0xffffffu);
+}
+
+void MiXXFmVoice::updateDrift (const VoiceParams& p, int numSamples)
+{
+    if (p.drift <= 0.0f)
+        return;
+
+    const float blockSeconds = static_cast<float> (numSamples) / static_cast<float> (sampleRate);
+
+    // Two rates, because they do different jobs. The walk decides where the pitch wants
+    // to be; the slew decides how quickly it gets there, and is what stops the movement
+    // from stepping audibly at block boundaries.
+    //
+    // Both are scaled by the block length, so the wander's speed does not change when the
+    // host changes its buffer size.
+    const float walkStep = blockSeconds * 1.5f;
+    const float slew = juce::jlimit (0.0f, 1.0f, blockSeconds / kDriftSlewSeconds);
+
+    auto step = [this, walkStep, slew] (float& value, float& target)
+    {
+        target = juce::jlimit (-1.0f, 1.0f,
+                               target + (nextDriftRandom() * 2.0f - 1.0f) * walkStep);
+        value += (target - value) * slew;
+    };
+
+    for (auto& op : ops)
+        step (op.drift, op.driftTarget);
+
+    // The VA walks on its own trajectory, so it detunes against the operators over time
+    // rather than moving with them.
+    step (vaDrift, vaDriftTarget);
 }
 
 void MiXXFmVoice::noteOn (int noteNumber, float vel, float phaseOffset01)
@@ -165,22 +227,47 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
 {
     const int numCh = buffer.getNumChannels();
 
-    // Resolve each operator's mip band and morph pair once per block. Doing this
-    // per sample would put a log2 and a table pick in the hot loop; the operator
-    // frequencies are constant for the whole range.
+    // Drift first: everything below is derived from the drifted frequencies, so it has to
+    // be advanced before any of them is resolved.
+    updateDrift (p, numSamples);
+
+    // Velocity, resolved once per block rather than per sample. It used to be applied as a
+    // bare `* velocity` on the output, which meant the sensitivity was permanently at 100%
+    // and could not be dialled back. velToLevel = 1 is exactly that old behaviour, so the
+    // default preserves it and the control only ever reduces it.
+    const float velAmount = juce::jlimit (0.0f, 1.0f, velocity);
+    const float velScale = 1.0f - p.velToLevel * (1.0f - velAmount);
+    const float indexScale = 1.0f - p.velToIndex * (1.0f - velAmount);
+
+    // Resolve each operator's mip band, morph pair AND phase increment once per block.
+    // Doing any of it per sample would put a log2 and a table pick in the hot loop. The
+    // increment lives here rather than in the loop because drift makes it vary per block,
+    // which is also why the loop no longer multiplies frequency by ratio per sample.
+    std::array<double, numOps> opInc {};
     std::array<mixxynth::OpWaveTables::Cursor, numOps> cursors;
 
     for (int i = 0; i < numOps; ++i)
+    {
+        const double opFreq = frequency * static_cast<double> (p.ratio[i])
+                                * centsToRatio (static_cast<double> (ops[static_cast<size_t> (i)].drift)
+                                                  * static_cast<double> (p.drift)
+                                                  * kMaxDriftCents);
+
+        opInc[static_cast<size_t> (i)] = opFreq / sampleRate;
+
         if (p.waveTables != nullptr)
-            cursors[static_cast<size_t> (i)] =
-                p.waveTables->makeCursor (p.opWave[i],
-                                          frequency * static_cast<double> (p.ratio[i]));
+            cursors[static_cast<size_t> (i)] = p.waveTables->makeCursor (p.opWave[i], opFreq);
+    }
 
     // The VA runs at a single frequency for the whole range too, so its morph pair and
     // its sub's are resolved here for the same reason the operator cursors are: doing it
-    // per sample would put a log2 and a table pick in the hot loop.
+    // per sample would put a log2 and a table pick in the hot loop. Its drift adds to its
+    // own detune, so the two are separate controls rather than one.
     const double vaFreq = frequency * std::pow (2.0, static_cast<double> (p.vaOctave))
-                            * std::pow (2.0, static_cast<double> (p.vaDetune) / 1200.0);
+                            * std::pow (2.0, static_cast<double> (p.vaDetune) / 1200.0)
+                            * centsToRatio (static_cast<double> (vaDrift)
+                                              * static_cast<double> (p.drift)
+                                              * kMaxDriftCents);
     const double vaInc = juce::jlimit (0.0, 0.49, vaFreq / sampleRate);
     const double vaSubInc = juce::jlimit (0.0, 0.49, vaFreq * 0.5 / sampleRate);
 
@@ -228,7 +315,7 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             // FM modulation is a phase offset, so the waveform is evaluated at
             // the modulated phase. A disabled operator outputs silence, which
             // also stops it modulating anything downstream.
-            const double modulated = op.phase + modSum * p.index;
+            const double modulated = op.phase + modSum * p.index * indexScale;
             const float ph01 = static_cast<float> (modulated - std::floor (modulated));
 
             const float raw = p.opOn[dst]
@@ -241,7 +328,7 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             if (p.carrier[dst])
                 sum += s * p.level[dst];
 
-            op.phase += frequency * p.ratio[dst] / sampleRate;
+            op.phase += opInc[static_cast<size_t> (dst)];
             if (op.phase >= 1.0)
                 op.phase -= std::floor (op.phase);
         }
@@ -357,7 +444,7 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             else                         filtered = v2;                  // low pass
         }
 
-        const float out = juce::jlimit (-1.0f, 1.0f, filtered * velocity * p.master);
+        const float out = juce::jlimit (-1.0f, 1.0f, filtered * velScale * p.master);
 
         if (numCh >= 2)
         {

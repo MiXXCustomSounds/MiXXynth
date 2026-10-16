@@ -820,6 +820,24 @@ int main()
     // views of the FM grid now rather than tabs of their own.
     check (miXXEditor->getNumTabs() == 4, "four tabs", juce::String (miXXEditor->getNumTabs()));
 
+    // The voice controls added in M6: drift and velocity response. The generic coverage
+    // check cannot say WHERE a parameter's control lives, and for these three that is the
+    // whole point - they are properties of a voice, not of an oscillator, so they belong
+    // beside polyphony and unison rather than on the FM tab.
+    {
+        int found = 0;
+
+        for (auto* k : miXXEditor->modTargets)
+        {
+            const auto id = k->getParamID();
+
+            if (id == "drift" || id == "velToLevel" || id == "velToIndex")
+                ++found;
+        }
+
+        check (found == 3, "drift and velocity each have a control", juce::String (found));
+    }
+
     for (int i = 0; i < miXXEditor->getNumTabs(); ++i)
     {
         auto* page = miXXEditor->getTabContentComponent (i);
@@ -1421,19 +1439,19 @@ int main()
 
         // The whole premise is that every value cell is square. If they are not, it
         // is a table with extra steps.
-        int nonSquare = 0, zeroSized = 0;
+        int nonSquare = 0, unsized = 0;
 
         for (auto* c : fmCells)
         {
             const auto b = c->getBounds();
 
             if (b.getWidth() <= 0 || b.getHeight() <= 0)
-                ++zeroSized;
+                ++unsized;
             else if (std::abs (b.getWidth() - b.getHeight()) > 1)
                 ++nonSquare;
         }
 
-        check (zeroSized == 0, "every FM cell has a size", juce::String (zeroSized));
+        check (unsized == 0, "every FM cell has a size", juce::String (unsized));
         check (nonSquare == 0, "every FM value cell is square", juce::String (nonSquare));
 
         // FM Index used to be a knob. It is the control that proves the section
@@ -1584,13 +1602,13 @@ int main()
                "there is one envelope per operator",
                juce::String (static_cast<int> (envelopes.size())));
 
-        int zeroSized = 0;
+        int unsized = 0;
 
         for (auto* e : envelopes)
             if (e->getWidth() <= 0 || e->getHeight() <= 0)
-                ++zeroSized;
+                ++unsized;
 
-        check (zeroSized == 0, "every envelope has a size", juce::String (zeroSized));
+        check (unsized == 0, "every envelope has a size", juce::String (unsized));
 
         // The axis has to round-trip, or the handle and the value disagree.
         int badRoundTrip = 0;

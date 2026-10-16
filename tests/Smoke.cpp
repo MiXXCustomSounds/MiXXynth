@@ -1898,6 +1898,187 @@ int main()
         }
     }
 
+    // --- Drift and velocity (M6) ---
+    //
+    // Both were gaps rather than bugs. Velocity was applied as a bare `* velocity` on the
+    // voice output, so the sensitivity was permanently 100% and could not be reduced;
+    // drift did not exist at all.
+    {
+        // A plain sine carrier with no FM, so any difference between two renders is the
+        // pitch or the gain and nothing else.
+        auto sinePatch = []
+        {
+            MiXXFmVoice::VoiceParams p;
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                p.ratio[i] = 1.0f;
+                p.level[i] = 0.0f;
+                p.carrier[i] = (i == 0);
+            }
+
+            p.level[0] = 0.8f;
+            p.index = 0.0f;
+            p.master = 0.8f;
+            return p;
+        };
+
+        const auto sine = sinePatch();
+
+        auto maxDiff = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+        {
+            float d = 0.0f;
+
+            for (int ch = 0; ch < a.getNumChannels(); ++ch)
+                for (int i = 0; i < a.getNumSamples(); ++i)
+                    d = juce::jmax (d, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+
+            return d;
+        };
+
+        auto windowDiff = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b,
+                              int from, int len)
+        {
+            float d = 0.0f;
+
+            for (int ch = 0; ch < a.getNumChannels(); ++ch)
+                for (int i = from; i < from + len; ++i)
+                    d = juce::jmax (d, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+
+            return d;
+        };
+
+        // Drift advances once per BLOCK, so this has to render many blocks rather than one
+        // long one: a single renderRange call would advance the walk exactly once and the
+        // test would be measuring almost nothing.
+        constexpr int driftBlock = 512;
+        constexpr int driftBlocks = 200;
+
+        auto renderDrift = [&] (float amount, juce::uint32 seed)
+        {
+            MiXXFmVoice v;
+            v.setSampleRate (sr);
+            v.setDriftSeed (seed);
+            v.noteOn (69, 1.0f);
+
+            auto p = sine;
+            p.drift = amount;
+
+            juce::AudioBuffer<float> buf (2, driftBlock * driftBlocks);
+            buf.clear();
+
+            for (int b = 0; b < driftBlocks; ++b)
+                v.renderAdd (buf, b * driftBlock, driftBlock, p);
+
+            return buf;
+        };
+
+        const auto driftOff1 = renderDrift (0.0f, 1u);
+        const auto driftOff2 = renderDrift (0.0f, 987654321u);
+        const auto driftOn1  = renderDrift (1.0f, 1u);
+        const auto driftOn2  = renderDrift (1.0f, 987654321u);
+
+        // With drift off the seed must make no difference at all. This is what stops
+        // "drift at zero" from quietly being a small amount of drift.
+        ok = check (maxDiff (driftOff1, driftOff2) == 0.0f,
+                    "drift off: seed changes nothing", maxDiff (driftOff1, driftOff2)) && ok;
+
+        ok = check (maxDiff (driftOff1, driftOn1) > 0.01f,
+                    "drift moves the pitch", maxDiff (driftOff1, driftOn1)) && ok;
+
+        // Two voices with different seeds must wander differently. If they did not, a
+        // unison stack would drift as one voice - which is detune, not drift.
+        ok = check (maxDiff (driftOn1, driftOn2) > 0.01f,
+                    "drift is per voice, not per patch", maxDiff (driftOn1, driftOn2)) && ok;
+
+        // The one that matters most: it has to BUILD UP rather than appear instantly. A
+        // drift that started at full offset would pass every check above while being
+        // nothing more than a random fixed detune.
+        const int total = driftBlock * driftBlocks;
+        const int window = total / 8;
+        const float early = windowDiff (driftOff1, driftOn1, 0, window);
+        const float late = windowDiff (driftOff1, driftOn1, total - window, window);
+
+        ok = check (late > early * 3.0f, "drift builds up rather than jumping",
+                    static_cast<double> (late / juce::jmax (1.0e-9f, early))) && ok;
+
+        // --- velocity ---
+        auto renderVel = [&] (const MiXXFmVoice::VoiceParams& base, float vel)
+        {
+            MiXXFmVoice v;
+            v.setSampleRate (sr);
+            v.noteOn (69, vel);
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+            v.renderAdd (buf, 0, blockLen, base);
+            return buf;
+        };
+
+        auto rmsOfBuffer = [] (const juce::AudioBuffer<float>& b)
+        {
+            return rmsOf (b, static_cast<int> (sr * 0.1), static_cast<int> (sr * 0.4));
+        };
+
+        // velToLevel = 1 is exactly what the voice did before this control existed, so the
+        // default has to reproduce it - otherwise the change would have altered the
+        // loudness of every patch that ever used velocity.
+        auto levelFull = sine;
+        levelFull.velToLevel = 1.0f;
+
+        const double loudFull = rmsOfBuffer (renderVel (levelFull, 1.0f));
+        const double softFull = rmsOfBuffer (renderVel (levelFull, 0.25f));
+
+        ok = check (softFull < loudFull * 0.5, "velocity scales the level by default",
+                    softFull / juce::jmax (1.0e-12, loudFull)) && ok;
+
+        // ...and 0 removes the response entirely, which is what makes it a control rather
+        // than a constant.
+        auto levelNone = sine;
+        levelNone.velToLevel = 0.0f;
+
+        const double loudNone = rmsOfBuffer (renderVel (levelNone, 1.0f));
+        const double softNone = rmsOfBuffer (renderVel (levelNone, 0.25f));
+
+        ok = check (std::abs (softNone - loudNone) < 1.0e-6,
+                    "velToLevel 0 ignores velocity entirely",
+                    std::abs (softNone - loudNone)) && ok;
+
+        // velToIndex needs a patch with FM in it: with no modulation the index multiplies
+        // zero, so the control would look dead while being wired perfectly.
+        auto fmPatch = sine;
+        fmPatch.mod[0][1] = 0.8f;
+        fmPatch.level[1] = 0.8f;
+        fmPatch.carrier[1] = true;
+        fmPatch.carrier[0] = false;
+        fmPatch.index = 4.0f;
+
+        auto idxOn = fmPatch;
+        idxOn.velToLevel = 0.0f;
+        idxOn.velToIndex = 1.0f;
+
+        auto idxOff = fmPatch;
+        idxOff.velToLevel = 0.0f;
+        idxOff.velToIndex = 0.0f;
+
+        // At full velocity the index scale is exactly 1, so this must be a no-op. A sharp
+        // boundary like that is what catches an off-by-one in the scaling.
+        const double idxFull = rmsOfBuffer (renderVel (idxOn, 1.0f));
+        const double noIdxFull = rmsOfBuffer (renderVel (idxOff, 1.0f));
+
+        ok = check (std::abs (idxFull - noIdxFull) < 1.0e-6,
+                    "velToIndex is a no-op at full velocity",
+                    std::abs (idxFull - noIdxFull)) && ok;
+
+        // ...and it must do something at low velocity, or it is not wired up at all.
+        const double idxSoft = rmsOfBuffer (renderVel (idxOn, 0.25f));
+        const double noIdxSoft = rmsOfBuffer (renderVel (idxOff, 0.25f));
+
+        ok = check (std::abs (idxSoft - noIdxSoft) > 1.0e-5,
+                    "velToIndex changes the tone at low velocity",
+                    std::abs (idxSoft - noIdxSoft)) && ok;
+    }
+
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");
     return ok ? 0 : 1;
 }
