@@ -1444,6 +1444,15 @@ public:
 
         addChoice (p, "filterType", filterType);
 
+        // The VA's amplitude envelope. Same component the operator envelopes use, so the
+        // two cannot drift apart - and it is a real ADSR now rather than a fixed gate.
+        vaEnvEditor = new mixxynth::ui::AdsrEditor (ranged (p, "vaAttack"),
+                                                    ranged (p, "vaDecay"),
+                                                    ranged (p, "vaSustain"),
+                                                    ranged (p, "vaRelease"));
+        vaEnvOwned.add (vaEnvEditor);
+        addAndMakeVisible (vaEnvEditor);
+
         filterOn = addToggle (p, "filterOn", "Filter On");
 
         octave = new juce::Slider (juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft);
@@ -1530,13 +1539,18 @@ public:
         octaveLabel.setBounds (controls.removeFromLeft (56));
         octave->setBounds (controls.removeFromLeft (120).reduced (2, 0));
         controls.removeFromLeft (16);
-        wave.setBounds (controls.removeFromLeft (130).reduced (2, 0));
-        controls.removeFromLeft (16);
         filterType.setBounds (controls.removeFromLeft (130).reduced (2, 0));
         controls.removeFromLeft (16);
 
         if (filterOn != nullptr)
             filterOn->setBounds (controls.removeFromLeft (100).reduced (2, 0));
+
+        // The VA's amplitude envelope gets the rest of the page. It wants width far more
+        // than height, which is the same reason the operator envelope column is wider than
+        // a square.
+        if (vaEnvEditor != nullptr)
+            vaEnvEditor->setBounds (b.removeFromTop (juce::jmin (150, b.getHeight()))
+                                     .removeFromLeft (juce::jmax (260, b.getWidth() / 2)));
 
         b.removeFromTop (8);
         hint.setBounds (b.removeFromTop (20));
@@ -1608,12 +1622,18 @@ private:
     MiXXynthEditor& ed;
     juce::OwnedArray<ModKnob> owned;
     juce::Array<ModKnob*> knobs, knobs2;
-    juce::ComboBox wave, filterType;
+    juce::ComboBox filterType;
     juce::ToggleButton* filterOn = nullptr;
     juce::Slider* octave = nullptr;
     juce::Label octaveLabel;
     juce::Label hint;
     juce::OwnedArray<juce::ToggleButton> toggles;
+
+    // The VA's amplitude envelope, edited with the same component the operator envelopes
+    // use so the two look and behave alike. Not a ModTarget: it only ever controls the VA
+    // layer's own amplitude, so it is owned here rather than registered for modulation.
+    juce::OwnedArray<mixxynth::ui::AdsrEditor> vaEnvOwned;
+    mixxynth::ui::AdsrEditor* vaEnvEditor = nullptr;
 };
 
 // ---------------------------------------------------------------------------

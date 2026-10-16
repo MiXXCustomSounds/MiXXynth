@@ -218,6 +218,29 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "vaNoiseLevel", "VA Noise Level",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
+    // The VA's own envelope. It was a hardwired one-pole gate - fixed ~8 ms attack and
+    // ~50 ms release, sustain pinned at 1 - which made the VA's amplitude shape the one
+    // thing in the layer you could not touch, and the main reason it sounded abrupt
+    // rather than subtle next to the FM stack.
+    //
+    // The defaults reproduce the old gate closely enough that nothing changes by
+    // surprise: no decay, full sustain, and a short attack and release.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaAttack", "VA Attack",
+        juce::NormalisableRange<float> (0.0f, 2.0f, 0.001f, 0.4f), 0.008f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaDecay", "VA Decay",
+        juce::NormalisableRange<float> (0.0f, 4.0f, 0.001f, 0.4f), 0.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaSustain", "VA Sustain",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaRelease", "VA Release",
+        juce::NormalisableRange<float> (0.0f, 8.0f, 0.001f, 0.4f), 0.05f));
+
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "filterOn", "Filter On", true));
 
@@ -664,6 +687,10 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     vp.vaDetune     = getParam (apvts, "vaDetune");
     vp.vaSubLevel   = getParam (apvts, "vaSubLevel");
     vp.vaNoiseLevel = getParam (apvts, "vaNoiseLevel");
+    vp.vaAttack     = getParam (apvts, "vaAttack");
+    vp.vaDecay      = getParam (apvts, "vaDecay");
+    vp.vaSustain    = getParam (apvts, "vaSustain");
+    vp.vaRelease    = getParam (apvts, "vaRelease");
     vp.filterOn     = getParam (apvts, "filterOn") > 0.5f;
     vp.filterType   = static_cast<int> (getParam (apvts, "filterType"));
     vp.cutoff       = getParam (apvts, "filterCutoff");

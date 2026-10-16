@@ -267,10 +267,30 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             op.prevOut = op.curOut;
 
         // --- M3b: VA layer, ADDED to the FM stack ---
-        // The envelope runs whether or not VA is in use, so raising VA Level
-        // mid-note does not start with a silent ramp-in.
-        const float vaCoef = gate ? 0.0025f : 0.0004f; // ~8 ms attack, ~50 ms release
-        vaEnv += ((gate ? 1.0f : 0.0f) - vaEnv) * vaCoef;
+        // The VA's own ADSR, driven by the gate EDGE rather than followed as a one-pole
+        // average of it. That is what makes attack, decay, sustain and release real
+        // parameters instead of a fixed ~8 ms / ~50 ms shape with the sustain pinned.
+        //
+        // It runs whether or not the VA is in use, so raising VA Level mid-note does not
+        // start with a silent ramp-in.
+        if (gate != vaGateLast)
+        {
+            if (gate)
+            {
+                vaEnvState.stage = 1;   // attack
+                vaEnvState.env = 0.0f;
+            }
+            else
+            {
+                vaEnvState.releaseFrom = vaEnvState.env;
+                vaEnvState.stage = 4;   // release
+            }
+
+            vaGateLast = gate;
+        }
+
+        vaEnv = updateEnvelope (vaEnvState, p.vaAttack, p.vaDecay, p.vaSustain, p.vaRelease,
+                                sampleRate);
 
         float va = 0.0f;        // the morphed oscillator, scaled by the FM/VA blend
         float vaExtras = 0.0f;  // sub and noise, which carry their own levels

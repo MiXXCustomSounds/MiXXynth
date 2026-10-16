@@ -88,6 +88,14 @@ namespace
         std::set<juce::String> s { "algorithm", "vaOctave", "filterType", "filterOn",
                                    "mpeEnabled", "mpeMemberChannels" };
 
+        // The VA's amplitude envelope is edited by the graphical envelope, not a knob. It
+        // is deliberately not a modulation destination: it only ever controls the VA
+        // layer's own amplitude.
+        s.insert ("vaAttack");
+        s.insert ("vaDecay");
+        s.insert ("vaSustain");
+        s.insert ("vaRelease");
+
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
             s.insert ("carrier" + juce::String (i + 1));
 

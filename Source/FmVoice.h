@@ -57,6 +57,14 @@ public:
         float vaSubLevel  = 0.0f;    // square, one octave below
         float vaNoiseLevel = 0.0f;   // white noise
 
+        // The VA's own ADSR. It is driven through the same updateEnvelope the operators
+        // use, so the two cannot disagree about what a stage does. It was a hardwired
+        // one-pole gate before.
+        float vaAttack  = 0.008f;
+        float vaDecay   = 0.0f;
+        float vaSustain = 1.0f;
+        float vaRelease = 0.05f;
+
         bool  filterOn    = false;
         int   filterType  = 0;       // 0 LP, 1 HP, 2 BP
         float cutoff      = 12000.0f;
@@ -123,8 +131,13 @@ private:
     // M3b: VA oscillator and filter state (per voice).
     double vaPhase = 0.0;
     double vaSubPhase = 0.0;
-    // Gate-driven AR envelope for the VA oscillator. Without it the VA was an
-    // envelopeless tone that ran for as long as the voice existed.
+    // The VA's own ADSR state. It reuses the operator Op and updateEnvelope so the two
+    // cannot disagree about what a stage does; only the envelope fields are used.
+    //
+    // This replaced a one-pole gate follower, which had a fixed attack and release and no
+    // sustain control. Stage transitions are now driven by the gate edge instead.
+    Op vaEnvState;
+    bool vaGateLast = false;
     float vaEnv = 0.0f;
     juce::uint32 noiseState = 0x2545f491u;
     float svfIc1 = 0.0f;
