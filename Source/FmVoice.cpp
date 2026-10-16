@@ -2,33 +2,16 @@
 
 namespace
 {
-    constexpr double twoPi = 6.28318530717958647692;
-
+    // The only helper the voice needs from outside its own class.
+    //
+    // This namespace used to hold two more things, and both are gone. `polyBlep` corrected
+    // the saw/square discontinuities of the VA's old hand-rolled oscillators; the VA reads
+    // the same band-limited morph tables the operators read now, so it has nothing to
+    // correct. `twoPi` was left behind when those oscillators went, and was declared but
+    // never referenced.
     float midiNoteToFreq (int note)
     {
         return 440.0f * std::pow (2.0f, static_cast<float> (note - 69) / 12.0f);
-    }
-
-    // PolyBLEP correction: removes most of the aliasing from the saw/square
-    // discontinuities without a wavetable.
-    inline float polyBlep (double t, double dt)
-    {
-        if (dt <= 0.0)
-            return 0.0f;
-
-        if (t < dt)
-        {
-            const double x = t / dt;
-            return static_cast<float> (x + x - x * x - 1.0);
-        }
-
-        if (t > 1.0 - dt)
-        {
-            const double x = (t - 1.0) / dt;
-            return static_cast<float> (x * x + x + x + 1.0);
-        }
-
-        return 0.0f;
     }
 }
 
@@ -95,11 +78,11 @@ void MiXXFmVoice::reset()
     }
 }
 
-void MiXXFmVoice::noteOn (int noteNumber, float velocity, float phaseOffset01)
+void MiXXFmVoice::noteOn (int noteNumber, float vel, float phaseOffset01)
 {
     currentNote = noteNumber;
     frequency = midiNoteToFreq (noteNumber) * std::pow (2.0, static_cast<double> (detuneCents) / 1200.0);
-    this->velocity = juce::jlimit (0.0f, 1.0f, velocity);
+    velocity = juce::jlimit (0.0f, 1.0f, vel);
     gate = true;
     vaPhase = 0.0;
     vaSubPhase = 0.0;

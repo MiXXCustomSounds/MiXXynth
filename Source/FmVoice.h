@@ -6,14 +6,16 @@
 
 #include "OpWave.h"
 
-// M2a: mono 6-op FM voice driven by a routing matrix.
+// One 6-op FM voice with a routing matrix, a VA layer and a per-voice filter.
 //   mod[src][dst]  modulation depth (src modulates dst), 0..1
 //   carrier[op]    whether the op goes to the output
 //   feedback[op]   per-op self-feedback (smoothed, 1-sample delayed, DX-style)
 // Feed-forward edges (src index > dst index, as in every DX7 algorithm) are
 // evaluated with zero delay; any other edge falls back to a 1-sample delay,
 // which keeps arbitrary free-matrix routing stable.
-// Polyphony/unison land in M2b.
+//
+// This class is a single voice. Polyphony, unison, pan spread and voice stealing
+// live in VoiceManager, which owns a pool of these and calls renderAdd on each.
 class MiXXFmVoice
 {
 public:
@@ -34,7 +36,8 @@ public:
         float master   = 0.8f;
 
         // M4b: per-operator enable and waveform. `wave` is 0..1 sweeping
-        // sine -> triangle -> saw -> square (see OpWave.h).
+        // sine -> triangle -> saw -> square -> pulse 25% -> 12% -> 6%, so the top of
+        // the sweep is a pulse width control rather than a further shape (see OpWave.h).
         bool  opOn[numOps]   = { true, true, true, true, true, true };
         float opWave[numOps] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 
@@ -97,7 +100,7 @@ public:
     // them all, 1 starts anywhere in the cycle. All operators of a voice get the
     // SAME offset, so the FM relationships inside a voice are preserved and only
     // the voices differ from each other.
-    void noteOn (int noteNumber, float velocity, float phaseOffset01 = 0.0f);
+    void noteOn (int noteNumber, float vel, float phaseOffset01 = 0.0f);
     void noteOff (int noteNumber);
     void reset();
 

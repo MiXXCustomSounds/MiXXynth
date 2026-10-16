@@ -21,7 +21,7 @@ The interactive half — dragging every knob in the standalone — is at the bot
 | 12 | Clear empties its slot and leaves others alone | Right-click clear |
 | 13 | Depth ring reflects and clears with its slot | Visual feedback |
 | 14 | No visible control is left at zero bounds | Regression guard for the `setSize()` ordering bug |
-| 15 | Six tabs exist and each has content | Layout regression guard |
+| 15 | Four tabs exist and each has content | Layout regression guard |
 | 16 | The sidebar holds exactly one shape strip per LFO/ENV (`kNumShapes`) | Catches a strip silently failing to build |
 | 17 | Every strip is visible and at least 100px tall | The editors must be usable, not collapsed |
 | 18 | Every strip is sized (non-zero width) | Same zero-bounds guard as #14, for the sidebar |
@@ -29,7 +29,7 @@ The interactive half — dragging every knob in the standalone — is at the bot
 | 20 | `setModDepthFor` creates the pair, sets the amount, can go negative, and never duplicates a slot | Backs the draggable depth ring |
 | 21 | `removeModSlot` clears only its own pair | Per-source removal from the knob menu |
 | 22 | `VA Pulse Width` is a modulation destination | The page claims all six knobs are destinations |
-| 23 | A routing edit switches the algorithm to Free, the triggering edit survives, and the algorithm was copied into the matrix | The Matrix tab used to be inert (see `docs/MATRIX-AND-VA.md`) |
+| 23 | A routing edit switches the algorithm to Free, the triggering edit survives, and the algorithm was copied into the matrix | The routing view used to be inert (see `docs/MATRIX-AND-VA.md`) |
 | 24 | Loading a state does **not** force Free mode | A preset load must not look like 30 knob edits |
 
 ## Bugs found and fixed
@@ -105,12 +105,14 @@ onto the shapes in the sidebar.
 
 Run the standalone and confirm by ear/eye:
 
-- [ ] FM tab: algorithm combo changes the tone; each Op Ratio/Level/Fb/A/D/S/R knob
-      moves its own dial and audibly changes the sound
-- [ ] Matrix tab: each routing knob changes the timbre; carrier toggles add/remove
-      operators from the output
-- [ ] VA/Filt tab: VA Level blends the saw/square/sub/noise in; filter type, cutoff,
-      resonance and drive all respond
+- [ ] FM tab, Values view: each operator row's shape, ratio, level, feedback and
+      envelope cells move their own value and audibly change the sound; the shape
+      cell's label names the shape as you drag through the morph
+- [ ] FM tab, Routing view: each routing cell changes the timbre; the diagonal
+      toggles that operator into the output
+- [ ] FM tab, VA view: the shape cell sweeps the morph, Sub and Noise add to it, the
+      envelope draws and responds, and filter type, cutoff, resonance and drive all
+      respond
 - [ ] Voice tab: polyphony limits held notes; unison thickens and spreads
 - [ ] Mod tab: 32 slot rows, source/destination/depth all editable
 - [ ] Sidebar (any tab): all seven shape editors are visible and keep their position
@@ -128,11 +130,9 @@ Run the standalone and confirm by ear/eye:
       the value, and the modulation depth audibly follows
 - [ ] **Right-click a modulated knob** -> menu lists the source and its amount;
       "Clear all modulation" removes it
-- [ ] Matrix tab: the banner says which mode is in charge. Move a routing knob while
-      an algorithm is selected -> it switches to Free, keeps your edit, and audibly
-      reroutes. "Copy algorithm to matrix" seeds the grid.
-- [ ] VA/Filt tab: the readout under the controls reports the VA/FM balance and the
-      filter state. Moving Cutoff is audible straight away (the filter is on and
-      open by default).
+- [ ] FM tab, Routing view: move a routing cell while an algorithm is selected -> it
+      switches to Free, keeps your edit, and audibly reroutes
+- [ ] FM tab, VA view: moving Cutoff is audible once the FILT cell switches the filter
+      in; the cell itself shows whether the filter is engaged
 - [ ] No dial is clipped or reads an obviously wrong position
 - [ ] Save the project, reopen it, and confirm the shapes you drew came back

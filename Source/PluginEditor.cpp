@@ -120,9 +120,9 @@ public:
     ShapeStrip (MiXXynthEditor& owner, int shapeIndex)
         : ed (owner), index (shapeIndex)
     {
-        auto& proc = ed.processor();
-        const bool isLfo = proc.shapeIsLfo (index);
-        const int src = proc.shapeSourceIndex (index);
+        auto& p = ed.processor();
+        const bool isLfo = p.shapeIsLfo (index);
+        const int src = p.shapeSourceIndex (index);
 
         chip = std::make_unique<SourceChip> (mixxynth::modSourceNames()[src], src);
         addAndMakeVisible (*chip);
@@ -279,11 +279,11 @@ private:
 
     juce::String chipName() const
     {
-        const auto& proc = ed.processor();
+        const auto& p = ed.processor();
 
-        return proc.shapeIsLfo (index)
+        return p.shapeIsLfo (index)
                  ? "LFO " + juce::String (index + 1)
-                 : "Env " + juce::String (index - proc.getNumLfoModules() + 1);
+                 : "Env " + juce::String (index - p.getNumLfoModules() + 1);
     }
 
     // Reads every control back into the shape and publishes it.
@@ -1054,9 +1054,6 @@ public:
         // space on the right rather than re-centring.
         constexpr int valueCols = 6;
         constexpr int valueSquares = 8;   // the envelope counts as three
-        constexpr int routingCols = 7;
-
-        const int numCols = routing ? routingCols : valueCols;
 
         // Squares are sized by whichever constraint binds first: the room there is, or
         // the room the squares need. The values view is the wider of the two, so it is
@@ -1699,8 +1696,8 @@ public:
     public:
         Card (FxPage& o, int slotIndex) : owner (o), slot (slotIndex)
         {
-            auto& proc = o.ed.processor();
-            const auto state = proc.readFxSlot (slot);
+            auto& p = o.ed.processor();
+            const auto state = p.readFxSlot (slot);
             const auto desc = mixxynth::FxRack::descriptorFor (state.type);
             const juce::String prefix = "fx" + juce::String (slot + 1);
 
@@ -1720,7 +1717,7 @@ public:
             // nothing, so the chain's ends are visible.
             up.setEnabled (slot > 0);
             down.setEnabled (slot + 1 < mixxynth::kMaxFxSlots
-                               && ! proc.readFxSlot (slot + 1).isEmpty());
+                               && ! p.readFxSlot (slot + 1).isEmpty());
 
             up.onClick = [this] { owner.moveModule (slot, -1); };
             down.onClick = [this] { owner.moveModule (slot, 1); };
@@ -1734,15 +1731,15 @@ public:
             bypass.setTooltip ("Bypass this module");
 
             if (auto* b = dynamic_cast<juce::AudioParameterBool*> (
-                    proc.apvts.getParameter (prefix + "bypass")))
+                    p.apvts.getParameter (prefix + "bypass")))
                 bypassAttachment = std::make_unique<juce::ButtonParameterAttachment> (*b, bypass);
 
             addAndMakeVisible (bypass);
 
-            for (int p = 0; p < desc.numParams && p < mixxynth::kMaxFxParams; ++p)
+            for (int pi = 0; pi < desc.numParams && pi < mixxynth::kMaxFxParams; ++pi)
             {
-                const auto& info = desc.params[static_cast<size_t> (p)];
-                const juce::String id = prefix + "p" + juce::String (p + 1);
+                const auto& info = desc.params[static_cast<size_t> (pi)];
+                const juce::String id = prefix + "p" + juce::String (pi + 1);
 
                 if (info.isChoice)
                 {
@@ -1778,7 +1775,7 @@ public:
                     };
 
                     choiceBoxes.add (box);
-                    choiceParams.add (proc.apvts.getParameter (id));
+                    choiceParams.add (p.apvts.getParameter (id));
                     choiceCounts.add (info.choices.size());
 
                     addAndMakeVisible (*box);
@@ -1789,7 +1786,7 @@ public:
                 // Dest Off: the rack's generic params are not in the matrix's
                 // destination list, so these knobs are not modulation targets and
                 // a dropped chip is rejected with a flash rather than ignored.
-                auto* k = new ModKnob (info.name, proc.apvts.getParameter (id),
+                auto* k = new ModKnob (info.name, p.apvts.getParameter (id),
                                        mixxynth::dstOff, true);
                 owner.ed.wireModTarget (*k);
                 addAndMakeVisible (k);
@@ -2104,15 +2101,15 @@ public:
 
     void removeModule (int slot)
     {
-        auto& proc = ed.processor();
+        auto& p = ed.processor();
 
         // Compact rather than leaving a hole. The chain being dense is what makes
         // "add fills the first free slot" mean "append to the end", and what makes
         // the arrows a plain adjacent swap. A hole would silently break both.
         for (int s = slot; s < mixxynth::kMaxFxSlots - 1; ++s)
-            proc.writeFxSlot (s, proc.readFxSlot (s + 1));
+            p.writeFxSlot (s, p.readFxSlot (s + 1));
 
-        proc.writeFxSlot (mixxynth::kMaxFxSlots - 1, mixxynth::FxSlotState {});
+        p.writeFxSlot (mixxynth::kMaxFxSlots - 1, mixxynth::FxSlotState {});
 
         ed.setModStatus ("Module removed from slot " + juce::String (slot + 1));
 
@@ -2129,16 +2126,16 @@ public:
         if (target < 0 || target >= mixxynth::kMaxFxSlots)
             return;
 
-        auto& proc = ed.processor();
-        const auto here = proc.readFxSlot (slot);
+        auto& p = ed.processor();
+        const auto here = p.readFxSlot (slot);
 
         if (here.isEmpty())
             return;
 
-        const auto there = proc.readFxSlot (target);
+        const auto there = p.readFxSlot (target);
 
-        proc.writeFxSlot (slot, there);
-        proc.writeFxSlot (target, here);
+        p.writeFxSlot (slot, there);
+        p.writeFxSlot (target, here);
 
         ed.setModStatus (juce::String (mixxynth::FxRack::descriptorFor (here.type).name)
                            + (delta < 0 ? " moved earlier" : " moved later"));
@@ -2175,8 +2172,8 @@ public:
     // thread and this is called from a button click inside a card.
     void chooseFileFor (int slot)
     {
-        auto& proc = ed.processor();
-        const auto state = proc.readFxSlot (slot);
+        auto& p = ed.processor();
+        const auto state = p.readFxSlot (slot);
         const auto desc = mixxynth::FxRack::descriptorFor (state.type);
 
         if (! desc.hasFile)

@@ -95,8 +95,8 @@ void OpWaveTables::prepare (double sr)
     sineLut.resize (static_cast<size_t> (sineLutSize) + 1);
 
     for (int i = 0; i <= sineLutSize; ++i)
-        sineLut[static_cast<size_t> (i)] =
-            std::sin (kTwoPi * static_cast<double> (i) / static_cast<double> (sineLutSize));
+        sineLut[static_cast<size_t> (i)] = static_cast<float> (
+            std::sin (kTwoPi * static_cast<double> (i) / static_cast<double> (sineLutSize)));
 
     const double nyquist = sampleRate * 0.5;
 

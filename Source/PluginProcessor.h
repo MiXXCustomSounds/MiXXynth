@@ -7,12 +7,14 @@
 #include "ModMatrix.h"
 #include "Fx/FxRack.h"
 
-// M2b/M3a: polyphonic 6-op FM synth with per-voice modulation.
+// Polyphonic 6-op FM synth with per-voice modulation.
 // 32 simultaneous notes, unison stacks up to 16, 64-voice pool, and a 32-slot
 // drag-and-drop modulation matrix. The four LFOs and three modulation envelopes
 // are editable breakpoint shapes (see ModShape.h) edited in the sidebar, plus
 // 4 macros and velocity/mod-wheel/aftertouch/key-track/timbre.
-// VA/filter, FX tail, presets and randomize land in M3b/M4.
+//
+// The VA layer, the per-voice filter and the FX tail have all landed since this
+// comment was written. Presets and randomize are still outstanding.
 class MiXXynthProcessor : public juce::AudioProcessor
 {
 public:

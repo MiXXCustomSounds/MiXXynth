@@ -1,10 +1,13 @@
 # MiXXynth — M6: consolidation and depth
 
-Status: **planned, not started.** Supersedes the ordering of M5's remaining
-workstreams. M5 workstreams 1-3 (modulation UX, the WeirdVerb rename, convolution)
-are done; M5's *feature* workstreams (distortion, chorus, presets) are deferred
-until this is finished, because this is depth on what already exists rather than
-new modules.
+Status: **in progress.** Steps 1-3 and 6 are done, and the tab consolidation has
+landed: the routing matrix and the VA/filter are views of the FM tab now, and the
+editor is four tabs (FM, Voice, Mod, FX). Steps 4 (the live shape graphic) and 5
+(the live modulated fill) remain, along with the per-operator filters. Supersedes
+the ordering of M5's remaining workstreams. M5 workstreams 1-3 (modulation UX, the
+WeirdVerb rename, convolution) are done; M5's *feature* workstreams (distortion,
+chorus, presets) are deferred until this is finished, because this is depth on what
+already exists rather than new modules.
 
 ## Goal
 
@@ -221,8 +224,14 @@ Each step keeps the plugin buildable and the tests passing.
 
 ## Progress
 
-**Steps 1-3 and 6 complete.** 179 audit checks, 0 failures; pluginval strictness 5
-SUCCESS; smoke OK.
+**Steps 1-3 and 6 complete, plus the tab consolidation.** 180 audit checks, 0
+failures; pluginval strictness 5 SUCCESS; smoke OK; the build is warning-clean.
+
+- **Consolidation**: the VA/Filt tab is gone. The FM tab has three views -
+  `Values | Routing | VA` - and `ViewSwitch` takes a list of segment names rather
+  than a hardcoded pair, because the tab has more than two readings now. The VA view
+  holds the oscillator, its envelope and the per-voice filter; the filter's mode
+  stays a combo box because a cell holds a value, not a list.
 
 - **Step 1** (`fabaa53`): `SquareCell` and `ModTarget` exist, build and are tested.
 - **Step 2**: `ModKnob` derives from `ModTarget`, and its duplicate drag-drop, menu
