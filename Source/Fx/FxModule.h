@@ -45,6 +45,7 @@ namespace mixxynth
         fxPhaser,
         fxCompressor,
         fxLimiter,
+        fxMultiband,
         kNumFxTypes
     };
 

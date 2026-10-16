@@ -15,6 +15,7 @@
 #include "../Source/Limiter.h"
 #include "../Source/Fx/CompressorFx.h"
 #include "../Source/Fx/LimiterFx.h"
+#include "../Source/Fx/MultibandFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -3728,6 +3729,127 @@ int main()
 
             ok = check (difference > 0.01, "soft clip changes the shape of the peaks",
                         difference) && ok;
+        }
+    }
+
+    // --- 43. Multiband: the two halves pull in opposite directions ---
+    //
+    // That is the entire character of an OTT-style compressor, so it is what gets checked:
+    // quiet material is LIFTED, loud material is PUSHED DOWN, and the middle is left alone.
+    // A module where both controls did the same thing would still pass a "does it compress"
+    // test and would not be this effect at all.
+    {
+        using Mb = mixxynth::MultibandFx;
+
+        const float quiet = Mb::bandGainDb (-60.0f, 1.0f, 1.0f);
+        const float middle = Mb::bandGainDb (-24.0f, 1.0f, 1.0f);
+        const float loud = Mb::bandGainDb (0.0f, 1.0f, 1.0f);
+
+        ok = check (quiet > 1.0f, "upward compression lifts quiet material", quiet) && ok;
+
+        ok = check (loud < -1.0f, "downward compression pushes loud material down", loud) && ok;
+
+        ok = check (quiet > 0.0f && loud < 0.0f && middle == 0.0f,
+                    "the two directions are opposite, with a gap between",
+                    quiet - loud) && ok;
+
+        // Upward must be capped: uncapped it would lift a noise floor to full scale, which
+        // is not a musical result.
+        {
+            const float floorGain = Mb::bandGainDb (-120.0f, 1.0f, 1.0f);
+
+            ok = check (floorGain <= 30.0f + 1.0e-4f,
+                        "upward compression is capped", floorGain) && ok;
+        }
+
+        // And with both amounts at zero it does nothing at all, at any level.
+        {
+            const float a = Mb::bandGainDb (-60.0f, 0.0f, 0.0f);
+            const float b = Mb::bandGainDb (0.0f, 0.0f, 0.0f);
+
+            ok = check (std::abs (a) < 1.0e-6f && std::abs (b) < 1.0e-6f,
+                        "both amounts at zero is no gain change at any level", a + b) && ok;
+        }
+
+        // Depth at zero is dry, so the module can be dialled out completely.
+        {
+            mixxynth::MultibandFx mb;
+            mb.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Mb::pSplitLow] = 0.3f;
+            p[Mb::pSplitHigh] = 0.55f;
+            p[Mb::pDownward] = 1.0f;
+            p[Mb::pUpward] = 1.0f;
+            p[Mb::pTime] = 0.4f;
+            p[Mb::pDepth] = 0.0f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+            juce::AudioBuffer<float> before (2, 512);
+
+            for (int i = 0; i < 512; ++i)
+            {
+                const float v = 0.5f * std::sin (0.07f * static_cast<float> (i));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+                before.setSample (0, i, v);
+                before.setSample (1, i, v);
+            }
+
+            mb.process (buf, p);
+
+            double worst = 0.0;
+
+            for (int i = 0; i < 512; ++i)
+                worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                       - before.getSample (0, i)));
+
+            ok = check (worst < 1.0e-6, "the Multiband module's Depth at zero is dry",
+                        worst) && ok;
+        }
+
+        // At full depth, on a signal that is loud in one band and quiet in another, it must
+        // do something - and the two bands must not get the same gain, or the crossover is
+        // not splitting anything.
+        {
+            mixxynth::MultibandFx mb;
+            mb.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Mb::pSplitLow] = 0.3f;    // about 200 Hz
+            p[Mb::pSplitHigh] = 0.55f;  // about 3 kHz
+            p[Mb::pDownward] = 1.0f;
+            p[Mb::pUpward] = 1.0f;
+            p[Mb::pTime] = 0.2f;
+            p[Mb::pDepth] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+
+            // A loud low tone with a very quiet high one, so the two bands see opposite
+            // situations and must be treated differently.
+            for (int b = 0; b < 40; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.6f * std::sin (0.02f * static_cast<float> (i))
+                                      + 0.0005f * std::sin (1.1f * static_cast<float> (i));
+                    buf.setSample (0, i, v);
+                    buf.setSample (1, i, v);
+                }
+
+                mb.process (buf, p);
+            }
+
+            const float lowBand = mb.getBandGainDb (0);
+            const float highBand = mb.getBandGainDb (2);
+
+            // The bands must be treated DIFFERENTLY, which is what the crossover is for. The
+            // direction is deliberately not asserted: a 2nd-order split has only 12 dB/oct of
+            // separation, so a loud low tone leaks into the high band well above a quiet high
+            // tone's own level, and which band ends up compressed is a property of the test
+            // signal rather than of the module.
+            ok = check (std::abs (lowBand - highBand) > 0.5,
+                        "the bands get different treatment", lowBand - highBand) && ok;
         }
     }
 

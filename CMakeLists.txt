@@ -91,6 +91,8 @@ target_sources(MiXXynth PRIVATE
     Source/Fx/CompressorFx.h
     Source/Fx/LimiterFx.cpp
     Source/Fx/LimiterFx.h
+    Source/Fx/MultibandFx.cpp
+    Source/Fx/MultibandFx.h
     Source/Algorithms.h
 )
 
@@ -138,6 +140,7 @@ add_executable(MiXXynthSmoke
     Source/Fx/PhaserFx.cpp
     Source/Fx/CompressorFx.cpp
     Source/Fx/LimiterFx.cpp
+    Source/Fx/MultibandFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -190,6 +193,7 @@ add_executable(MiXXynthEditorAudit
     Source/Fx/PhaserFx.cpp
     Source/Fx/CompressorFx.cpp
     Source/Fx/LimiterFx.cpp
+    Source/Fx/MultibandFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils
