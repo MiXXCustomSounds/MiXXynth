@@ -160,7 +160,6 @@ private:
     class SourceChip;
     class ShapeStrip;
     class FmPage;
-    class ModPage;
     class FxPage;
 
     MiXXynthProcessor& proc;
@@ -196,7 +195,6 @@ private:
     std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
     std::unique_ptr<mixxynth::ui::WheelComponent> pitchWheel, modWheel;
     std::unique_ptr<FmPage> fmPage;
-    std::unique_ptr<ModPage> modPage;
     std::unique_ptr<FxPage> fxPage;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MiXXynthEditor)

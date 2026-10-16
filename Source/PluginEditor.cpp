@@ -588,7 +588,164 @@ namespace
     };
 }
 
-// FM page: algorithm + FM index + per-op ratio/level/feedback/ADSR
+// ---------------------------------------------------------------------------
+// One modulation slot: source, destination, bipolar depth, clear
+// ---------------------------------------------------------------------------
+namespace
+{
+    class SlotRow : public juce::Component
+    {
+    public:
+        SlotRow (MiXXynthProcessor& p, int index)
+        {
+            const juce::String n = juce::String (index + 1);
+
+            srcParam = choice (p, "mod" + n + "src");
+
+            if (srcParam != nullptr)
+            {
+                for (int i = 0; i < srcParam->choices.size(); ++i)
+                    src.addItem (srcParam->choices[i], i + 1);
+
+                src.setSelectedId (srcParam->getIndex() + 1, juce::dontSendNotification);
+                src.onChange = [this]
+                {
+                    if (srcParam == nullptr)
+                        return;
+
+                    srcParam->beginChangeGesture();
+                    srcParam->setValueNotifyingHost (
+                        srcParam->convertTo0to1 (static_cast<float> (src.getSelectedId() - 1)));
+                    srcParam->endChangeGesture();
+                };
+            }
+
+            dstParam = choice (p, "mod" + n + "dst");
+
+            if (dstParam != nullptr)
+            {
+                for (int i = 0; i < dstParam->choices.size(); ++i)
+                    dst.addItem (dstParam->choices[i], i + 1);
+
+                dst.setSelectedId (dstParam->getIndex() + 1, juce::dontSendNotification);
+                dst.onChange = [this]
+                {
+                    if (dstParam == nullptr)
+                        return;
+
+                    dstParam->beginChangeGesture();
+                    dstParam->setValueNotifyingHost (
+                        dstParam->convertTo0to1 (static_cast<float> (dst.getSelectedId() - 1)));
+                    dstParam->endChangeGesture();
+                };
+            }
+
+            auto* depthParam = ranged (p, "mod" + n + "depth");
+            depth = new ModKnob ("Depth", depthParam, mixxynth::dstOff, true);
+            addAndMakeVisible (depth);
+
+            clear.setButtonText ("x");
+            clear.onClick = [this, &p, n]
+            {
+                if (auto* s = choice (p, "mod" + n + "src"))
+                {
+                    s->beginChangeGesture();
+                    s->setValueNotifyingHost (0.0f);
+                    s->endChangeGesture();
+                    src.setSelectedId (1, juce::dontSendNotification);
+                }
+
+                if (auto* d = choice (p, "mod" + n + "dst"))
+                {
+                    d->beginChangeGesture();
+                    d->setValueNotifyingHost (0.0f);
+                    d->endChangeGesture();
+                    dst.setSelectedId (1, juce::dontSendNotification);
+                }
+
+                if (onChanged != nullptr)
+                    onChanged();
+            };
+
+            addAndMakeVisible (label);
+            label.setText ("Slot " + n, juce::dontSendNotification);
+            addAndMakeVisible (src);
+            addAndMakeVisible (dst);
+            addAndMakeVisible (clear);
+        }
+
+        // Re-reads the three parameters this row drives.
+        //
+        // The combos are bound by hand in the constructor, so without this a slot
+        // assigned by DRAGGING A CHIP ONTO A KNOB - which writes exactly these
+        // parameters - leaves the row still showing Off. That was the whole of the
+        // "drag and drop does not sync with the modulation matrix" bug: the
+        // parameters were always correct, and this tab simply never looked again.
+        //
+        // Guarded so it cannot fight the user: an open combo popup or a knob being
+        // dragged is left alone, and the timer picks it up on the next tick.
+        void poll()
+        {
+            if (srcParam != nullptr && ! src.isPopupActive())
+            {
+                const int id = srcParam->getIndex() + 1;
+
+                if (src.getSelectedId() != id)
+                    src.setSelectedId (id, juce::dontSendNotification);
+            }
+
+            if (dstParam != nullptr && ! dst.isPopupActive())
+            {
+                const int id = dstParam->getIndex() + 1;
+
+                if (dst.getSelectedId() != id)
+                    dst.setSelectedId (id, juce::dontSendNotification);
+            }
+
+            if (depth != nullptr && ! depth->isAdjusting())
+                depth->refreshFromParam();
+        }
+
+        // For the audit: what this row is actually SHOWING. The bug this exists to
+        // catch was invisible in the parameters and visible only here.
+        juce::String debugDump() const
+        {
+            juce::String s;
+            s << "srcId=" << src.getSelectedId()
+              << " srcText=" << src.getText()
+              << " dstId=" << dst.getSelectedId()
+              << " dstText=" << dst.getText();
+
+            return s;
+        }
+
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced (2);
+            label.setBounds (b.removeFromLeft (52));
+            src.setBounds (b.removeFromLeft (110).reduced (2));
+            dst.setBounds (b.removeFromLeft (150).reduced (2));
+            depth->setBounds (b.removeFromLeft (72));
+            clear.setBounds (b.removeFromLeft (26).reduced (2, 6));
+        }
+
+        std::function<void()> onChanged;
+
+        ModKnob* getDepthKnob() const { return depth; }
+
+    private:
+        juce::Label label;
+        juce::ComboBox src, dst;
+        juce::AudioParameterChoice* srcParam = nullptr;
+        juce::AudioParameterChoice* dstParam = nullptr;
+        ModKnob* depth = nullptr;
+        juce::TextButton clear;
+    };
+}
+
+// ---------------------------------------------------------------------------
+// FM page: algorithm + FM index + per-op ratio/level/feedback/ADSR, the VA
+// panel, the envelope section, and the modulation matrix
 // ---------------------------------------------------------------------------
 // A combo font small enough that "Low Pass" fits one square.
 //
@@ -799,6 +956,23 @@ public:
 
             addRouteButtons (ranged (p, "op" + n + "fltRoute"), i);
         }
+
+        // ---- the modulation matrix ----
+        // All thirty-two slots, built up front. A slot's controls only exist if it has
+        // parameters, which it always does - they are a fixed pool - so unlike the FX rack
+        // there is nothing to build lazily here.
+        for (int n = 0; n < mixxynth::kNumModSlots; ++n)
+        {
+            auto* row = new SlotRow (p, n);
+            row->onChanged = [this] { ed.refreshModRings(); };
+            modContent.addAndMakeVisible (row);
+            modRows.add (row);
+            ed.modTargets.push_back (row->getDepthKnob());
+        }
+
+        modViewport.setViewedComponent (&modContent, false);
+        modViewport.setScrollBarsShown (true, false);
+        addChildComponent (modViewport);
 
         // ---- the routing view ----
         // The header row's first cell names the row axis, because this grid reads as
@@ -1360,10 +1534,36 @@ public:
             adsrPages.setBounds (sectionCell (0, 0, 4).reduced (0, 2));
 
             // Page one's envelopes are three columns wide, like the filter page's envelope, so
-            // the two pages' envelopes line up with each other. The rest of the section's width
-            // is deliberately left for something else rather than stretched to fill.
+            // the two pages' envelopes line up with each other.
             for (int i = 0; i < adsrEditors.size(); ++i)
                 adsrEditors[i]->setBounds (sectionCell (i + 1, 0, 3).reduced (1));
+
+            // The modulation matrix takes the columns the volume envelopes leave, across all
+            // six operator rows - so the slots are on screen while you work on the
+            // oscillator, which is when you actually want them.
+            //
+            // A viewport rather than a grid of rows: thirty-two slots at this height would
+            // need two columns too narrow to read a destination name in, or rows half the
+            // height they are. Scrolling shows about a dozen at a time, which is more than
+            // most patches use.
+            {
+                const int modW = (adsrSquares - 3) * sectionCol + (adsrSquares - 4) * gap;
+
+                modViewport.setBounds (adsrX + 3 * (sectionCol + gap),
+                                       originY + (square + gap),
+                                       modW,
+                                       6 * square + 5 * gap);
+
+                // The rows are laid out inside the scrolled content, sized to the viewport so
+                // they use its full width rather than a fixed width of their own.
+                modContent.setSize (juce::jmax (320, modViewport.getMaximumVisibleWidth()),
+                                    mixxynth::kNumModSlots * modRowHeight);
+
+                auto area = modContent.getLocalBounds();
+
+                for (auto* row : modRows)
+                    row->setBounds (area.removeFromTop (modRowHeight));
+            }
 
             // Page two, in reading order: the filter's envelope, then what the filter is, then
             // where it goes.
@@ -1629,6 +1829,10 @@ private:
 
         for (auto* b : routeButtons)
             b->setVisible (! volume);
+
+        // The matrix shares the volume page: it takes the columns that page's envelopes
+        // leave, and the filter page needs that space for its own controls.
+        modViewport.setVisible (volume);
     }
 
     // Shows one view's contents and hides the others'. The operator cells and the toolbar
@@ -1709,6 +1913,23 @@ public:
 
     int getAdsrPage() const { return adsrPages.getSelected(); }
 
+    // The modulation matrix's rows are bound by hand, so they need an explicit refresh.
+    // Without this a slot assigned by dragging a chip onto a knob leaves the row still showing
+    // Off - the parameters were always correct, the row just never looked again.
+    void pollModRows()
+    {
+        for (auto* row : modRows)
+            row->poll();
+    }
+
+    juce::String modDebugDump (int slot) const
+    {
+        if (slot < 0 || slot >= modRows.size())
+            return "out of range";
+
+        return modRows[slot]->debugDump();
+    }
+
 private:
 
     MiXXynthEditor& ed;
@@ -1716,6 +1937,10 @@ private:
     // Declared before the controls that use it: members are destroyed in reverse order, so a
     // look and feel has to come first to outlive every combo pointing at it.
     CompactComboLookAndFeel compactComboLook;
+
+    // The modulation matrix's row height. The same as the Mod tab's used to be, so a slot
+    // reads the same way it always did.
+    static constexpr int modRowHeight = 26;
 
     DiceButton diceButton;
     ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing" } };
@@ -1747,6 +1972,15 @@ private:
     // Three stacked buttons per operator, sharing a radio group so they behave as one choice
     // rather than as three switches.
     juce::OwnedArray<juce::TextButton> routeButtons;
+
+    // ---- the modulation matrix, in the envelope section ----------------------
+    // It lives here rather than on a tab of its own so the slots are visible while you work
+    // on the oscillator - which is when you actually want to see them. It shares the envelope
+    // section's page switch, so it is on the volume page and the filter page has the section
+    // to itself.
+    juce::Viewport modViewport;
+    juce::Component modContent;
+    juce::OwnedArray<SlotRow> modRows;
 
     // ---- the routing view -------------------------------------------------
     // One cell per ordered operator pair, so the grid is 6x6 with no holes: the 30
@@ -1790,245 +2024,6 @@ private:
     juce::OwnedArray<SquareCell> ownedCells;
     juce::Array<SquareCell*> cells;
     juce::OwnedArray<OperatorCell> opOnToggles;
-};
-
-// ---------------------------------------------------------------------------
-// One modulation slot: source, destination, bipolar depth, clear
-// ---------------------------------------------------------------------------
-namespace
-{
-    class SlotRow : public juce::Component
-    {
-    public:
-        SlotRow (MiXXynthProcessor& p, int index)
-        {
-            const juce::String n = juce::String (index + 1);
-
-            srcParam = choice (p, "mod" + n + "src");
-
-            if (srcParam != nullptr)
-            {
-                for (int i = 0; i < srcParam->choices.size(); ++i)
-                    src.addItem (srcParam->choices[i], i + 1);
-
-                src.setSelectedId (srcParam->getIndex() + 1, juce::dontSendNotification);
-                src.onChange = [this]
-                {
-                    if (srcParam == nullptr)
-                        return;
-
-                    srcParam->beginChangeGesture();
-                    srcParam->setValueNotifyingHost (
-                        srcParam->convertTo0to1 (static_cast<float> (src.getSelectedId() - 1)));
-                    srcParam->endChangeGesture();
-                };
-            }
-
-            dstParam = choice (p, "mod" + n + "dst");
-
-            if (dstParam != nullptr)
-            {
-                for (int i = 0; i < dstParam->choices.size(); ++i)
-                    dst.addItem (dstParam->choices[i], i + 1);
-
-                dst.setSelectedId (dstParam->getIndex() + 1, juce::dontSendNotification);
-                dst.onChange = [this]
-                {
-                    if (dstParam == nullptr)
-                        return;
-
-                    dstParam->beginChangeGesture();
-                    dstParam->setValueNotifyingHost (
-                        dstParam->convertTo0to1 (static_cast<float> (dst.getSelectedId() - 1)));
-                    dstParam->endChangeGesture();
-                };
-            }
-
-            auto* depthParam = ranged (p, "mod" + n + "depth");
-            depth = new ModKnob ("Depth", depthParam, mixxynth::dstOff, true);
-            addAndMakeVisible (depth);
-
-            clear.setButtonText ("x");
-            clear.onClick = [this, &p, n]
-            {
-                if (auto* s = choice (p, "mod" + n + "src"))
-                {
-                    s->beginChangeGesture();
-                    s->setValueNotifyingHost (0.0f);
-                    s->endChangeGesture();
-                    src.setSelectedId (1, juce::dontSendNotification);
-                }
-
-                if (auto* d = choice (p, "mod" + n + "dst"))
-                {
-                    d->beginChangeGesture();
-                    d->setValueNotifyingHost (0.0f);
-                    d->endChangeGesture();
-                    dst.setSelectedId (1, juce::dontSendNotification);
-                }
-
-                if (onChanged != nullptr)
-                    onChanged();
-            };
-
-            addAndMakeVisible (label);
-            label.setText ("Slot " + n, juce::dontSendNotification);
-            addAndMakeVisible (src);
-            addAndMakeVisible (dst);
-            addAndMakeVisible (clear);
-        }
-
-        // Re-reads the three parameters this row drives.
-        //
-        // The combos are bound by hand in the constructor, so without this a slot
-        // assigned by DRAGGING A CHIP ONTO A KNOB - which writes exactly these
-        // parameters - leaves the row still showing Off. That was the whole of the
-        // "drag and drop does not sync with the modulation matrix" bug: the
-        // parameters were always correct, and this tab simply never looked again.
-        //
-        // Guarded so it cannot fight the user: an open combo popup or a knob being
-        // dragged is left alone, and the timer picks it up on the next tick.
-        void poll()
-        {
-            if (srcParam != nullptr && ! src.isPopupActive())
-            {
-                const int id = srcParam->getIndex() + 1;
-
-                if (src.getSelectedId() != id)
-                    src.setSelectedId (id, juce::dontSendNotification);
-            }
-
-            if (dstParam != nullptr && ! dst.isPopupActive())
-            {
-                const int id = dstParam->getIndex() + 1;
-
-                if (dst.getSelectedId() != id)
-                    dst.setSelectedId (id, juce::dontSendNotification);
-            }
-
-            if (depth != nullptr && ! depth->isAdjusting())
-                depth->refreshFromParam();
-        }
-
-        // For the audit: what this row is actually SHOWING. The bug this exists to
-        // catch was invisible in the parameters and visible only here.
-        juce::String debugDump() const
-        {
-            juce::String s;
-            s << "srcId=" << src.getSelectedId()
-              << " srcText=" << src.getText()
-              << " dstId=" << dst.getSelectedId()
-              << " dstText=" << dst.getText();
-
-            return s;
-        }
-
-        void resized() override
-        {
-            auto b = getLocalBounds().reduced (2);
-            label.setBounds (b.removeFromLeft (52));
-            src.setBounds (b.removeFromLeft (110).reduced (2));
-            dst.setBounds (b.removeFromLeft (150).reduced (2));
-            depth->setBounds (b.removeFromLeft (72));
-            clear.setBounds (b.removeFromLeft (26).reduced (2, 6));
-        }
-
-        std::function<void()> onChanged;
-
-        ModKnob* getDepthKnob() const { return depth; }
-
-    private:
-        juce::Label label;
-        juce::ComboBox src, dst;
-        juce::AudioParameterChoice* srcParam = nullptr;
-        juce::AudioParameterChoice* dstParam = nullptr;
-        ModKnob* depth = nullptr;
-        juce::TextButton clear;
-    };
-}
-
-// ---------------------------------------------------------------------------
-// Mod page: the 32 matrix slot rows. The LFO and envelope shapes are edited in
-// the always-visible sidebar, not here.
-// ---------------------------------------------------------------------------
-class MiXXynthEditor::ModPage : public juce::Component
-{
-public:
-    explicit ModPage (MiXXynthEditor& e) : ed (e)
-    {
-        auto& p = e.processor();
-
-        for (int n = 0; n < mixxynth::kNumModSlots; ++n)
-        {
-            auto* row = new SlotRow (p, n);
-            row->onChanged = [this] { ed.refreshModRings(); };
-            content.addAndMakeVisible (row);
-            rows.add (row);
-            ed.modTargets.push_back (row->getDepthKnob());
-        }
-
-        content.setSize (420, mixxynth::kNumModSlots * rowHeight);
-        viewport.setViewedComponent (&content, false);
-        viewport.setScrollBarsShown (true, false);
-        addAndMakeVisible (viewport);
-
-    }
-
-    // The rows are bound by hand, so they need an explicit refresh. Without this a
-    // slot assigned by dragging a chip onto a knob leaves this tab still showing
-    // Off, which is exactly what it used to do - the parameters were always
-    // correct, the tab just never looked again.
-    void poll()
-    {
-        for (auto* row : rows)
-            row->poll();
-    }
-
-    // For the audit.
-    juce::String debugDump (int slot) const
-    {
-        if (slot < 0 || slot >= rows.size())
-            return "out of range";
-
-        return rows[slot]->debugDump();
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.setColour (juce::Colour (0xff8b98a5));
-        g.setFont (11.5f);
-        g.drawFittedText ("32 slots. Drag a source onto any knob - use the chip on any shape in the left sidebar, "
-                          "or a performance chip - or set source and destination here. Right-click a knob to clear "
-                          "its modulation. The four LFOs and three envelopes are drawn and edited in the sidebar, "
-                          "and stay visible on every tab.",
-                          getLocalBounds().removeFromTop (46), juce::Justification::centredLeft, 3);
-    }
-
-    void resized() override
-    {
-        auto b = getLocalBounds().reduced (8);
-        b.removeFromTop (46);
-        viewport.setBounds (b);
-
-        // The rows were created and added but never given bounds, so the entire
-        // tab rendered empty. Lay them out inside the scrolled content, sizing
-        // the content to the viewport so the rows use the full width.
-        content.setSize (juce::jmax (320, viewport.getMaximumVisibleWidth()),
-                         mixxynth::kNumModSlots * rowHeight);
-
-        auto contentArea = content.getLocalBounds();
-
-        for (auto* row : rows)
-            row->setBounds (contentArea.removeFromTop (rowHeight));
-    }
-
-private:
-    static constexpr int rowHeight = 26;
-
-    MiXXynthEditor& ed;
-    juce::Viewport viewport;
-    juce::Component content;
-    juce::OwnedArray<SlotRow> rows;
 };
 
 // ---------------------------------------------------------------------------
@@ -2792,16 +2787,14 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     pitchWheel->onValueChanged = [this] (float v) { proc.setPitchBendFromUI (v); };
     modWheel->onValueChanged = [this] (float v) { proc.setModWheelFromUI (v); };
 
-    // The FM routing matrix is a second view of the FM grid now rather than a tab of
-    // its own, so the FM page is the only thing that has to be built for it. The voice
-    // section is not a page at all any more - it lives in the sidebar.
+    // The FM routing matrix is a second view of the FM grid, and the modulation matrix is a
+    // section of it, so the FM page is the only thing that has to be built for either. The
+    // voice section is not a page at all - it lives in the sidebar.
     fmPage = std::make_unique<FmPage> (*this);
-    modPage = std::make_unique<ModPage> (*this);
     fxPage = std::make_unique<FxPage> (*this);
 
     tabs.setOutline (0);
     tabs.addTab ("FM", juce::Colour (0xff14181d), fmPage.get(), false);
-    tabs.addTab ("Mod", juce::Colour (0xff14181d), modPage.get(), false);
     tabs.addTab ("FX", juce::Colour (0xff14181d), fxPage.get(), false);
     addAndMakeVisible (tabs);
 
@@ -3128,7 +3121,7 @@ juce::String MiXXynthEditor::fxDebug() const
 
 juce::String MiXXynthEditor::modDebug (int slot) const
 {
-    return modPage != nullptr ? modPage->debugDump (slot) : juce::String ("no page");
+    return fmPage != nullptr ? fmPage->modDebugDump (slot) : juce::String ("no page");
 }
 
 void MiXXynthEditor::pushModulatedValues()
@@ -3181,10 +3174,10 @@ void MiXXynthEditor::runTabPolls()
     if (fxPage != nullptr)
         fxPage->poll();
 
-    // The Mod tab's rows are hand-bound, so they need polling too - otherwise a
-    // modulation slot created by dragging a chip onto a knob never shows up here.
-    if (modPage != nullptr)
-        modPage->poll();
+    // The modulation matrix's rows are hand-bound, so they need polling too - otherwise a
+    // slot created by dragging a chip onto a knob never shows up in the list.
+    if (fmPage != nullptr)
+        fmPage->pollModRows();
 }
 
 void MiXXynthEditor::rollFmDice()
