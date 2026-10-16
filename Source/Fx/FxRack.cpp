@@ -10,6 +10,7 @@
 #include "CompressorFx.h"
 #include "LimiterFx.h"
 #include "MultibandFx.h"
+#include "EqFx.h"
 
 namespace mixxynth
 {
@@ -28,6 +29,7 @@ namespace mixxynth
             case fxCompressor:  return "Compressor";
             case fxLimiter:     return "Limiter";
             case fxMultiband:   return "Multiband";
+            case fxGraphicEq:   return "Graphic EQ";
             default:            break;
         }
 
@@ -48,6 +50,7 @@ namespace mixxynth
             case fxCompressor:  return CompressorFx::descriptor();
             case fxLimiter:     return LimiterFx::descriptor();
             case fxMultiband:   return MultibandFx::descriptor();
+            case fxGraphicEq:   return EqFx::descriptor();
             default:            break;
         }
 
@@ -91,6 +94,7 @@ namespace mixxynth
                 case fxCompressor:  module = std::make_unique<CompressorFx>(); break;
                 case fxLimiter:     module = std::make_unique<LimiterFx>(); break;
                 case fxMultiband:   module = std::make_unique<MultibandFx>(); break;
+                case fxGraphicEq:   module = std::make_unique<EqFx>(); break;
                 default:            return nullptr;
             }
 

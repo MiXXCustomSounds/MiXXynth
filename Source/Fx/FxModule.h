@@ -46,6 +46,7 @@ namespace mixxynth
         fxCompressor,
         fxLimiter,
         fxMultiband,
+        fxGraphicEq,
         kNumFxTypes
     };
 
@@ -77,6 +78,19 @@ namespace mixxynth
         bool hasFile = false;
         const char* fileLabel = "File";
         const char* fileFilter = "*";
+
+        // A module with something to DRAW declares it here, and the card reserves space for
+        // a graph above the knobs.
+        //
+        // A function pointer rather than a virtual on the module, because the card draws from
+        // the PARAMETER VALUES and never touches the audio-side instance - the rack owns
+        // those, and reaching into them from the UI would be a lifetime problem for no gain.
+        // The signature is (normalised params, frequency in Hz, sample rate) to dB.
+        float (*drawGraph) (const float* params, float hz, double sampleRate) = nullptr;
+        const char* graphLabel = "";
+
+        // How tall the graph area is, when there is one.
+        static constexpr int graphHeight = 92;
     };
 
     // Everything a slot holds, so reordering can permute whole slots rather than

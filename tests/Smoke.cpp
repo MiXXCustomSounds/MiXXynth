@@ -16,6 +16,7 @@
 #include "../Source/Fx/CompressorFx.h"
 #include "../Source/Fx/LimiterFx.h"
 #include "../Source/Fx/MultibandFx.h"
+#include "../Source/Fx/EqFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -3850,6 +3851,121 @@ int main()
             // signal rather than of the module.
             ok = check (std::abs (lowBand - highBand) > 0.5,
                         "the bands get different treatment", lowBand - highBand) && ok;
+        }
+    }
+
+    // --- 44. Graphic EQ: the curve it draws is the curve it applies ---
+    //
+    // The display is drawn from `responseDb`, the same function the audio path's coefficients
+    // come from, so checking it is checking both. Flat must be exactly flat - ten filters in
+    // series each contributing a rounding residue would add up - and a boosted band must
+    // actually peak where it says it does.
+    {
+        using Eq = mixxynth::EqFx;
+
+        float flat[mixxynth::kMaxFxParams] {};
+        float boosted[mixxynth::kMaxFxParams] {};
+
+        for (int b = 0; b < Eq::kNumBands; ++b)
+        {
+            flat[Eq::pFirstBand + b] = 0.5f;    // centred = flat
+            boosted[Eq::pFirstBand + b] = 0.5f;
+        }
+
+        // Band 5 is 1 kHz. Push it to the top.
+        boosted[Eq::pFirstBand + 5] = 1.0f;
+
+        // Flat: nothing anywhere in the audible range.
+        {
+            float worst = 0.0f;
+
+            for (int i = 0; i <= 40; ++i)
+            {
+                const float hz = 20.0f * std::pow (1000.0f, static_cast<float> (i) / 40.0f);
+                worst = juce::jmax (worst, std::abs (Eq::responseDb (flat, hz, sr)));
+            }
+
+            ok = check (worst < 0.001f, "a flat Graphic EQ is flat", worst) && ok;
+        }
+
+        // Boosted at 1 kHz: a big lift there, and nothing at 31 Hz.
+        {
+            const float atBand = Eq::responseDb (boosted, 1000.0f, sr);
+            const float atBottom = Eq::responseDb (boosted, 31.0f, sr);
+
+            ok = check (atBand > 12.0f, "a boosted band lifts its own frequency", atBand) && ok;
+
+            ok = check (std::abs (atBottom) < 0.5f,
+                        "a boosted band leaves the far end alone", atBottom) && ok;
+        }
+
+        // Every band at its limit is still finite and bounded, which is what stops a stray
+        // tan or a division by zero reaching the audio.
+        {
+            float extreme[mixxynth::kMaxFxParams] {};
+
+            for (int b = 0; b < Eq::kNumBands; ++b)
+                extreme[Eq::pFirstBand + b] = (b % 2 == 0) ? 0.0f : 1.0f;   // alternating corners
+
+            float worst = 0.0f;
+
+            for (int i = 0; i <= 60; ++i)
+            {
+                const float hz = 20.0f * std::pow (1000.0f, static_cast<float> (i) / 60.0f);
+                worst = juce::jmax (worst, std::abs (Eq::responseDb (extreme, hz, sr)));
+            }
+
+            ok = check (std::isfinite (worst) && worst < 200.0f,
+                        "the Graphic EQ's response stays finite at the extremes", worst) && ok;
+        }
+
+        // And the module itself, driven flat, is transparent to within a rounding error -
+        // which is the audio-path version of the same claim.
+        {
+            mixxynth::EqFx eq;
+            eq.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+
+            for (int b = 0; b < Eq::kNumBands; ++b)
+                p[Eq::pFirstBand + b] = 0.5f;
+
+            p[Eq::pOutput] = 0.5f;
+
+            juce::AudioBuffer<float> buf (2, 512);
+            juce::AudioBuffer<float> before (2, 512);
+
+            for (int i = 0; i < 512; ++i)
+            {
+                const float v = 0.5f * std::sin (0.07f * static_cast<float> (i));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+                before.setSample (0, i, v);
+                before.setSample (1, i, v);
+            }
+
+            // Several blocks, so any ringing has settled.
+            for (int b = 0; b < 4; ++b)
+            {
+                eq.process (buf, p);
+
+                if (b < 3)
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        const float v = 0.5f * std::sin (0.07f * static_cast<float> (i));
+                        buf.setSample (0, i, v);
+                        buf.setSample (1, i, v);
+                    }
+            }
+
+            double worst = 0.0;
+
+            for (int i = 0; i < 512; ++i)
+                worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                       - before.getSample (0, i)));
+
+            ok = check (worst < 1.0e-4, "a flat Graphic EQ passes the signal through",
+                        worst) && ok;
         }
     }
 

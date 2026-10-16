@@ -2127,7 +2127,8 @@ public:
 
     // One module in the rack: title, bypass, the two arrows, remove, and the
     // controls the module's descriptor declares.
-    class Card : public juce::Component
+    class Card : public juce::Component,
+                 private juce::Timer
     {
     public:
         Card (FxPage& o, int slotIndex) : owner (o), slot (slotIndex)
@@ -2135,7 +2136,10 @@ public:
             auto& p = o.ed.processor();
             const auto state = p.readFxSlot (slot);
             const auto desc = mixxynth::FxRack::descriptorFor (state.type);
-            const juce::String prefix = "fx" + juce::String (slot + 1);
+
+            // A member rather than a local, because the graph's timer needs it long after the
+            // constructor has returned.
+            prefix = "fx" + juce::String (slot + 1);
 
             title.setText (desc.name, juce::dontSendNotification);
             title.setColour (juce::Label::textColourId, juce::Colour (0xff35e0ff));
@@ -2230,6 +2234,17 @@ public:
                 knobs.add (k);
             }
 
+            // A module that declares a graph gets a curve above its knobs, drawn from the
+            // same coefficients the audio path uses so the picture cannot drift from the
+            // sound.
+            if (desc.drawGraph != nullptr)
+            {
+                hasGraphFn = true;
+                graphFn = desc.drawGraph;
+                graphLabel = desc.graphLabel;
+                startTimerHz (20);
+            }
+
             // A module that needs a file gets a button and a name, not a knob. The
             // file is state rather than a parameter, so it cannot be one.
             if (desc.hasFile)
@@ -2247,7 +2262,13 @@ public:
             }
         }
 
-        static int preferredHeight() { return 26 + 4 + 30 + 78 + 10; }
+        // Per-card rather than static, because a module with a graph is taller than one
+        // without and the page has to ask each card rather than assume they match.
+        int preferredHeight() const
+        {
+            return 26 + 4 + (choiceBoxes.isEmpty() && ! hasFileControl ? 0 : 30)
+                     + (hasGraphFn ? mixxynth::FxDescriptor::graphHeight + 6 : 0) + 78 + 10;
+        }
 
         // Keeps the controls honest when a parameter moves from anywhere else -
         // a preset load, or the host.
@@ -2340,7 +2361,80 @@ public:
             g.drawText ("slot " + juce::String (slot + 1),
                         getLocalBounds().removeFromRight (56).reduced (6, 4),
                         juce::Justification::centredRight, false);
+
+            if (hasGraphFn && ! graphArea.isEmpty())
+                drawGraphCurve (g);
         }
+
+    private:
+        // The response curve, drawn from the module's own transfer function rather than from
+        // an impression of one.
+        //
+        // Log frequency, because that is how the ear is arranged and how every EQ is drawn;
+        // a linear axis would put nine of the ten bands in the right-hand fifth of the plot.
+        void drawGraphCurve (juce::Graphics& g)
+        {
+            auto area = graphArea.toFloat();
+
+            g.setColour (juce::Colour (0xff0d1117));
+            g.fillRoundedRectangle (area, 3.0f);
+
+            // The same +/-18 dB window the module's controls span, so a band at its limit
+            // reaches the edge of the plot rather than somewhere arbitrary.
+            constexpr float rangeDb = 18.0f;
+            const float midY = area.getCentreY();
+            const float halfH = area.getHeight() * 0.5f - 4.0f;
+
+            g.setColour (juce::Colour (0xff222a33));
+            g.drawHorizontalLine (static_cast<int> (midY), area.getX() + 2.0f, area.getRight() - 2.0f);
+
+            // Read the parameters fresh. The knobs are separate components, so the card has
+            // no way to be told one moved - it polls instead, which is the same 20 Hz poll
+            // the rest of the editor uses.
+            std::array<float, mixxynth::kMaxFxParams> values {};
+
+            for (int p = 0; p < mixxynth::kMaxFxParams; ++p)
+                if (auto* param = owner.ed.processor().apvts.getParameter (
+                        prefix + "p" + juce::String (p + 1)))
+                    values[static_cast<size_t> (p)] = param->getValue();
+
+            juce::Path path;
+
+            const int steps = juce::jmax (2, static_cast<int> (area.getWidth()) / 2);
+
+            for (int i = 0; i < steps; ++i)
+            {
+                const float t = static_cast<float> (i) / static_cast<float> (steps - 1);
+
+                // 20 Hz to 20 kHz, exponentially.
+                const float hz = 20.0f * std::pow (1000.0f, t);
+
+                const float db = graphFn (values.data(), hz, owner.ed.processor().getSampleRate());
+
+                const float x = area.getX() + 2.0f + t * (area.getWidth() - 4.0f);
+                const float y = midY - juce::jlimit (-rangeDb, rangeDb, db) / rangeDb * halfH;
+
+                if (i == 0)
+                    path.startNewSubPath (x, y);
+                else
+                    path.lineTo (x, y);
+            }
+
+            g.setColour (juce::Colour (0xffffa63d));
+            g.strokePath (path, juce::PathStrokeType (1.4f));
+
+            g.setColour (juce::Colour (0xff5d6b78));
+            g.setFont (9.0f);
+            g.drawText (graphLabel, area.reduced (5.0f, 2.0f), juce::Justification::topLeft);
+        }
+
+        void timerCallback() override { repaint(); }
+
+        bool hasGraphFn = false;
+        float (*graphFn) (const float*, float, double) = nullptr;
+        juce::String graphLabel;
+        juce::String prefix;
+        juce::Rectangle<int> graphArea;
 
         void resized() override
         {
@@ -2355,6 +2449,12 @@ public:
             bypass.setBounds (top.removeFromRight (78).reduced (0, 1));
 
             b.removeFromTop (4);
+
+            if (hasGraphFn)
+            {
+                graphArea = b.removeFromTop (mixxynth::FxDescriptor::graphHeight);
+                b.removeFromTop (6);
+            }
 
             // Choices get their own row: a module can have several, and sharing
             // the knob row would leave the knobs too narrow to use.
@@ -2589,12 +2689,14 @@ public:
         viewport.setBounds (b);
 
         const int w = juce::jmax (340, viewport.getMaximumVisibleWidth());
-        const int cardH = Card::preferredHeight();
 
         int y = 0;
 
         for (auto* c : cards)
         {
+            // Each card reports its own height: a module with a graph is taller than one
+            // without, and assuming they match would overlap them.
+            const int cardH = c->preferredHeight();
             c->setBounds (0, y, w, cardH);
             y += cardH + 6;
         }
