@@ -183,6 +183,14 @@ private:
     juce::Label modStatus;
     juce::Component bar;
     juce::Label barTitle;
+
+    // The output limiter's controls, which live in the bar beside Master because that is
+    // where they sit in the signal path: last.
+    class LimiterMeter;
+    std::unique_ptr<LimiterMeter> limiterMeter;
+    juce::ToggleButton limiterButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> limiterAttach;
+    mixxynth::ui::ModKnob* limiterKnob = nullptr;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
 
     juce::OwnedArray<ShapeStrip> shapeStrips;

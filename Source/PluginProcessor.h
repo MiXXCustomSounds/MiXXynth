@@ -5,6 +5,7 @@
 #include "FmVoice.h"
 #include "VoiceManager.h"
 #include "ModMatrix.h"
+#include "Limiter.h"
 #include "Fx/FxRack.h"
 
 // Polyphonic 6-op FM synth with per-voice modulation.
@@ -202,6 +203,17 @@ private:
 
     // M4b workstream 4: the FX rack. Lives at the end of the signal path.
     mixxynth::FxRack rack;
+
+    // The output safety limiter, after the rack. See Limiter.h for why this replaced the
+    // tanh guard that used to sit here.
+    mixxynth::Limiter limiter;
+
+public:
+    // Gain reduction in dB (negative), for the editor's meter. Relaxed atomic, same
+    // single-writer/single-reader contract as the modulated values.
+    float getLimiterGainReductionDb() const { return limiter.getGainReductionDb(); }
+
+private:
 
     // Per-block snapshot of the slot types, so processBlock reads each parameter
     // once rather than once per slot per block.

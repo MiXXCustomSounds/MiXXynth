@@ -12,6 +12,7 @@
 #include "../Source/Fx/PingPongDelayFx.h"
 #include "../Source/Fx/FlangerFx.h"
 #include "../Source/Fx/PhaserFx.h"
+#include "../Source/Limiter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -3385,6 +3386,111 @@ int main()
         ok = check (same < 1.0e-6, "Phaser with no stage offset is mono", same) && ok;
         ok = check (offset > 0.05, "the Phaser stage offset separates the channels",
                     offset) && ok;
+    }
+
+    // --- 40. The output limiter is a brickwall, and transparent below it ---
+    //
+    // Two claims, and both matter. The first is that nothing above the threshold ever
+    // reaches the output - that is what makes it a safety net rather than a suggestion.
+    // The second is that below the threshold it does nothing at all, because a limiter
+    // that colours ordinary material is not a safety net either.
+    {
+        // ---- transparent below the threshold ----
+        //
+        // Down there it is a DELAY and nothing else, so the output is the input shifted by
+        // the lookahead. Checking that, rather than "roughly the same", is what proves the
+        // gain really is exactly 1 and not merely close to it.
+        {
+            mixxynth::Limiter lim;
+            lim.prepare (sr, 512, 2);
+            lim.setReleaseMs (100.0f);
+
+            constexpr int lookahead = static_cast<int> (mixxynth::Limiter::kLookaheadMs
+                                                          * 0.001f * 44100.0f);
+
+            const int len = 4096;
+            juce::AudioBuffer<float> buf (2, len);
+            std::vector<float> input (static_cast<size_t> (len));
+
+            for (int i = 0; i < len; ++i)
+            {
+                const float v = 0.5f * std::sin (0.03f * static_cast<float> (i));
+                input[static_cast<size_t> (i)] = v;
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            lim.process (buf);
+
+            double worst = 0.0;
+
+            // Past the first lookahead, so both sides are real signal.
+            for (int i = lookahead + 4; i < len; ++i)
+                worst = juce::jmax (worst, std::abs (static_cast<double> (buf.getSample (0, i))
+                                                       - input[static_cast<size_t> (i - lookahead)]));
+
+            ok = check (worst < 1.0e-6, "the limiter is transparent below the threshold",
+                        worst) && ok;
+        }
+
+        // ---- a brickwall above it ----
+        //
+        // Deliberately absurd input: thirty times full scale, and a DC-like plateau rather
+        // than a transient, so a limiter that only caught the first sample of a peak would
+        // be caught out. Nothing above the threshold may survive either case.
+        {
+            mixxynth::Limiter lim;
+            lim.prepare (sr, 512, 2);
+            lim.setReleaseMs (50.0f);
+
+            const int len = 8192;
+            juce::AudioBuffer<float> buf (2, len);
+
+            for (int i = 0; i < len; ++i)
+            {
+                // A square wave at 30x, so every edge is a step far past the threshold.
+                const float v = (i / 97) % 2 == 0 ? 30.0f : -30.0f;
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            lim.process (buf);
+
+            float peak = 0.0f;
+
+            for (int i = 0; i < len; ++i)
+                peak = juce::jmax (peak, std::abs (buf.getSample (0, i)));
+
+            ok = check (std::isfinite (peak) && peak <= mixxynth::Limiter::kThreshold + 1.0e-5f,
+                        "nothing above the limiter's threshold reaches the output", peak) && ok;
+
+            // And it reports the reduction it applied, which is what the meter shows.
+            ok = check (lim.getGainReductionDb () < -20.0f,
+                        "the limiter reports its gain reduction",
+                        lim.getGainReductionDb()) && ok;
+        }
+
+        // ---- below the threshold it reports nothing ----
+        {
+            mixxynth::Limiter lim;
+            lim.prepare (sr, 512, 2);
+            lim.setReleaseMs (100.0f);
+
+            juce::AudioBuffer<float> buf (2, 512);
+
+            for (int i = 0; i < 512; ++i)
+            {
+                const float v = 0.5f * std::sin (0.03f * static_cast<float> (i));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            lim.process (buf);
+
+            ok = check (lim.getGainReductionDb() > -0.01f,
+                        "the limiter reports no reduction when it is not working",
+                        lim.getGainReductionDb()) && ok;
+        }
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

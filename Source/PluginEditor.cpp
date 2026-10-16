@@ -2696,6 +2696,61 @@ private:
 // ---------------------------------------------------------------------------
 // Editor
 // ---------------------------------------------------------------------------
+// The limiter's gain-reduction meter.
+//
+// It exists because a safety limiter is only trustworthy if you can see that it is NOT
+// working. A meter that sits at zero confirms the threshold is doing nothing on ordinary
+// material; one that flickers tells you the patch is running hot and the limiter is
+// earning its place. Without it, "is my limiter eating transients?" is unanswerable.
+class MiXXynthEditor::LimiterMeter : public juce::Component
+{
+public:
+    void setGainReduction (float db) noexcept
+    {
+        // Smoothed for the eye. The audio-thread value jumps; a meter that jumped with it
+        // would flicker rather than read.
+        current = juce::jmax (db, current - 1.5f);
+
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+
+        g.setColour (juce::Colour (0xff141414));
+        g.fillRoundedRectangle (area, 3.0f);
+
+        // The scale is 12 dB, which is about the range a safety limiter should ever be
+        // showing. Beyond that the number stops being informative and starts being an
+        // alarm.
+        constexpr float range = 12.0f;
+
+        const float amount = juce::jlimit (0.0f, 1.0f, -current / range);
+
+        if (amount > 0.001f)
+        {
+            auto fill = area.reduced (1.0f);
+            fill = fill.removeFromLeft (fill.getWidth() * amount);
+
+            // Orange while it is working, because orange is the value colour everywhere
+            // else in this editor.
+            g.setColour (juce::Colour (0xffe08a3c));
+            g.fillRoundedRectangle (fill, 2.0f);
+        }
+
+        g.setColour (juce::Colour (0xff5a6570));
+        g.setFont (juce::FontOptions (9.0f));
+
+        g.drawText (current < -0.05f ? juce::String (current, 1) + " dB" : juce::String ("GR"),
+                    getLocalBounds(), juce::Justification::centred);
+    }
+
+private:
+    float current = 0.0f;
+};
+
+
 MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
@@ -2832,6 +2887,31 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     bar.addAndMakeVisible (master);
     modTargets.push_back (master);
     macroKnobs.add (master); // owned alongside the macros
+
+    // The output limiter, beside Master because it is the next thing in the signal path.
+    //
+    // The release is a knob rather than a hidden constant because it is the only part of
+    // a limiter that is a matter of taste; the threshold is not adjustable, and that is
+    // deliberate - a safety limiter whose threshold can be moved stops being a safety
+    // limiter and becomes an effect.
+    limiterKnob = new ModKnob ("Release", ranged (proc, "limiterRelease"),
+                               mixxynth::dstOff, true);
+    bar.addAndMakeVisible (limiterKnob);
+    macroKnobs.add (limiterKnob); // owned alongside the macros
+
+    // Registered like every other knob. modTargets is the editor's full list of knobs, not
+    // only the modulation destinations - a dstOff knob still has to be there, or the audit
+    // cannot see it and its parameter reads as unreachable from the UI.
+    modTargets.push_back (limiterKnob);
+
+    limiterButton.setButtonText ("LIMIT");
+    limiterButton.setTooltip ("Output safety limiter");
+    bar.addAndMakeVisible (limiterButton);
+    limiterAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        proc.apvts, "limiterOn", limiterButton);
+
+    limiterMeter = std::make_unique<LimiterMeter>();
+    bar.addAndMakeVisible (*limiterMeter);
 
     // Performance bar: on-screen keyboard plus pitch and mod wheels. The
     // keyboard both mirrors incoming notes and plays the synth when clicked;
@@ -2993,10 +3073,26 @@ void MiXXynthEditor::resized()
     auto barArea = bar.getLocalBounds().reduced (8);
     barTitle.setBounds (barArea.removeFromLeft (64));
 
-    const int knobW = juce::jmax (70, barArea.getWidth() / 5);
+    // Seven ways: the four macros, Master, the limiter's Release knob, and the area the
+    // limiter's switch and meter live in. Getting this divisor wrong does not misalign
+    // anything - it gives the limiter controls zero bounds, because the knobs have
+    // already consumed the bar.
+    const int knobW = juce::jmax (64, barArea.getWidth() / 7);
 
     for (auto* k : macroKnobs)
         k->setBounds (barArea.removeFromLeft (knobW).reduced (2));
+
+    // The limiter's switch and meter fill what is left beside the Master knob. The
+    // divider above leaves room for them by splitting the bar six ways rather than five.
+    if (limiterButton.isVisible() || limiterMeter != nullptr)
+    {
+        auto limiterArea = barArea.removeFromLeft (juce::jmin (barArea.getWidth(), knobW));
+
+        limiterButton.setBounds (limiterArea.removeFromLeft (58).reduced (2, 8));
+
+        if (limiterMeter != nullptr)
+            limiterMeter->setBounds (limiterArea.reduced (2, 22));
+    }
 
     if (keyboard != nullptr)
     {
@@ -3033,6 +3129,10 @@ void MiXXynthEditor::timerCallback()
 
     if (modWheel != nullptr)
         modWheel->setValueFromMidi (proc.getModWheelValue());
+
+    // The limiter's gain reduction, on the same poll as everything else.
+    if (limiterMeter != nullptr)
+        limiterMeter->setGainReduction (proc.getLimiterGainReductionDb());
 }
 
 void MiXXynthEditor::shapeEdited (int index, const mixxynth::ModShape& shape)

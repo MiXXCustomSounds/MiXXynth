@@ -358,6 +358,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "masterGain", "Master Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
 
+    // The output safety limiter. On by default, because a safety net that has to be
+    // switched on is not one.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "limiterOn", "Limiter", true));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "limiterRelease", "Limiter Release",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.35f));
+
     // M4b workstream 4: the FX rack.
     //
     // A fixed pool of eight slots, because an APVTS parameter's items cannot
@@ -565,6 +574,7 @@ void MiXXynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     // that already exist, and then publishes whatever the current parameters ask
     // for, which matters when a host restores state before preparing.
     rack.prepare (sampleRate, samplesPerBlock, 2);
+    limiter.prepare (sampleRate, samplesPerBlock, 2);
     syncFxRack();
 }
 
@@ -938,18 +948,33 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     rack.process (buffer, fxTypes.data(), fxBypass.data(), fxParams.data());
 
-    // The rack is the last stage, so it is the last thing that can push the
-    // output past unity - a reverb at 100% wet has no obligation to stay inside
-    // it. The voice stage's own soft clip runs before the rack, so this is a
-    // second, deliberately gentle guard rather than the working limiter. With an
-    // empty rack the signal is already inside unity and this is transparent.
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    // ---- the output safety limiter -------------------------------------------
+    // The rack is the last stage that can push the output past unity - a reverb at 100%
+    // wet has no obligation to stay inside it - so the limiter sits after it, as the
+    // last thing in the chain.
+    //
+    // It replaces a per-sample tanh guard, which was not a limiter: a waveshaper
+    // distorts the peaks it is meant to be catching, so it changed the sound of exactly
+    // the material it existed to protect.
+    if (getParam (apvts, "limiterOn") > 0.5f)
     {
-        auto* data = buffer.getWritePointer (ch);
+        limiter.setReleaseMs (20.0f * std::pow (25.0f, getParam (apvts, "limiterRelease")));
+        limiter.process (buffer);
+    }
+    else
+    {
+        // Switched off means switched off, but the output still has to be inside full
+        // scale: a host is entitled to receive a signal it can convert, and a hard clamp
+        // is the honest behaviour when the user has asked for no limiter.
+        limiter.reset();
 
-        for (int i = 0; i < buffer.getNumSamples(); ++i)
-            if (std::abs (data[i]) > 1.0f)
-                data[i] = std::tanh (data[i]);
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch);
+
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+                data[i] = juce::jlimit (-1.0f, 1.0f, data[i]);
+        }
     }
 
     // Publish the newest voice's shape phases for the editor's playheads. Single
