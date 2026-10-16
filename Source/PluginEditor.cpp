@@ -504,21 +504,25 @@ namespace
         }
     };
 
-    // A two-segment switch for choosing which reading of the grid you are looking
-    // at. Drawn rather than built from TextButtons, so it sits in the same visual
-    // language as the cells it switches between.
+    // A segmented switch for choosing which module of the FM tab you are looking at.
+    // Drawn rather than built from TextButtons, so it sits in the same visual language as
+    // the cells it switches between.
+    //
+    // It used to be hardcoded to two segments. It takes a list now, because the tab is
+    // absorbing the VA and the filter and that is more than two readings of one grid.
     class ViewSwitch : public juce::Component
     {
     public:
-        ViewSwitch (const juce::String& first, const juce::String& second)
+        explicit ViewSwitch (juce::StringArray segmentNames) : names (std::move (segmentNames))
         {
-            names[0] = first;
-            names[1] = second;
+            jassert (! names.isEmpty());
         }
+
+        int getNumSegments() const noexcept { return names.size(); }
 
         void setSelected (int index, juce::NotificationType n = juce::sendNotificationSync)
         {
-            index = juce::jlimit (0, 1, index);
+            index = juce::jlimit (0, getNumSegments() - 1, index);
 
             if (selected == index)
                 return;
@@ -534,7 +538,7 @@ namespace
 
         void mouseDown (const juce::MouseEvent& e) override
         {
-            setSelected (e.getPosition().x < getWidth() / 2 ? 0 : 1);
+            setSelected (segmentAt (e.getPosition().x));
         }
 
         void paint (juce::Graphics& g) override
@@ -544,10 +548,9 @@ namespace
             g.setColour (juce::Colour (0xff161c22));
             g.fillRoundedRectangle (b, 4.0f);
 
-            for (int i = 0; i < 2; ++i)
+            for (int i = 0; i < getNumSegments(); ++i)
             {
-                const auto seg = getLocalBounds().withWidth (getWidth() / 2)
-                                                  .withX (i * (getWidth() / 2));
+                const auto seg = segmentBounds (i);
 
                 if (i == selected)
                 {
@@ -568,7 +571,19 @@ namespace
         std::function<void (int)> onChange;
 
     private:
-        juce::String names[2];
+        juce::Rectangle<int> segmentBounds (int i) const
+        {
+            const int w = getWidth() / juce::jmax (1, getNumSegments());
+            return getLocalBounds().withWidth (w).withX (i * w);
+        }
+
+        int segmentAt (int x) const
+        {
+            const int w = juce::jmax (1, getWidth() / juce::jmax (1, getNumSegments()));
+            return juce::jlimit (0, getNumSegments() - 1, x / w);
+        }
+
+        juce::StringArray names;
         int selected = 0;
     };
 }
@@ -741,6 +756,68 @@ public:
                                       "Op" + sn + " to Op" + dn);
             }
         }
+
+        // ---- the VA view ----
+        // The VA oscillator and the per-voice filter. The shape is the same morph the
+        // operators use, so its cell names the shape exactly as the operator shape cells do.
+        vaCells[0] = addVaCell (ranged (p, "vaShape"), mixxynth::dstVaPulseWidth, "VA Shape");
+        vaCells[0]->setValueTextFunction ([] (float v)
+        {
+            return juce::String (mixxynth::OpWaveTables::shapeName (v));
+        });
+
+        vaCells[1] = addVaCell (ranged (p, "vaSubLevel"), mixxynth::dstOff, "Sub");
+        vaCells[2] = addVaCell (ranged (p, "vaNoiseLevel"), mixxynth::dstOff, "Noise");
+        vaCells[3] = addVaCell (ranged (p, "vaLevel"), mixxynth::dstVaLevel, "VA Level");
+        vaCells[4] = addVaCell (ranged (p, "vaDetune"), mixxynth::dstVaDetune, "Detune");
+        vaCells[5] = addVaCell (ranged (p, "vaOctave"), mixxynth::dstOff, "Octave");
+
+        // The filter's three values follow the oscillator's in the same list, so indices
+        // 6..8 are cutoff, resonance and drive.
+        addVaCell (ranged (p, "filterCutoff"), mixxynth::dstFilterCutoff, "Cutoff");
+        addVaCell (ranged (p, "filterReso"), mixxynth::dstFilterReso, "Reso");
+        addVaCell (ranged (p, "filterDrive"), mixxynth::dstFilterDrive, "Drive");
+
+        // The VA's amplitude envelope: the same editor the operator envelopes use, so the
+        // two cannot drift apart.
+        vaEnvEditor = new AdsrEditor (ranged (p, "vaAttack"), ranged (p, "vaDecay"),
+                                      ranged (p, "vaSustain"), ranged (p, "vaRelease"));
+        vaEnvOwned.add (vaEnvEditor);
+        addChildComponent (vaEnvEditor);
+
+        // The filter's on/off and its mode. The mode is a choice, so it stays a combo box:
+        // a cell can hold a value, not a list.
+        auto* filtOn = new OperatorCell ("FILT");
+        vaToggles.add (filtOn);
+        addChildComponent (filtOn);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, "filterOn")))
+        {
+            filtOn->setToggleState (param->get(), juce::dontSendNotification);
+            filtOn->onClick = [filtOn, param]
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (filtOn->getToggleState() ? 1.0f : 0.0f);
+                param->endChangeGesture();
+            };
+        }
+
+        if (auto* typeParam = choice (p, "filterType"))
+        {
+            for (int i = 0; i < typeParam->choices.size(); ++i)
+                vaFilterType.addItem (typeParam->choices[i], i + 1);
+
+            vaFilterType.setSelectedId (typeParam->getIndex() + 1, juce::dontSendNotification);
+            vaFilterType.onChange = [this, typeParam]
+            {
+                typeParam->beginChangeGesture();
+                typeParam->setValueNotifyingHost (
+                    typeParam->convertTo0to1 (static_cast<float> (vaFilterType.getSelectedId() - 1)));
+                typeParam->endChangeGesture();
+            };
+        }
+
+        addChildComponent (vaFilterType);
 
         viewSwitch.onChange = [this] (int v) { applyView (v); };
         addAndMakeVisible (viewSwitch);
@@ -928,13 +1005,16 @@ public:
         // values view's Fb column and the routing view's diagonal both sit in the "self"
         // position and they do NOT mean the same thing. Rather than hoping nobody
         // conflates them, the text says which is which.
-        const bool routing = viewSwitch.getSelected() == 1;
+        const int view = viewSwitch.getSelected();
 
         g.setColour (juce::Colour (0xff8b98a5));
         g.setFont (11.5f);
-        g.drawFittedText (routing
+        g.drawFittedText (view == 1
                             ? "Each cell sends its row's operator into its column's operator. The diagonal is that "
                               "operator's own output, not feedback - feedback is the Fb column back in Values."
+                          : view == 2
+                            ? "The VA oscillator and the per-voice filter. The shape is the same morph the operators "
+                              "use, so past the square it narrows into a pulse rather than stopping at a square."
                             : "Drag a cell up or down to set its value. Drop a modulation source onto one to modulate it, "
                               "then drag the white line to set how far the modulation reaches.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
@@ -1075,6 +1155,41 @@ public:
             if (i < adsrEditors.size())
                 adsrEditors[i]->setBounds (cellAt (row, valueCols - 1).reduced (1));
         }
+
+        // ---- VA view ----
+        // The VA is one oscillator, not six, so this is deliberately not a six-row grid: a
+        // row of cells for the oscillator, the envelope across some width, then a row for
+        // the filter. It shares the operator cells' square size so the two views still read
+        // as the same instrument.
+        {
+            auto va = b;
+            const int cell = juce::jmax (22, juce::jmin (square, va.getHeight() / 3));
+
+            auto oscRow = va.removeFromTop (cell);
+
+            for (int i = 0; i < 6; ++i)
+                if (vaCells[static_cast<size_t> (i)] != nullptr)
+                    vaCells[static_cast<size_t> (i)]->setBounds (oscRow.removeFromLeft (cell).reduced (1));
+
+            va.removeFromTop (gap);
+
+            if (vaEnvEditor != nullptr)
+                vaEnvEditor->setBounds (va.removeFromTop (cell)
+                                          .removeFromLeft (juce::jmin (cell * 3, va.getWidth()))
+                                          .reduced (1));
+
+            va.removeFromTop (gap);
+
+            auto filtRow = va.removeFromTop (cell);
+
+            if (! vaToggles.isEmpty())
+                vaToggles[0]->setBounds (filtRow.removeFromLeft (cell).reduced (1));
+
+            vaFilterType.setBounds (filtRow.removeFromLeft (cell * 2).reduced (1, cell / 4));
+
+            for (int i = 6; i < vaOwned.size(); ++i)
+                vaOwned[i]->setBounds (filtRow.removeFromLeft (cell).reduced (1));
+        }
     }
 
 private:
@@ -1109,12 +1224,24 @@ private:
         return c;
     }
 
-    // Shows one view's contents and hides the other's. The operator cells and the
-    // toolbar are shared, because both views have the same six rows: row 3 is Op3
-    // whether you are reading values or routing, and that shared axis is the whole
-    // reason the two grids belong in one place.
+    // A VA-view cell. Registered for modulation like any other, but kept in its own list so
+    // the values layout never sees it.
+    SquareCell* addVaCell (juce::RangedAudioParameter* param, int dest, const juce::String& label)
+    {
+        auto* c = new SquareCell (label, param, dest, true);
+        ed.wireModTarget (*c);
+        addChildComponent (c);
+        ed.modTargets.push_back (c);
+        vaOwned.add (c);
+        return c;
+    }
+
+    // Shows one view's contents and hides the others'. The operator cells and the toolbar
+    // are shared: every view is a reading of the same six operators, so switching views
+    // moves nothing.
     void applyView (int v)
     {
+        const bool values = (v == 0);
         const bool routing = (v == 1);
 
         for (auto* t : outCells)
@@ -1130,15 +1257,26 @@ private:
 
         // indexCell is cells[0], so this covers it.
         for (auto* c : cells)
-            c->setVisible (! routing);
+            c->setVisible (values);
 
         for (auto* icon : headerIcons)
-            icon->setVisible (! routing);
+            icon->setVisible (values);
 
-        adsrHeader.setVisible (! routing);
+        adsrHeader.setVisible (values);
 
         for (auto* e : adsrEditors)
-            e->setVisible (! routing);
+            e->setVisible (values);
+
+        for (auto* c : vaOwned)
+            c->setVisible (! values && ! routing);
+
+        vaFilterType.setVisible (! values && ! routing);
+
+        for (auto* t : vaToggles)
+            t->setVisible (! values && ! routing);
+
+        if (vaEnvEditor != nullptr)
+            vaEnvEditor->setVisible (! values && ! routing);
 
         resized();
         repaint();
@@ -1146,7 +1284,7 @@ private:
 
     MiXXynthEditor& ed;
     DiceButton diceButton;
-    ViewSwitch viewSwitch { "Values", "Routing" };
+    ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing", "VA" } };
     juce::Label audibility;
     juce::Label adsrHeader;
     juce::OwnedArray<GridIcon> headerIcons;
@@ -1170,6 +1308,16 @@ private:
     juce::OwnedArray<OperatorCell> outCells;
     juce::OwnedArray<SquareCell> routingOwned;
     std::array<SquareCell*, MiXXFmVoice::numOps * MiXXFmVoice::numOps> routingCell {};
+
+    // ---- the VA view --------------------------------------------------------
+    // The VA oscillator and the per-voice filter, which had a tab of their own until
+    // reducing the tab count became worth doing.
+    juce::OwnedArray<SquareCell> vaOwned;
+    std::array<SquareCell*, 6> vaCells {};   // shape, sub, noise, level, detune, octave
+    juce::ComboBox vaFilterType;
+    juce::OwnedArray<OperatorCell> vaToggles;  // the filter on/off
+    juce::OwnedArray<AdsrEditor> vaEnvOwned;
+    AdsrEditor* vaEnvEditor = nullptr;
 
     juce::Random rng;
     juce::OwnedArray<SquareCell> ownedCells;
@@ -1414,226 +1562,6 @@ private:
     juce::Viewport viewport;
     juce::Component content;
     juce::OwnedArray<SlotRow> rows;
-};
-
-// ---------------------------------------------------------------------------
-// VA / Filter page (M3b)
-// ---------------------------------------------------------------------------
-class MiXXynthEditor::VaPage : public juce::Component
-{
-public:
-    explicit VaPage (MiXXynthEditor& e) : ed (e)
-    {
-        auto& p = e.processor();
-
-        addKnob (ranged (p, "vaLevel"), mixxynth::dstVaLevel, "VA Level");
-        addKnob (ranged (p, "vaDetune"), mixxynth::dstVaDetune, "VA Detune");
-
-        // The shape morph, through the same tables the operators use. The destination is
-        // the old pulse width slot, which is the same idea on the new axis - and keeping
-        // that slot means an existing modulation routing still points somewhere sensible.
-        addKnob (ranged (p, "vaShape"), mixxynth::dstVaPulseWidth, "Shape");
-
-        // Their own levels rather than shape-list entries, so they blend with any shape.
-        addKnob (ranged (p, "vaSubLevel"), mixxynth::dstOff, "Sub");
-        addKnob (ranged (p, "vaNoiseLevel"), mixxynth::dstOff, "Noise");
-
-        addKnob (ranged (p, "filterCutoff"), mixxynth::dstFilterCutoff, "Cutoff");
-        addKnob (ranged (p, "filterReso"), mixxynth::dstFilterReso, "Resonance");
-        addKnob (ranged (p, "filterDrive"), mixxynth::dstFilterDrive, "Drive");
-
-        addChoice (p, "filterType", filterType);
-
-        // The VA's amplitude envelope. Same component the operator envelopes use, so the
-        // two cannot drift apart - and it is a real ADSR now rather than a fixed gate.
-        vaEnvEditor = new mixxynth::ui::AdsrEditor (ranged (p, "vaAttack"),
-                                                    ranged (p, "vaDecay"),
-                                                    ranged (p, "vaSustain"),
-                                                    ranged (p, "vaRelease"));
-        vaEnvOwned.add (vaEnvEditor);
-        addAndMakeVisible (vaEnvEditor);
-
-        filterOn = addToggle (p, "filterOn", "Filter On");
-
-        octave = new juce::Slider (juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft);
-        octave->setRange (-2.0, 2.0, 1.0);
-        addAndMakeVisible (octave);
-
-        if (auto* param = dynamic_cast<juce::AudioParameterInt*> (ranged (p, "vaOctave")))
-        {
-            octave->setValue (param->get(), juce::dontSendNotification);
-            octave->onValueChange = [this, param]
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (
-                    param->convertTo0to1 (static_cast<float> (octave->getValue())));
-                param->endChangeGesture();
-            };
-        }
-
-        octaveLabel.setText ("Octave", juce::dontSendNotification);
-        addAndMakeVisible (octaveLabel);
-
-        hint.setJustificationType (juce::Justification::centredLeft);
-        hint.setFont (juce::FontOptions (11.0f));
-        hint.setColour (juce::Label::textColourId, juce::Colour (0xff4ade80));
-        addAndMakeVisible (hint);
-        refreshHint();
-    }
-
-    // Driven from the editor's timer: spells out what the VA layer and filter are
-    // actually doing, so a page full of knobs is never silently inert.
-    void refreshHint()
-    {
-        const float va = juce::jlimit (0.0f, 1.0f, readParam ("vaLevel"));
-        const bool filterActive = readParam ("filterOn") > 0.5f;
-        const float cut = readParam ("filterCutoff");
-        const float reso = readParam ("filterReso");
-        const int type = static_cast<int> (readParam ("filterType"));
-
-        static const char* const typeNames[] = { "Low Pass", "High Pass", "Band Pass" };
-
-        const int vaPercent = juce::roundToInt (va * 100.0f);
-
-        juce::String s;
-        s << (vaPercent <= 0 ? juce::String ("FM only (VA Level is 0)")
-                             : "VA " + juce::String (vaPercent) + "% / FM " + juce::String (100 - vaPercent) + "%")
-          << "   |   Filter: ";
-
-        if (filterActive)
-            s << typeNames[juce::jlimit (0, 2, type)] << " " << juce::String (cut, 0) << " Hz, Q "
-              << juce::String (reso, 2);
-        else
-            s << "bypassed (turn Filter On)";
-
-        hint.setText (s, juce::dontSendNotification);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.setColour (juce::Colour (0xff8b98a5));
-        g.setFont (11.5f);
-        g.drawFittedText ("VA Level ADDS the VA oscillator on top of the FM stack (0 = FM only). "
-                          "The VA has its own gate envelope. The filter is per voice and all six knobs are "
-                          "modulation destinations.",
-                          getLocalBounds().removeFromTop (32), juce::Justification::centredLeft, 2);
-    }
-
-    void resized() override
-    {
-        auto b = getLocalBounds().reduced (10);
-        b.removeFromTop (34);
-
-        auto row = b.removeFromTop (96);
-
-        for (auto* k : knobs)
-            k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 4)).reduced (4));
-
-        row = b.removeFromTop (96);
-
-        for (auto* k : knobs2)
-            k->setBounds (row.removeFromLeft (juce::jmax (80, row.getWidth() / 4)).reduced (4));
-
-        b.removeFromTop (10);
-        auto controls = b.removeFromTop (26);
-        octaveLabel.setBounds (controls.removeFromLeft (56));
-        octave->setBounds (controls.removeFromLeft (120).reduced (2, 0));
-        controls.removeFromLeft (16);
-        filterType.setBounds (controls.removeFromLeft (130).reduced (2, 0));
-        controls.removeFromLeft (16);
-
-        if (filterOn != nullptr)
-            filterOn->setBounds (controls.removeFromLeft (100).reduced (2, 0));
-
-        // The VA's amplitude envelope gets the rest of the page. It wants width far more
-        // than height, which is the same reason the operator envelope column is wider than
-        // a square.
-        if (vaEnvEditor != nullptr)
-            vaEnvEditor->setBounds (b.removeFromTop (juce::jmin (150, b.getHeight()))
-                                     .removeFromLeft (juce::jmax (260, b.getWidth() / 2)));
-
-        b.removeFromTop (8);
-        hint.setBounds (b.removeFromTop (20));
-    }
-
-private:
-    float readParam (const juce::String& id)
-    {
-        if (auto* p = ranged (ed.processor(), id))
-            return p->convertFrom0to1 (p->getValue());
-
-        return 0.0f;
-    }
-
-    void addKnob (juce::RangedAudioParameter* param, int dest, const juce::String& label)
-    {
-        auto* k = new ModKnob (label, param, dest, true);
-        ed.wireModTarget (*k);
-        addAndMakeVisible (k);
-        ed.modTargets.push_back (k);
-        owned.add (k);
-
-        if (knobs.size() < 4)
-            knobs.add (k);
-        else
-            knobs2.add (k);
-    }
-
-    void addChoice (MiXXynthProcessor& p, const juce::String& id, juce::ComboBox& box)
-    {
-        addAndMakeVisible (box);
-
-        if (auto* param = choice (p, id))
-        {
-            for (int i = 0; i < param->choices.size(); ++i)
-                box.addItem (param->choices[i], i + 1);
-
-            box.setSelectedId (param->getIndex() + 1, juce::dontSendNotification);
-            box.onChange = [&box, param]
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (
-                    param->convertTo0to1 (static_cast<float> (box.getSelectedId() - 1)));
-                param->endChangeGesture();
-            };
-        }
-    }
-
-    juce::ToggleButton* addToggle (MiXXynthProcessor& p, const juce::String& id, const juce::String& text)
-    {
-        auto* t = new juce::ToggleButton (text);
-        toggles.add (t);
-        addAndMakeVisible (t);
-
-        if (auto* param = dynamic_cast<juce::AudioParameterBool*> (ranged (p, id)))
-        {
-            t->setToggleState (param->get(), juce::dontSendNotification);
-            t->onClick = [t, param]
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (t->getToggleState() ? 1.0f : 0.0f);
-                param->endChangeGesture();
-            };
-        }
-
-        return t;
-    }
-
-    MiXXynthEditor& ed;
-    juce::OwnedArray<ModKnob> owned;
-    juce::Array<ModKnob*> knobs, knobs2;
-    juce::ComboBox filterType;
-    juce::ToggleButton* filterOn = nullptr;
-    juce::Slider* octave = nullptr;
-    juce::Label octaveLabel;
-    juce::Label hint;
-    juce::OwnedArray<juce::ToggleButton> toggles;
-
-    // The VA's amplitude envelope, edited with the same component the operator envelopes
-    // use so the two look and behave alike. Not a ModTarget: it only ever controls the VA
-    // layer's own amplitude, so it is owned here rather than registered for modulation.
-    juce::OwnedArray<mixxynth::ui::AdsrEditor> vaEnvOwned;
-    mixxynth::ui::AdsrEditor* vaEnvEditor = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -2441,13 +2369,11 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     // its own, so the FM page is the only thing that has to be built for it.
     fmPage = std::make_unique<FmPage> (*this);
     modPage = std::make_unique<ModPage> (*this);
-    vaPage = std::make_unique<VaPage> (*this);
     voicePage = std::make_unique<VoicePage> (*this);
     fxPage = std::make_unique<FxPage> (*this);
 
     tabs.setOutline (0);
     tabs.addTab ("FM", juce::Colour (0xff14181d), fmPage.get(), false);
-    tabs.addTab ("VA/Filt", juce::Colour (0xff14181d), vaPage.get(), false);
     tabs.addTab ("Voice", juce::Colour (0xff14181d), voicePage.get(), false);
     tabs.addTab ("Mod", juce::Colour (0xff14181d), modPage.get(), false);
     tabs.addTab ("FX", juce::Colour (0xff14181d), fxPage.get(), false);
@@ -2745,10 +2671,6 @@ juce::String MiXXynthEditor::modDebug (int slot) const
 
 void MiXXynthEditor::runTabPolls()
 {
-    // The VA page keeps its state readout current.
-    if (vaPage != nullptr)
-        vaPage->refreshHint();
-
     if (fmPage != nullptr)
         fmPage->refreshAudibility();
 

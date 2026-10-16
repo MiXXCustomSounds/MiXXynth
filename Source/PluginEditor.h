@@ -148,7 +148,6 @@ private:
     class ShapeStrip;
     class FmPage;
     class ModPage;
-    class VaPage;
     class VoicePage;
     class FxPage;
 
@@ -176,7 +175,6 @@ private:
     std::unique_ptr<mixxynth::ui::WheelComponent> pitchWheel, modWheel;
     std::unique_ptr<FmPage> fmPage;
     std::unique_ptr<ModPage> modPage;
-    std::unique_ptr<VaPage> vaPage;
     std::unique_ptr<VoicePage> voicePage;
     std::unique_ptr<FxPage> fxPage;
 

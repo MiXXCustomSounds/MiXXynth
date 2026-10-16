@@ -431,20 +431,20 @@ int main()
         for (int n = 0; n < mixxynth::kNumModSlots; ++n)
             miXXEditor->clearModDest (slotDst (n));
 
-        // The arc geometry is a ModKnob property, and the FM grid's controls are
-        // SquareCells now, so this deliberately targets a control that is still a
-        // knob: the VA filter's cutoff, which is a real modulation destination too.
-        miXXEditor->assignModSlot (mixxynth::srcLfo1, mixxynth::dstFilterCutoff);
-        miXXEditor->assignModSlot (mixxynth::srcMacro1, mixxynth::dstFilterCutoff);
+        // The arc geometry is a ModKnob property, and the FM page's controls are
+        // SquareCells now, so this deliberately targets a control that is still a knob:
+        // the master gain, which is a real modulation destination too.
+        miXXEditor->assignModSlot (mixxynth::srcLfo1, mixxynth::dstMaster);
+        miXXEditor->assignModSlot (mixxynth::srcMacro1, mixxynth::dstMaster);
         miXXEditor->refreshModRings();
 
         mixxynth::ui::ModKnob* knob = nullptr;
 
         for (auto* k : miXXEditor->modTargets)
-            if (k->getParamID() == "filterCutoff" && k->getNumAssignments() == 2)
+            if (k->getParamID() == "masterGain" && k->getNumAssignments() == 2)
                 knob = dynamic_cast<mixxynth::ui::ModKnob*> (k);
 
-        check (knob != nullptr, "the filter cutoff knob collected both sources", "");
+        check (knob != nullptr, "the master knob collected both sources", "");
 
         if (knob != nullptr)
         {
@@ -459,11 +459,11 @@ int main()
             // exactly the bug this replaced, and it was invisible while the arc
             // swept from a fixed angle instead.
             // Start from a known low value rather than from whatever the audit left
-            // the cutoff at. Otherwise this measures 0.9 against a cutoff an earlier
+            // the master gain at. Otherwise this measures 0.9 against a value an earlier
             // section parked at 1.0, and reports the arc moving backwards.
             auto setCutoff = [&proc] (float v)
             {
-                if (auto* p = proc.apvts.getParameter ("filterCutoff"))
+                if (auto* p = proc.apvts.getParameter ("masterGain"))
                 {
                     p->beginChangeGesture();
                     p->setValueNotifyingHost (v);
@@ -816,9 +816,9 @@ int main()
     std::printf ("     visible child components=%d\n", visited);
     std::printf ("     %s\n", miXXEditor->perfBarDebug().toRawUTF8());
 
-    // Every tab must exist and be populated. Five, not six: the routing matrix is a
-    // view of the FM grid now rather than a tab of its own.
-    check (miXXEditor->getNumTabs() == 5, "five tabs", juce::String (miXXEditor->getNumTabs()));
+    // Every tab must exist and be populated. Four: the routing matrix and the VA/filter are
+    // views of the FM grid now rather than tabs of their own.
+    check (miXXEditor->getNumTabs() == 4, "four tabs", juce::String (miXXEditor->getNumTabs()));
 
     for (int i = 0; i < miXXEditor->getNumTabs(); ++i)
     {
@@ -1375,6 +1375,7 @@ int main()
         std::vector<SquareCell*> fmCells;
         std::vector<SquareCell*> allCells;
         int routingCount = 0;
+        int vaCount = 0;
 
         for (auto* k : miXXEditor->modTargets)
         {
@@ -1385,14 +1386,23 @@ int main()
 
             allCells.push_back (c);
 
-            // The routing view's cells are SquareCells too, so they have to be told
-            // apart by their parameter: an mtxxy id is a routing depth, everything else
-            // in this page is a value.
-            if (c->getParamID().startsWith ("mtx"))
+            // Every view's cells are SquareCells, so they have to be told apart by their
+            // parameters: mtxxy is a routing depth, va* and filter* are the VA view, and
+            // everything else in this page is a value.
+            const auto id = c->getParamID();
+
+            if (id.startsWith ("mtx"))
                 ++routingCount;
+            else if (id.startsWith ("va") || id.startsWith ("filter"))
+                ++vaCount;
             else
                 fmCells.push_back (c);
         }
+
+        // The VA view: six oscillator cells (shape, sub, noise, level, detune, octave) and
+        // three filter cells (cutoff, resonance, drive).
+        check (vaCount == 9, "the VA view built its oscillator and filter cells",
+               juce::String (vaCount));
 
         // One for FM Index, then shape/ratio/level/feedback for each operator.
         const int expected = 1 + 4 * MiXXFmVoice::numOps;
