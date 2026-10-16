@@ -959,7 +959,7 @@ int main()
         {
             auto p = paramsForAlgo (4);
             p.vaLevel = 1.0f; // VA only
-            p.vaWave = w;
+            p.vaShape = w;
             p.vaOctave = 0;
             p.index = 0.0f;
 
@@ -984,7 +984,7 @@ int main()
         auto fmOnly = paramsForAlgo (4);
         auto blended = paramsForAlgo (4);
         blended.vaLevel = 0.5f;
-        blended.vaWave = 0;
+        blended.vaShape = 0;
 
         juce::AudioBuffer<float> a (2, blockLen), b (2, blockLen);
         juce::MidiBuffer m1, m2;
@@ -1009,7 +1009,7 @@ int main()
     {
         auto open = paramsForAlgo (4);
         open.vaLevel = 1.0f;
-        open.vaWave = 0; // saw: bright
+        open.vaShape = 0; // saw: bright
         open.index = 0.0f;
         open.filterOn = true;
         open.filterType = 0; // LP
@@ -1031,7 +1031,7 @@ int main()
     {
         auto p = paramsForAlgo (4);
         p.vaLevel = 1.0f;
-        p.vaWave = 1;
+        p.vaShape = 1;
         p.index = 0.0f;
         p.filterOn = true;
         p.filterType = 2; // band pass

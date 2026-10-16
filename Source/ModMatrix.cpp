@@ -250,7 +250,11 @@ void applyModulation (const std::array<float, kNumModSources>& sources,
         }
         else if (slot.dest == dstVaPulseWidth)
         {
-            vp.vaPulseWidth = juce::jlimit (0.05f, 0.95f, vp.vaPulseWidth + amt * 0.45f);
+            // The slot keeps its index and its place in the destination list, so an old
+            // preset's routing still points here - it just drives the shape morph now
+            // instead of the old separate pulse width, which is the same idea expressed
+            // on the new axis.
+            vp.vaShape = juce::jlimit (0.0f, 1.0f, vp.vaShape + amt * 0.45f);
         }
         else if (slot.dest == dstFilterCutoff)
         {

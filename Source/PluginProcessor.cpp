@@ -155,7 +155,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     modDests.add ("Master");
     modDests.add ("VA Level");
     modDests.add ("VA Detune");
-    modDests.add ("VA Pulse Width");
+    modDests.add ("VA Shape");
     modDests.add ("Filter Cutoff");
     modDests.add ("Filter Reso");
     modDests.add ("Filter Drive");
@@ -187,9 +187,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "vaLevel", "VA Level",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
-    params.push_back (std::make_unique<juce::AudioParameterChoice> (
-        "vaWave", "VA Wave",
-        juce::StringArray { "Saw", "Square", "Sub", "Noise" }, 0));
+    // vaWave used to be a choice of four shapes. It is a 0..1 morph now, through the same
+    // shared tables the operators use, so the VA sweeps sine -> triangle -> saw -> square
+    // -> narrowing pulse instead of jumping between four waveforms.
+    //
+    // The parameter TYPE changed, so an old preset's shape selection does not carry over
+    // as the same shape: its normalised value maps onto the new axis, which means a patch
+    // that sat on Square lands somewhere in the middle of the sweep. Flagged deliberately
+    // rather than discovered.
+    //
+    // Defaults to saw, which is where the old list started.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaShape", "VA Shape",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f / 3.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterInt> (
         "vaOctave", "VA Octave", -2, 2, 0));
@@ -198,9 +208,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         "vaDetune", "VA Detune",
         juce::NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f));
 
+    // The sub and the noise are their own levels rather than two more entries in the shape
+    // list, so they blend with any shape instead of replacing it.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        "vaPulseWidth", "VA Pulse Width",
-        juce::NormalisableRange<float> (0.05f, 0.95f, 0.001f), 0.5f));
+        "vaSubLevel", "VA Sub Level",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "vaNoiseLevel", "VA Noise Level",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "filterOn", "Filter On", true));
@@ -643,10 +659,11 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     // M3b: VA layer and filter.
     vp.vaLevel      = getParam (apvts, "vaLevel");
-    vp.vaWave       = static_cast<int> (getParam (apvts, "vaWave"));
+    vp.vaShape      = getParam (apvts, "vaShape");
     vp.vaOctave     = static_cast<int> (getParam (apvts, "vaOctave"));
     vp.vaDetune     = getParam (apvts, "vaDetune");
-    vp.vaPulseWidth = getParam (apvts, "vaPulseWidth");
+    vp.vaSubLevel   = getParam (apvts, "vaSubLevel");
+    vp.vaNoiseLevel = getParam (apvts, "vaNoiseLevel");
     vp.filterOn     = getParam (apvts, "filterOn") > 0.5f;
     vp.filterType   = static_cast<int> (getParam (apvts, "filterType"));
     vp.cutoff       = getParam (apvts, "filterCutoff");

@@ -54,7 +54,7 @@ namespace
         if (id == "masterGain")  return mixxynth::dstMaster;
         if (id == "vaLevel")     return mixxynth::dstVaLevel;
         if (id == "vaDetune")    return mixxynth::dstVaDetune;
-        if (id == "vaPulseWidth") return mixxynth::dstVaPulseWidth;
+        if (id == "vaShape") return mixxynth::dstVaPulseWidth;
         if (id == "filterCutoff") return mixxynth::dstFilterCutoff;
         if (id == "filterReso")  return mixxynth::dstFilterReso;
         if (id == "filterDrive") return mixxynth::dstFilterDrive;
@@ -85,7 +85,7 @@ namespace
     // Parameters driven by controls other than ModKnob (combos, toggles, sliders).
     std::set<juce::String> nonKnobUiParams()
     {
-        std::set<juce::String> s { "algorithm", "vaWave", "vaOctave", "filterType", "filterOn",
+        std::set<juce::String> s { "algorithm", "vaOctave", "filterType", "filterOn",
                                    "mpeEnabled", "mpeMemberChannels" };
 
         for (int i = 0; i < MiXXFmVoice::numOps; ++i)
@@ -493,8 +493,8 @@ int main()
             return juce::String {};
         };
 
-        check (nameAt (mixxynth::dstVaPulseWidth) == "VA Pulse Width",
-               "VA Pulse Width is a modulation destination", nameAt (mixxynth::dstVaPulseWidth));
+        check (nameAt (mixxynth::dstVaPulseWidth) == "VA Shape",
+               "VA Shape is a modulation destination", nameAt (mixxynth::dstVaPulseWidth));
     }
 
     // ---- 8. (removed) FM routing edits and the algorithm ----------------

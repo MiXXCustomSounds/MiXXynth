@@ -193,6 +193,26 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
                 p.waveTables->makeCursor (p.opWave[i],
                                           frequency * static_cast<double> (p.ratio[i]));
 
+    // The VA runs at a single frequency for the whole range too, so its morph pair and
+    // its sub's are resolved here for the same reason the operator cursors are: doing it
+    // per sample would put a log2 and a table pick in the hot loop.
+    const double vaFreq = frequency * std::pow (2.0, static_cast<double> (p.vaOctave))
+                            * std::pow (2.0, static_cast<double> (p.vaDetune) / 1200.0);
+    const double vaInc = juce::jlimit (0.0, 0.49, vaFreq / sampleRate);
+    const double vaSubInc = juce::jlimit (0.0, 0.49, vaFreq * 0.5 / sampleRate);
+
+    mixxynth::OpWaveTables::Cursor vaCursor, vaSubCursor;
+
+    if (p.waveTables != nullptr)
+    {
+        vaCursor = p.waveTables->makeCursor (p.vaShape, vaFreq);
+
+        // The sub stays a square whatever the morph is doing. It is there for weight, and
+        // a narrow pulse an octave down is not weight.
+        vaSubCursor = p.waveTables->makeCursor (
+            3.0f / static_cast<float> (mixxynth::OpWaveTables::numShapes - 1), vaFreq * 0.5);
+    }
+
     for (int n = 0; n < numSamples; ++n)
     {
         float sum = 0.0f;
@@ -252,62 +272,50 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         const float vaCoef = gate ? 0.0025f : 0.0004f; // ~8 ms attack, ~50 ms release
         vaEnv += ((gate ? 1.0f : 0.0f) - vaEnv) * vaCoef;
 
-        float va = 0.0f;
+        float va = 0.0f;        // the morphed oscillator, scaled by the FM/VA blend
+        float vaExtras = 0.0f;  // sub and noise, which carry their own levels
 
-        if (p.vaLevel > 0.0f)
+        if (p.vaLevel > 0.0f || p.vaSubLevel > 0.0f || p.vaNoiseLevel > 0.0f)
         {
-            const double vaFreq = frequency * std::pow (2.0, static_cast<double> (p.vaOctave))
-                                  * std::pow (2.0, static_cast<double> (p.vaDetune) / 1200.0);
-            const double inc = juce::jlimit (0.0, 0.49, vaFreq / sampleRate);
-
-            vaPhase += inc;
+            vaPhase += vaInc;
 
             if (vaPhase >= 1.0)
                 vaPhase -= std::floor (vaPhase);
 
-            switch (p.vaWave)
+            // The morph, read from the same tables the operators read, so a VA saw and an
+            // operator saw are the same waveform and inherit the same band-limiting. This
+            // replaced a polyBLEP saw/square pair, which also means the VA is now clean at
+            // high pitch rather than only mostly clean.
+            va = mixxynth::OpWaveTables::read (vaCursor, static_cast<float> (vaPhase));
+
+            if (p.vaSubLevel > 0.0f)
             {
-                case 1: // square with pulse width
-                {
-                    const double duty = juce::jlimit (0.05, 0.95, static_cast<double> (p.vaPulseWidth));
-                    float s = vaPhase < duty ? 1.0f : -1.0f;
-                    s -= polyBlep (vaPhase, inc);
-                    s += polyBlep (std::fmod (vaPhase + (1.0 - duty), 1.0), inc);
-                    va = s;
-                    break;
-                }
-                case 2: // sub square, one octave down
-                {
-                    const double subInc = inc * 0.5;
-                    vaSubPhase += subInc;
+                vaSubPhase += vaSubInc;
 
-                    if (vaSubPhase >= 1.0)
-                        vaSubPhase -= std::floor (vaSubPhase);
+                if (vaSubPhase >= 1.0)
+                    vaSubPhase -= std::floor (vaSubPhase);
 
-                    float s = vaSubPhase < 0.5 ? 1.0f : -1.0f;
-                    s -= polyBlep (vaSubPhase, subInc);
-                    va = s;
-                    break;
-                }
-                case 3: // white noise
-                {
-                    noiseState = noiseState * 1664525u + 1013904223u;
-                    va = static_cast<float> ((noiseState >> 8) & 0xffffu) / 32768.0f - 1.0f;
-                    break;
-                }
-                default: // saw
-                {
-                    float s = static_cast<float> (2.0 * vaPhase - 1.0);
-                    s -= polyBlep (vaPhase, inc);
-                    va = s;
-                    break;
-                }
+                vaExtras += mixxynth::OpWaveTables::read (vaSubCursor,
+                                                          static_cast<float> (vaSubPhase))
+                              * p.vaSubLevel;
+            }
+
+            // Noise, from the same LCG the old Noise entry used.
+            if (p.vaNoiseLevel > 0.0f)
+            {
+                noiseState = noiseState * 1664525u + 1013904223u;
+                vaExtras += (static_cast<float> ((noiseState >> 8) & 0xffffu) / 32768.0f - 1.0f)
+                              * p.vaNoiseLevel;
             }
         }
 
         // Additive, not a crossfade: turning VA Level up must not duck the FM
         // patch, which is what the old (1 - vaLevel) blend did.
-        const float mixed = sum + va * p.vaLevel * vaEnv;
+        //
+        // Sub and noise deliberately bypass the blend. They are their own levels, so a
+        // patch with the FM stack in charge can still add a sub, which is the whole point
+        // of taking them out of the shape list.
+        const float mixed = sum + (va * p.vaLevel + vaExtras) * vaEnv;
 
         // --- M3b: per-voice TPT state-variable filter ---
         float filtered = mixed;

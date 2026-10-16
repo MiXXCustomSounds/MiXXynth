@@ -1428,12 +1428,20 @@ public:
 
         addKnob (ranged (p, "vaLevel"), mixxynth::dstVaLevel, "VA Level");
         addKnob (ranged (p, "vaDetune"), mixxynth::dstVaDetune, "VA Detune");
-        addKnob (ranged (p, "vaPulseWidth"), mixxynth::dstVaPulseWidth, "Pulse Width");
+
+        // The shape morph, through the same tables the operators use. The destination is
+        // the old pulse width slot, which is the same idea on the new axis - and keeping
+        // that slot means an existing modulation routing still points somewhere sensible.
+        addKnob (ranged (p, "vaShape"), mixxynth::dstVaPulseWidth, "Shape");
+
+        // Their own levels rather than shape-list entries, so they blend with any shape.
+        addKnob (ranged (p, "vaSubLevel"), mixxynth::dstOff, "Sub");
+        addKnob (ranged (p, "vaNoiseLevel"), mixxynth::dstOff, "Noise");
+
         addKnob (ranged (p, "filterCutoff"), mixxynth::dstFilterCutoff, "Cutoff");
         addKnob (ranged (p, "filterReso"), mixxynth::dstFilterReso, "Resonance");
         addKnob (ranged (p, "filterDrive"), mixxynth::dstFilterDrive, "Drive");
 
-        addChoice (p, "vaWave", wave);
         addChoice (p, "filterType", filterType);
 
         filterOn = addToggle (p, "filterOn", "Filter On");

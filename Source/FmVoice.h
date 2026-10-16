@@ -45,8 +45,17 @@ public:
         float vaLevel     = 0.0f;    // 0 = FM only, 1 = VA only
         float vaDetune    = 0.0f;    // cents
         int   vaOctave    = 0;       // -2..+2
-        int   vaWave      = 0;       // 0 saw, 1 square, 2 sub, 3 noise
-        float vaPulseWidth = 0.5f;   // square duty (0.05..0.95)
+
+        // The same 0..1 morph the operators use, through the same shared tables. Past
+        // the square it narrows the duty, so one control is the shape selector and the
+        // pulse width control at once. Defaults to saw, which is where the old
+        // four-entry shape list started.
+        float vaShape     = 1.0f / 3.0f;
+
+        // Their own levels rather than entries in a shape list, so they can be blended
+        // with any shape instead of replacing it.
+        float vaSubLevel  = 0.0f;    // square, one octave below
+        float vaNoiseLevel = 0.0f;   // white noise
 
         bool  filterOn    = false;
         int   filterType  = 0;       // 0 LP, 1 HP, 2 BP
