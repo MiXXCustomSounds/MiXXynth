@@ -2819,8 +2819,49 @@ juce::String MiXXynthEditor::modDebug (int slot) const
     return modPage != nullptr ? modPage->debugDump (slot) : juce::String ("no page");
 }
 
+void MiXXynthEditor::pushModulatedValues()
+{
+    // False when nothing is sounding, so every control falls back to its parameter rather
+    // than sitting on the last value it saw and pretending to be live.
+    const bool live = proc.getModulatedValuesLive();
+
+    for (auto* t : modTargets)
+    {
+        auto* param = t->getParam();
+        const int dest = t->getDestIndex();
+
+        // Only a destination that something is actually driving shows a live value. The
+        // colour already decides "this is modulated" from the assignments alone; setting a
+        // live value on a control nothing drives would paint it blue for no reason.
+        bool modulated = false;
+
+        for (const auto& a : t->getAssignments())
+            if (a.source != mixxynth::srcOff && std::abs (a.depth) > 1.0e-6f)
+            {
+                modulated = true;
+                break;
+            }
+
+        // A drag wins over the readout. Pushing the modulated value while the user is
+        // dragging would make the fill jump out from under the cursor.
+        if (! live || ! modulated || t->isAdjusting()
+              || param == nullptr || dest <= 0 || dest >= mixxynth::kNumModDests)
+        {
+            t->setLiveValue01 (-1.0f);
+            continue;
+        }
+
+        // The PARAMETER does the normalising, because it knows its own skew. Filter cutoff
+        // is the case that makes this matter: 5000 Hz is nowhere near the middle of a log
+        // range, so converting it by hand would put the fill in the wrong place.
+        t->setLiveValue01 (param->convertTo0to1 (proc.getModulatedValue (dest)));
+    }
+}
+
 void MiXXynthEditor::runTabPolls()
 {
+    pushModulatedValues();
+
     if (fmPage != nullptr)
         fmPage->refreshAudibility();
 

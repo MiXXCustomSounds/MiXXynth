@@ -114,8 +114,31 @@ namespace mixxynth
                          int numSamples,
                          std::array<float, kNumModSources>& out);
 
+    // The total modulation aimed at each destination, before any of it is applied.
+    //
+    // Its own pass, so that what is APPLIED and what is DISPLAYED come from the same
+    // number. Recomputing the total separately for the display is exactly how a readout
+    // ends up disagreeing with what you hear.
+    std::array<float, kNumModDests> modTotals (const std::array<float, kNumModSources>& sources,
+                                               const ModParams& params);
+
     // Applies the slot matrix on top of a base VoiceParams, per voice.
     void applyModulation (const std::array<float, kNumModSources>& sources,
                           const ModParams& params,
                           MiXXFmVoice::VoiceParams& vp);
+
+    // The same, from totals already computed. A caller that wants both the sound and the
+    // readout pays for the totals once rather than twice.
+    void applyModulation (const std::array<float, kNumModDests>& totals,
+                          MiXXFmVoice::VoiceParams& vp);
+
+    // The modulated value of every destination, in the destination's OWN parameter units,
+    // read back OUT of the VoiceParams after modulation has been applied.
+    //
+    // Read back rather than recomputed, for the same reason as the totals: it is what the
+    // voice is actually using, so the readout cannot drift from the sound. The editor
+    // converts these to normalised with the real parameter, which is what keeps a skewed
+    // range like cutoff honest.
+    void publishModulatedValues (const MiXXFmVoice::VoiceParams& vp,
+                                 std::array<float, kNumModDests>& out);
 }

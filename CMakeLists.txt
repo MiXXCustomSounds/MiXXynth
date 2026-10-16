@@ -122,6 +122,14 @@ target_link_libraries(MiXXynthSmoke PRIVATE
            juce::juce_recommended_warning_flags
 )
 target_compile_features(MiXXynthSmoke PRIVATE cxx_std_20)
+
+# The smoke test holds a MiXXVoiceManager on the stack, and that is ~52 KB. The default
+# 1 MB stack left so little headroom that adding 13 KB to the manager overflowed it - and
+# the failure mode was a crash BEFORE main with no output whatsoever, which is close to
+# undebuggable. An explicit reserve makes the budget deliberate instead of accidental.
+if (MSVC)
+    target_link_options(MiXXynthSmoke PRIVATE /STACK:8388608)
+endif()
 target_compile_definitions(MiXXynthSmoke PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

@@ -203,6 +203,17 @@ void MiXXVoiceManager::setNoteTimbre (int channel, int note, float value)
 void MiXXVoiceManager::renderRange (juce::AudioBuffer<float>& buffer, int startSample, int numSamples,
                                     const MiXXFmVoice::VoiceParams& params, const mixxynth::ModParams& mod)
 {
+    // Only the newest voice's modulated values are kept, because only one set can ever be
+    // displayed at once. Publishing all 64 would be 64x the work for 63 sets nobody reads,
+    // and it would be work spent on the audio thread for the sake of a readout.
+    const Slot* newest = nullptr;
+
+    for (const auto& s : slots)
+        if (s.voice.isActive() && (newest == nullptr || s.order > newest->order))
+            newest = &s;
+
+    publishedModValuesValid = (newest != nullptr);
+
     // Short sub-blocks keep modulation smooth without recomputing per sample.
     int offset = 0;
 
@@ -225,7 +236,14 @@ void MiXXVoiceManager::renderRange (juce::AudioBuffer<float>& buffer, int startS
                                       chunk, sources);
 
             auto vp = params; // base patch plus this voice's modulation
-            mixxynth::applyModulation (sources, mod, vp);
+
+            // Totals first, so what is heard and what is displayed come from one
+            // calculation rather than two that can drift apart.
+            mixxynth::applyModulation (mixxynth::modTotals (sources, mod), vp);
+
+            if (&s == newest)
+                mixxynth::publishModulatedValues (vp, publishedModValues);
+
             s.voice.renderAdd (buffer, startSample + offset, chunk, vp);
         }
 
@@ -312,6 +330,15 @@ int MiXXVoiceManager::getActiveVoiceCount() const
             ++n;
 
     return n;
+}
+
+bool MiXXVoiceManager::publishModulatedValues (std::array<float, mixxynth::kNumModDests>& out) const
+{
+    if (! publishedModValuesValid)
+        return false;
+
+    out = publishedModValues;
+    return true;
 }
 
 void MiXXVoiceManager::publishShapePhases (std::array<float, mixxynth::kMaxShapes>& out) const

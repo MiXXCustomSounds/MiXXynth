@@ -56,6 +56,14 @@ public:
     // playheads. Called from the audio thread; -1 means "no voice to show".
     void publishShapePhases (std::array<float, mixxynth::kMaxShapes>& out) const;
 
+    // Copies the newest active voice's modulated destination values, in parameter units,
+    // for the editor's live readouts.
+    //
+    // Returns false when nothing is sounding, which is what tells the editor to stop
+    // showing live values rather than keep showing the last ones - a stale readout that
+    // looks live is worse than no readout.
+    bool publishModulatedValues (std::array<float, mixxynth::kNumModDests>& out) const;
+
     // Global pitch offset (semitones) applied on top of each voice's unison
     // detune. MPE will extend this to per-note offsets.
     void setPitchBendSemitones (float semitones);
@@ -84,6 +92,14 @@ private:
     int countHeldNotes() const;
 
     std::array<Slot, maxVoices> slots;
+
+    // The newest voice's modulated values, in parameter units, for the editor's readouts.
+    //
+    // ONE array rather than one per slot. Only the newest voice's set is ever read, so 63
+    // of 64 copies would be dead weight - and 64 copies is 13 KB, which is enough to matter
+    // when this manager is a stack local, as it is in the tests.
+    std::array<float, mixxynth::kNumModDests> publishedModValues {};
+    bool publishedModValuesValid = false;
     double sampleRate = 44100.0;
     juce::uint64 counter = 0;
     float mixGain = 1.0f; // smoothed voice-count compensation

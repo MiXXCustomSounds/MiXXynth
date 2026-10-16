@@ -204,51 +204,100 @@ namespace
     }
 }
 
-void applyModulation (const std::array<float, kNumModSources>& sources,
-                      const ModParams& params,
-                      MiXXFmVoice::VoiceParams& vp)
+std::array<float, kNumModDests> modTotals (const std::array<float, kNumModSources>& sources,
+                                           const ModParams& params)
 {
+    std::array<float, kNumModDests> totals {};
+
     for (const auto& slot : params.slots)
     {
         if (slot.source == srcOff || slot.dest == dstOff || slot.depth == 0.0f)
             continue;
 
-        const float amt = slot.depth * sources[static_cast<size_t> (slot.source)];
+        if (slot.dest < 0 || slot.dest >= kNumModDests)
+            continue;
+
+        totals[static_cast<size_t> (slot.dest)] +=
+            slot.depth * sources[static_cast<size_t> (slot.source)];
+    }
+
+    return totals;
+}
+
+void publishModulatedValues (const MiXXFmVoice::VoiceParams& vp,
+                             std::array<float, kNumModDests>& out)
+{
+    out.fill (0.0f);
+
+    out[static_cast<size_t> (dstFmIndex)] = vp.index;
+
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+    {
+        out[static_cast<size_t> (dstOp1Ratio + i)] = vp.ratio[static_cast<size_t> (i)];
+        out[static_cast<size_t> (dstOp1Level + i)] = vp.level[static_cast<size_t> (i)];
+    }
+
+    out[static_cast<size_t> (dstMaster)]       = vp.master;
+    out[static_cast<size_t> (dstVaLevel)]      = vp.vaLevel;
+    out[static_cast<size_t> (dstVaDetune)]     = vp.vaDetune;
+    out[static_cast<size_t> (dstVaPulseWidth)] = vp.vaShape;
+    out[static_cast<size_t> (dstFilterCutoff)] = vp.cutoff;
+    out[static_cast<size_t> (dstFilterReso)]   = vp.resonance;
+    out[static_cast<size_t> (dstFilterDrive)]  = vp.drive;
+
+    // The 30 matrix depths, walked in the same order mtxIndexToPair walks them. That shared
+    // order IS the contract between a slot's destination index and this write: get it wrong
+    // in one place and every routing readout is silently off by one pair.
+    int k = 0;
+
+    for (int s = 0; s < MiXXFmVoice::numOps; ++s)
+        for (int d = 0; d < MiXXFmVoice::numOps; ++d)
+            if (s != d)
+                out[static_cast<size_t> (dstMtxFirst + k++)] =
+                    vp.mod[static_cast<size_t> (s)][static_cast<size_t> (d)];
+}
+
+void applyModulation (const std::array<float, kNumModDests>& totals,
+                      MiXXFmVoice::VoiceParams& vp)
+{
+    for (int dest = 0; dest < kNumModDests; ++dest)
+    {
+        const float amt = totals[static_cast<size_t> (dest)];
 
         if (amt == 0.0f)
             continue;
 
-        if (slot.dest == dstFmIndex)
+        if (dest == dstFmIndex)
         {
             // Matches the parameter's 0..2 range, so modulating FM Index cannot
             // push it past the musical end of the knob.
             vp.index = juce::jlimit (0.0f, 2.0f, vp.index + amt * 2.0f);
         }
-        else if (slot.dest >= dstOp1Ratio && slot.dest <= dstOp6Ratio)
+        else if (dest >= dstOp1Ratio && dest <= dstOp6Ratio)
         {
-            const int i = slot.dest - dstOp1Ratio;
+            const int i = dest - dstOp1Ratio;
             vp.ratio[static_cast<size_t> (i)] =
                 juce::jlimit (0.0f, 16.0f, vp.ratio[static_cast<size_t> (i)] + amt * 16.0f);
         }
-        else if (slot.dest >= dstOp1Level && slot.dest <= dstOp6Level)
+        else if (dest >= dstOp1Level && dest <= dstOp6Level)
         {
-            const int i = slot.dest - dstOp1Level;
+            const int i = dest - dstOp1Level;
             vp.level[static_cast<size_t> (i)] =
                 juce::jlimit (0.0f, 1.0f, vp.level[static_cast<size_t> (i)] + amt);
         }
-        else if (slot.dest == dstMaster)
+        else if (dest == dstMaster)
         {
             vp.master = juce::jlimit (0.0f, 1.0f, vp.master + amt);
         }
-        else if (slot.dest == dstVaLevel)
+        else if (dest == dstVaLevel)
         {
             vp.vaLevel = juce::jlimit (0.0f, 1.0f, vp.vaLevel + amt);
         }
-        else if (slot.dest == dstVaDetune)
+        else if (dest == dstVaDetune)
         {
             vp.vaDetune = juce::jlimit (-100.0f, 100.0f, vp.vaDetune + amt * 50.0f);
         }
-        else if (slot.dest == dstVaPulseWidth)
+        else if (dest == dstVaPulseWidth)
         {
             // The slot keeps its index and its place in the destination list, so an old
             // preset's routing still points here - it just drives the shape morph now
@@ -256,27 +305,36 @@ void applyModulation (const std::array<float, kNumModSources>& sources,
             // on the new axis.
             vp.vaShape = juce::jlimit (0.0f, 1.0f, vp.vaShape + amt * 0.45f);
         }
-        else if (slot.dest == dstFilterCutoff)
+        else if (dest == dstFilterCutoff)
         {
             // Modulating cutoff by ear needs an exponential sweep, so the depth
             // is applied in octaves rather than hertz.
             vp.cutoff = juce::jlimit (20.0f, 20000.0f,
                                       vp.cutoff * std::pow (2.0f, amt * 5.0f));
         }
-        else if (slot.dest == dstFilterReso)
+        else if (dest == dstFilterReso)
         {
             vp.resonance = juce::jlimit (0.0f, 0.98f, vp.resonance + amt);
         }
-        else if (slot.dest == dstFilterDrive)
+        else if (dest == dstFilterDrive)
         {
             vp.drive = juce::jlimit (0.0f, 1.0f, vp.drive + amt);
         }
         else
         {
             int s = 0, d = 1;
-            mtxIndexToPair (slot.dest - dstMtxFirst, s, d);
-            vp.mod[s][d] = juce::jlimit (0.0f, 1.0f, vp.mod[s][d] + amt);
+            mtxIndexToPair (dest - dstMtxFirst, s, d);
+            vp.mod[static_cast<size_t> (s)][static_cast<size_t> (d)] =
+                juce::jlimit (0.0f, 1.0f,
+                              vp.mod[static_cast<size_t> (s)][static_cast<size_t> (d)] + amt);
         }
     }
+}
+
+void applyModulation (const std::array<float, kNumModSources>& sources,
+                      const ModParams& params,
+                      MiXXFmVoice::VoiceParams& vp)
+{
+    applyModulation (modTotals (sources, params), vp);
 }
 }

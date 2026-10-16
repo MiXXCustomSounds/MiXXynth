@@ -887,12 +887,34 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             shapePhases[static_cast<size_t> (i)].store (phases[static_cast<size_t> (i)],
                                                         std::memory_order_relaxed);
     }
+
+    // The same for the modulated destination values. This is what lets a control MOVE and
+    // turn blue rather than only being able to say that it could.
+    {
+        std::array<float, mixxynth::kNumModDests> values;
+        const bool live = voiceManager.publishModulatedValues (values);
+
+        modValuesLive.store (live, std::memory_order_relaxed);
+
+        // Not stored when nothing is sounding: the reader keys off the flag, and leaving
+        // the old numbers in place would make a stale readout look live.
+        if (live)
+            for (int i = 0; i < mixxynth::kNumModDests; ++i)
+                modValues[static_cast<size_t> (i)].store (values[static_cast<size_t> (i)],
+                                                          std::memory_order_relaxed);
+    }
 }
 
 float MiXXynthProcessor::getShapePhase (int index) const
 {
     index = juce::jlimit (0, mixxynth::kMaxShapes - 1, index);
     return shapePhases[static_cast<size_t> (index)].load (std::memory_order_relaxed);
+}
+
+float MiXXynthProcessor::getModulatedValue (int destIndex) const
+{
+    destIndex = juce::jlimit (0, mixxynth::kNumModDests - 1, destIndex);
+    return modValues[static_cast<size_t> (destIndex)].load (std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* MiXXynthProcessor::createEditor()

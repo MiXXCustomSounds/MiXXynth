@@ -955,11 +955,16 @@ int main()
 
     // --- 14. VA layer: every waveform renders finite, audible and bounded ---
     {
-        for (int w = 0; w < 4; ++w)
+        // All seven morph stops, not the four this started with. The pulse stops were
+        // added later and the test never grew with them, so three of the seven shapes
+        // were going untested - which is the kind of gap that only shows up when one of
+        // them breaks.
+        for (int w = 0; w < mixxynth::OpWaveTables::numShapes; ++w)
         {
             auto p = paramsForAlgo (4);
             p.vaLevel = 1.0f; // VA only
-            p.vaShape = w;
+            p.vaShape = static_cast<float> (w)
+                          / static_cast<float> (mixxynth::OpWaveTables::numShapes - 1);
             p.vaOctave = 0;
             p.index = 0.0f;
 
@@ -2077,6 +2082,62 @@ int main()
         ok = check (std::abs (idxSoft - noIdxSoft) > 1.0e-5,
                     "velToIndex changes the tone at low velocity",
                     std::abs (idxSoft - noIdxSoft)) && ok;
+    }
+
+    // --- The published modulated values (M6 step 5) ---
+    //
+    // The chain that makes a modulated control move: totals -> apply -> read back. Checked
+    // end to end, because each link is useless without the others and a break in any of
+    // them looks exactly like "the display does nothing" - which is indistinguishable from
+    // the display never having been wired up.
+    {
+        mixxynth::ModParams m;
+        m.slots[0].source = mixxynth::srcMacro1;
+        m.slots[0].dest = mixxynth::dstFmIndex;
+        m.slots[0].depth = 0.5f;
+
+        std::array<float, mixxynth::kNumModSources> sources {};
+        sources[static_cast<size_t> (mixxynth::srcMacro1)] = 1.0f;
+
+        const auto totals = mixxynth::modTotals (sources, m);
+
+        ok = check (std::abs (totals[static_cast<size_t> (mixxynth::dstFmIndex)] - 0.5f) < 1.0e-6f,
+                    "mod totals: the slot's amount reaches its destination",
+                    totals[static_cast<size_t> (mixxynth::dstFmIndex)]) && ok;
+
+        // Every other destination must be untouched. A single-destination check would pass
+        // even if the totals pass were writing every slot to the same place.
+        float stray = 0.0f;
+
+        for (int i = 0; i < mixxynth::kNumModDests; ++i)
+            if (i != mixxynth::dstFmIndex)
+                stray = juce::jmax (stray, std::abs (totals[static_cast<size_t> (i)]));
+
+        ok = check (stray == 0.0f, "mod totals: nothing lands on another destination", stray) && ok;
+
+        MiXXFmVoice::VoiceParams vp;
+        vp.index = 0.25f;
+        mixxynth::applyModulation (totals, vp);
+
+        ok = check (std::abs (vp.index - 1.25f) < 1.0e-6f,
+                    "mod apply: FM Index moves by depth x 2", vp.index) && ok;
+
+        std::array<float, mixxynth::kNumModDests> published;
+        mixxynth::publishModulatedValues (vp, published);
+
+        ok = check (std::abs (published[static_cast<size_t> (mixxynth::dstFmIndex)] - vp.index) < 1.0e-6f,
+                    "mod publish: the readout is what was applied",
+                    published[static_cast<size_t> (mixxynth::dstFmIndex)]) && ok;
+
+        // A destination nobody drove must read back as its BASE, not as zero. The editor
+        // asks for all of them, and zero would draw a full operator as a silent one.
+        MiXXFmVoice::VoiceParams plain;
+        plain.level[2] = 0.7f;
+        mixxynth::publishModulatedValues (plain, published);
+
+        ok = check (std::abs (published[static_cast<size_t> (mixxynth::dstOp3Level)] - 0.7f) < 1.0e-6f,
+                    "mod publish: an unmodulated value reads back as its base",
+                    published[static_cast<size_t> (mixxynth::dstOp3Level)]) && ok;
     }
 
     std::printf (ok ? "SMOKE OK\n" : "SMOKE FAILED\n");

@@ -93,6 +93,17 @@ public:
     // Published once per block for the editor's playheads (negative = idle).
     float getShapePhase (int index) const;
 
+    // The newest voice's modulated value of one destination, in that destination's own
+    // parameter units. Meaningless unless getModulatedValuesLive() is true.
+    float getModulatedValue (int destIndex) const;
+
+    // Whether anything is currently sounding, and therefore whether the modulated values
+    // above mean anything at all.
+    bool getModulatedValuesLive() const
+    {
+        return modValuesLive.load (std::memory_order_relaxed);
+    }
+
     // ---- FX rack (M4b workstream 4) ----------------------------------------
     // The rack sits at the end of processBlock, after the voice mix. An Off or
     // bypassed slot is skipped, so an empty rack is a bit-exact passthrough.
@@ -167,6 +178,14 @@ private:
     std::array<mixxynth::ShapeSet, 2> shapeBuffers;
     std::atomic<int> activeShapeBuffer { 0 };
     std::array<std::atomic<float>, mixxynth::kMaxShapes> shapePhases {};
+
+    // The newest voice's modulated destination values, in parameter units. Same relaxed
+    // single-writer (audio) / single-reader (UI) contract as shapePhases.
+    std::array<std::atomic<float>, mixxynth::kNumModDests> modValues {};
+
+    // False when nothing is sounding. Without it the editor would keep showing the last
+    // values it saw, and a stale readout that looks live is worse than none.
+    std::atomic<bool> modValuesLive { false };
     std::atomic<int> stateLoadCount { 0 };
 
     // Shared band-limited operator waveform tables (M4b). One copy for the whole

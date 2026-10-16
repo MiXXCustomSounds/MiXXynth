@@ -75,6 +75,10 @@ public:
     // the editor audit can drive the Matrix page's mode-switch logic directly.
     void runTabPolls();
 
+    // Pushes the newest voice's modulated values into the controls, so a modulated cell
+    // moves and turns blue instead of only being able to say that it could.
+    void pushModulatedValues();
+
     // Rolls the FM tab's dice. Exposed so the audit can check the roll's
     // invariants without driving a button.
     void rollFmDice();

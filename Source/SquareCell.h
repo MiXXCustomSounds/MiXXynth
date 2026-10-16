@@ -49,7 +49,7 @@ public:
     // The modulated value, pushed by the editor's timer. Negative means the cell
     // is not modulated, which is when it falls back to the parameter's own value
     // and paints orange.
-    void setLiveValue01 (float v01);
+    void setLiveValue01 (float v01) override;
 
     // Overrides the text drawn in the cell. The operator shape cell uses this to
     // say "sine" rather than "0.000", which is the difference between a readout and

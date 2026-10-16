@@ -45,6 +45,13 @@ public:
     // Repaint hook, so this class can change what is drawn without knowing how.
     virtual void repaintForMod() = 0;
 
+    // The live modulated value, normalised 0..1, or negative for "not modulated".
+    //
+    // Pushed by the editor's timer. The default does nothing: a control that does not draw
+    // a value has nothing to move, and a knob shows an arc rather than a height. SquareCell
+    // overrides it, which is why this lives on the base rather than being a cell-only call.
+    virtual void setLiveValue01 (float) {}
+
     // Re-read the parameter and repaint. The editor calls this after a preset load
     // or a dice roll, so a control shows the value that is actually there rather
     // than the one it last painted.
