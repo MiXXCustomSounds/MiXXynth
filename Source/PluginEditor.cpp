@@ -757,9 +757,19 @@ public:
             }
         }
 
-        // ---- the VA view ----
-        // The VA oscillator and the per-voice filter. The shape is the same morph the
-        // operators use, so its cell names the shape exactly as the operator shape cells do.
+        // ---- the VA panel ----
+        // The VA oscillator and the per-voice filter. This is a SECTION of the tab rather
+        // than another reading of the grid: the VA is one oscillator and one filter, not
+        // six operators, so it sits in its own column to the left of the grid and stays
+        // visible whichever view the grid is showing.
+        vaHeader.setText ("VA", juce::dontSendNotification);
+        vaHeader.setJustificationType (juce::Justification::centredLeft);
+        vaHeader.setColour (juce::Label::textColourId, juce::Colour (0xff7c8896));
+        vaHeader.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        addAndMakeVisible (vaHeader);
+
+        // The shape is the same morph the operators use, so its cell names the shape
+        // exactly as the operator shape cells do.
         vaCells[0] = addVaCell (ranged (p, "vaShape"), mixxynth::dstVaPulseWidth, "VA Shape");
         vaCells[0]->setValueTextFunction ([] (float v)
         {
@@ -1012,11 +1022,9 @@ public:
         g.drawFittedText (view == 1
                             ? "Each cell sends its row's operator into its column's operator. The diagonal is that "
                               "operator's own output, not feedback - feedback is the Fb column back in Values."
-                          : view == 2
-                            ? "The VA oscillator and the per-voice filter. The shape is the same morph the operators "
-                              "use, so past the square it narrows into a pulse rather than stopping at a square."
                             : "Drag a cell up or down to set its value. Drop a modulation source onto one to modulate it, "
-                              "then drag the white line to set how far the modulation reaches.",
+                              "then drag the white line to set how far the modulation reaches. The VA panel holds "
+                              "the VA oscillator and the filter.",
                           getLocalBounds().removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
@@ -1055,15 +1063,24 @@ public:
         constexpr int valueCols = 6;
         constexpr int valueSquares = 8;   // the envelope counts as three
 
-        // Squares are sized by whichever constraint binds first: the room there is, or
-        // the room the squares need. The values view is the wider of the two, so it is
-        // always the binding one. This is what lets the grid scale with the window
-        // without ever distorting, and why the minimum window size has to be large
-        // enough for the squares to stay legible.
+        // The VA panel is three squares wide and sits to the LEFT of the grid, so the
+        // width budget has to cover both. That is what stops the grid being sized as if it
+        // had the whole tab and then colliding with the panel.
+        constexpr int vaCols = 3;
+        constexpr int vaRows = 5;   // oscillator x2, envelope, filter x2
+
+        // Squares are sized by whichever constraint binds first: the room there is, or the
+        // room the squares need. The values view is the wider of the two grid views, so it
+        // is always the binding one. This is what lets the grid scale with the window
+        // without ever distorting, and why the minimum window size has to be large enough
+        // for the squares to stay legible.
+        //
+        // Across: the grid is valueSquares wide, the panel is vaCols wide, and there is a
+        // gap between them on top of the gaps inside each.
         const int rowH = (b.getHeight() - gap * (numRows - 1)) / numRows;
 
         const int square = juce::jmax (22, juce::jmin (rowH,
-                                      (b.getWidth() - gap * (valueCols - 1)) / valueSquares));
+                                      (b.getWidth() - gap * (valueCols + vaCols)) / (valueSquares + vaCols)));
 
         const int tailW = square * 3;   // the envelope column, values view only
 
@@ -1071,8 +1088,16 @@ public:
         const int gridW = 5 * square + tailW + gap * (valueCols - 1);
         const int gridH = numRows * square + (numRows - 1) * gap;
 
-        const int originX = b.getX() + juce::jmax (0, (b.getWidth() - gridW) / 2);
+        const int vaW = vaCols * square + (vaCols - 1) * gap;
+
+        // The panel and the grid are centred together as one block, so the pair reads as a
+        // single instrument rather than as two things that happen to share a tab.
+        const int totalW = vaW + gap + gridW;
+
+        const int originX = b.getX() + juce::jmax (0, (b.getWidth() - totalW) / 2);
         const int originY = b.getY() + juce::jmax (0, (b.getHeight() - gridH) / 2);
+
+        const int gridX = originX + vaW + gap;
 
         // Columns are contiguous: each starts one gap after the previous one ends. The
         // wider last column's position already accounts for its width, so it must NOT
@@ -1082,7 +1107,7 @@ public:
         {
             const int w = (! routing && col == valueCols - 1) ? tailW : square;
 
-            return juce::Rectangle<int> (originX + col * (square + gap),
+            return juce::Rectangle<int> (gridX + col * (square + gap),
                                          originY + row * (square + gap), w, square);
         };
 
@@ -1153,39 +1178,74 @@ public:
                 adsrEditors[i]->setBounds (cellAt (row, valueCols - 1).reduced (1));
         }
 
-        // ---- VA view ----
-        // The VA is one oscillator, not six, so this is deliberately not a six-row grid: a
-        // row of cells for the oscillator, the envelope across some width, then a row for
-        // the filter. It shares the operator cells' square size so the two views still read
-        // as the same instrument.
+        // ---- the VA panel ----
+        // A column three squares wide to the LEFT of the grid. Its header shares the grid's
+        // header row, so the two read across as one layout:
+        //
+        //   [ VA ]              | FM INDEX | icons | ADSR
+        //   [shape][sub][noise] | OP 1
+        //   [level][det] [oct]  | OP 2
+        //   [    envelope    ]  | OP 3
+        //   [FILT] [  mode   ]  | OP 4
+        //   [cut] [reso][drv]   | OP 5
+        //                       | OP 6
         {
-            auto va = b;
-            const int cell = juce::jmax (22, juce::jmin (square, va.getHeight() / 3));
+            vaHeader.setBounds (originX, originY, vaW, square);
 
-            auto oscRow = va.removeFromTop (cell);
+            auto va = juce::Rectangle<int> (originX, originY + square + gap,
+                                            vaW, vaRows * square + (vaRows - 1) * gap);
 
-            for (int i = 0; i < 6; ++i)
+            // Takes the next square out of the row and advances past it and its gap.
+            auto take = [&] (juce::Rectangle<int>& row)
+            {
+                auto r = row.removeFromLeft (square);
+                row.removeFromLeft (gap);
+                return r.reduced (1);
+            };
+
+            // The next row of the panel.
+            auto nextRow = [&]
+            {
+                auto r = va.removeFromTop (square);
+                va.removeFromTop (gap);
+                return r;
+            };
+
+            // The oscillator: shape, sub, noise, then level, detune, octave. Six controls in
+            // a three-wide column is two rows rather than the one they had as a view.
+            auto row1 = nextRow();
+
+            for (int i = 0; i < 3; ++i)
                 if (vaCells[static_cast<size_t> (i)] != nullptr)
-                    vaCells[static_cast<size_t> (i)]->setBounds (oscRow.removeFromLeft (cell).reduced (1));
+                    vaCells[static_cast<size_t> (i)]->setBounds (take (row1));
 
-            va.removeFromTop (gap);
+            auto row2 = nextRow();
+
+            for (int i = 3; i < 6; ++i)
+                if (vaCells[static_cast<size_t> (i)] != nullptr)
+                    vaCells[static_cast<size_t> (i)]->setBounds (take (row2));
+
+            // The envelope takes the panel's whole width. Three squares is a wide, short
+            // envelope, which is exactly the proportion the operator envelopes get.
+            auto envRow = nextRow();
 
             if (vaEnvEditor != nullptr)
-                vaEnvEditor->setBounds (va.removeFromTop (cell)
-                                          .removeFromLeft (juce::jmin (cell * 3, va.getWidth()))
-                                          .reduced (1));
+                vaEnvEditor->setBounds (envRow.reduced (1));
 
-            va.removeFromTop (gap);
-
-            auto filtRow = va.removeFromTop (cell);
+            // The filter's on/off and its mode. The mode is a choice, so it stays a combo
+            // box: a cell can hold a value, not a list.
+            auto filtRow = nextRow();
 
             if (! vaToggles.isEmpty())
-                vaToggles[0]->setBounds (filtRow.removeFromLeft (cell).reduced (1));
+                vaToggles[0]->setBounds (take (filtRow));
 
-            vaFilterType.setBounds (filtRow.removeFromLeft (cell * 2).reduced (1, cell / 4));
+            vaFilterType.setBounds (filtRow.removeFromLeft (square * 2 + gap).reduced (1, square / 5));
+
+            // Cutoff, resonance, drive.
+            auto valRow = nextRow();
 
             for (int i = 6; i < vaOwned.size(); ++i)
-                vaOwned[i]->setBounds (filtRow.removeFromLeft (cell).reduced (1));
+                vaOwned[i]->setBounds (take (valRow));
         }
     }
 
@@ -1254,13 +1314,13 @@ private:
 
         // The operator cells are the shared axis: values and routing both label their rows
         // with them, which is what makes switching between those two views move nothing.
-        // The VA view has no operator rows, so they have to go there.
         //
-        // This list was the one applyView did not know about, and the operator cells sat
-        // on top of the VA envelope and the filter row because of it - a column of six
-        // green boxes down the middle of a view that has no operators in it.
+        // They used to be switched off for the VA, back when the VA was a third view of
+        // the grid. It is a panel beside the grid now, so there is nothing to switch off
+        // for - and this list being forgotten is what put a column of operator boxes on
+        // top of the VA content in the first place.
         for (auto* t : opOnToggles)
-            t->setVisible (values || routing);
+            t->setVisible (true);
 
         // indexCell is cells[0], so this covers it.
         for (auto* c : cells)
@@ -1274,16 +1334,21 @@ private:
         for (auto* e : adsrEditors)
             e->setVisible (values);
 
+        // The VA panel is a SECTION of the tab rather than a reading of the grid, so it
+        // is visible in both views. It was a third view itself until the panel moved
+        // beside the grid, which is why it used to be gated on the view.
         for (auto* c : vaOwned)
-            c->setVisible (! values && ! routing);
+            c->setVisible (true);
 
-        vaFilterType.setVisible (! values && ! routing);
+        vaFilterType.setVisible (true);
 
         for (auto* t : vaToggles)
-            t->setVisible (! values && ! routing);
+            t->setVisible (true);
 
         if (vaEnvEditor != nullptr)
-            vaEnvEditor->setVisible (! values && ! routing);
+            vaEnvEditor->setVisible (true);
+
+        vaHeader.setVisible (true);
 
         resized();
         repaint();
@@ -1301,7 +1366,7 @@ private:
 
     MiXXynthEditor& ed;
     DiceButton diceButton;
-    ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing", "VA" } };
+    ViewSwitch viewSwitch { juce::StringArray { "Values", "Routing" } };
     juce::Label audibility;
     juce::Label adsrHeader;
     juce::OwnedArray<GridIcon> headerIcons;
@@ -1335,6 +1400,7 @@ private:
     juce::OwnedArray<OperatorCell> vaToggles;  // the filter on/off
     juce::OwnedArray<AdsrEditor> vaEnvOwned;
     AdsrEditor* vaEnvEditor = nullptr;
+    juce::Label vaHeader;
 
     juce::Random rng;
     juce::OwnedArray<SquareCell> ownedCells;

@@ -110,9 +110,9 @@ Run the standalone and confirm by ear/eye:
       cell's label names the shape as you drag through the morph
 - [ ] FM tab, Routing view: each routing cell changes the timbre; the diagonal
       toggles that operator into the output
-- [ ] FM tab, VA view: the shape cell sweeps the morph, Sub and Noise add to it, the
-      envelope draws and responds, and filter type, cutoff, resonance and drive all
-      respond
+- [ ] FM tab, VA panel (left of the grid, visible in BOTH views): the shape cell sweeps
+      the morph, Sub and Noise add to it, the envelope draws and responds, and filter
+      type, cutoff, resonance and drive all respond
 - [ ] Voice tab: polyphony limits held notes; unison thickens and spreads
 - [ ] Mod tab: 32 slot rows, source/destination/depth all editable
 - [ ] Sidebar (any tab): all seven shape editors are visible and keep their position
@@ -132,7 +132,7 @@ Run the standalone and confirm by ear/eye:
       "Clear all modulation" removes it
 - [ ] FM tab, Routing view: move a routing cell while an algorithm is selected -> it
       switches to Free, keeps your edit, and audibly reroutes
-- [ ] FM tab, VA view: moving Cutoff is audible once the FILT cell switches the filter
+- [ ] FM tab, VA panel: moving Cutoff is audible once the FILT cell switches the filter
       in; the cell itself shows whether the filter is engaged
 - [ ] No dial is clipped or reads an obviously wrong position
 - [ ] Save the project, reopen it, and confirm the shapes you drew came back

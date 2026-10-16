@@ -878,7 +878,7 @@ int main()
                 return "#" + juce::String (idx);
             };
 
-            for (int v = 0; v < 3; ++v)
+            for (int v = 0; v < 2; ++v)
             {
                 miXXEditor->setFmView (v);
 
@@ -909,6 +909,34 @@ int main()
 
             miXXEditor->setFmView (0);
         }
+    }
+
+    // The VA panel belongs to the LEFT of the grid. That is a layout requirement rather
+    // than an incidental consequence of the order things were constructed in, so it is
+    // asserted rather than assumed.
+    {
+        mixxynth::ui::SquareCell* vaShape = nullptr;
+        mixxynth::ui::SquareCell* indexCell = nullptr;
+
+        for (auto* k : miXXEditor->modTargets)
+        {
+            auto* c = dynamic_cast<mixxynth::ui::SquareCell*> (k);
+
+            if (c == nullptr)
+                continue;
+
+            if (c->getParamID() == "vaShape")  vaShape = c;
+            if (c->getParamID() == "fmIndex")  indexCell = c;
+        }
+
+        check (vaShape != nullptr && indexCell != nullptr,
+               "the VA panel and the grid both have cells",
+               juce::String (vaShape != nullptr ? 1 : 0) + "/" + juce::String (indexCell != nullptr ? 1 : 0));
+
+        if (vaShape != nullptr && indexCell != nullptr)
+            check (vaShape->getRight() <= indexCell->getX(),
+                   "the VA panel sits to the left of the grid",
+                   juce::String (vaShape->getRight()) + " <= " + juce::String (indexCell->getX()));
     }
 
     for (int i = 0; i < miXXEditor->getNumTabs(); ++i)

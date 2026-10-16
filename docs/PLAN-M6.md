@@ -239,11 +239,13 @@ audit checks, 0 failures; smoke OK; the build is warning-clean.
 - Both live on the **Voice tab** with polyphony and unison, because both are properties
   of a voice rather than of an oscillator or a filter.
 
-- **Consolidation**: the VA/Filt tab is gone. The FM tab has three views -
-  `Values | Routing | VA` - and `ViewSwitch` takes a list of segment names rather
-  than a hardcoded pair, because the tab has more than two readings now. The VA view
-  holds the oscillator, its envelope and the per-voice filter; the filter's mode
-  stays a combo box because a cell holds a value, not a list.
+- **Consolidation**: the VA/Filt tab is gone, and the VA is a PANEL to the left of the
+  grid rather than a third view of it. The view switch is back to `Values | Routing`,
+  because the VA is one oscillator and one filter rather than another reading of six
+  operators - so it belongs beside the grid and stays visible in both views. Its header
+  shares the grid's header row and its five rows line up with OP 1-5. The grid's square
+  size is now budgeted across the panel and the grid together, which is what stops the
+  grid being sized as if it had the whole tab and then colliding with the panel.
 
 - **Step 1** (`fabaa53`): `SquareCell` and `ModTarget` exist, build and are tested.
 - **Step 2**: `ModKnob` derives from `ModTarget`, and its duplicate drag-drop, menu
