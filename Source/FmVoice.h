@@ -30,6 +30,15 @@ public:
         float sustain[numOps];
         float release[numOps];
         float feedback[numOps] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
+        // Where each operator sits in the stereo image, -1 (hard left) to +1 (hard right).
+        //
+        // Only a CARRIER's pan is audible, because in FM a modulator is heard through what it
+        // modulates rather than on its own. That is a property of the synthesis rather than a
+        // limitation of the control: on a two-carrier patch it spreads the two across the field,
+        // and on a single-carrier patch there is nothing to spread.
+        float pan[numOps] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
         float mod[numOps][numOps] = {}; // mod[src][dst]
         bool carrier[numOps] = { true, true, true, true, true, true };
         float index    = 3.0f;
@@ -242,8 +251,14 @@ private:
     // what drift is supposed to not be.
     juce::uint32 driftSeed = 0x9e3779b9u;
 
-    float svfIc1 = 0.0f;
-    float svfIc2 = 0.0f;
+    // The voice filter's integrator state, ONE PAIR PER CHANNEL.
+    //
+    // Two pairs rather than one because the two channels are no longer the same signal once the
+    // carriers are panned: one filter fed a mono sum would undo the panning entirely. With every
+    // pan at its default the two pairs see identical input and track identically, so a patch that
+    // does not use panning is bit-for-bit what it was.
+    float svfIc1[2] = { 0.0f, 0.0f };
+    float svfIc2[2] = { 0.0f, 0.0f };
 
     // Cached TPT coefficients. The filter is on by default, so recomputing
     // tan() per sample per voice was the hot path; it now runs once per change.

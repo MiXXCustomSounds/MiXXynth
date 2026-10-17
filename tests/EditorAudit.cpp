@@ -21,6 +21,7 @@
 #include "../Source/PatchBar.h"
 #include "../Source/PluginEditor.h"
 #include "../Source/PluginProcessor.h"
+#include "../Source/SnapValues.h"
 #include "../Source/SquareCell.h"
 #include "../Source/Fx/FxRack.h"
 #include "../Source/Fx/WeirdVerbFx.h"
@@ -73,6 +74,10 @@ namespace
             if (id == "op" + n + "fltCutoff") return mixxynth::dstOp1FilterCutoff + i;
             if (id == "op" + n + "fltReso")   return mixxynth::dstOp1FilterReso + i;
             if (id == "op" + n + "fltDrive")  return mixxynth::dstOp1FilterDrive + i;
+
+            // The pan cells were dstOff until six destinations were added for them, so this is
+            // the audit being told the gap has closed rather than the audit being relaxed.
+            if (id == "op" + n + "pan")       return mixxynth::dstOp1Pan + i;
         }
 
         for (int s = 0; s < MiXXFmVoice::numOps; ++s)
@@ -202,6 +207,14 @@ int main()
         check (nameAt (mixxynth::dstFilterDrive) == "Filter Drive", "name[FilterDrive]", nameAt (mixxynth::dstFilterDrive));
         check (nameAt (mixxynth::dstMtxFirst) == "Op1 > Op2", "name[first matrix cell]", nameAt (mixxynth::dstMtxFirst));
         check (nameAt (mixxynth::kNumModDests - 1) == "Op6 > Op5", "name[last matrix cell]", nameAt (mixxynth::kNumModDests - 1));
+
+        // The pan destinations sit between the per-operator filters and the matrix, so these also
+        // pin down that they were APPENDED rather than slotted in beside the level or ratio they
+        // belong to - which would have repointed every saved patch's routing at something else.
+        check (nameAt (mixxynth::dstOp1Pan) == "Op1 Pan", "name[Op1Pan]", nameAt (mixxynth::dstOp1Pan));
+        check (nameAt (mixxynth::dstOp6Pan) == "Op6 Pan", "name[Op6Pan]", nameAt (mixxynth::dstOp6Pan));
+        check (mixxynth::dstOp6Pan + 1 == mixxynth::dstMtxFirst,
+               "the pan destinations end where the matrix begins", "");
     }
     else
     {
@@ -582,7 +595,22 @@ int main()
             algoParam->endChangeGesture();
         }
 
-        miXXEditor->rollFmDice();
+        // This drives the Randomizer with a fixed seed - the same call the patch bar's dice makes,
+        // and the reason the check can say what the roll SHOULD have done rather than only that it
+        // did something.
+        //
+        // ONLY the FM section is unlocked. The check is about the FM roll's invariants, and
+        // letting the dice roll the FX section as well would leave modules sitting in the rack for
+        // the rack checks further down - which are a different test's fixture, and were passing
+        // only because the old FM-only dice never touched them.
+        for (int s = 0; s < mixxynth::kNumRollSections; ++s)
+            proc.randomizer.setLocked (s, s != mixxynth::rollFm);
+
+        proc.randomizer.roll (20261017);
+
+        // Left as found: no section locked, which is the state the rest of the audit expects.
+        for (int s = 0; s < mixxynth::kNumRollSections; ++s)
+            proc.randomizer.setLocked (s, false);
 
         bool inRange = true;
 
@@ -1519,6 +1547,84 @@ int main()
         check (SquareCell::valueFromDrag (0.5f, 100.0f, 100.0f) == 0.5f,
                "not moving leaves the value alone");
 
+        // --- the same cell turned 90 degrees ---
+        //
+        // A pan cell is this widget rotated, so the same claims have to hold with x where y was.
+        // The SIGN is the part worth checking: a horizontal control that DECREASED to the right
+        // would be a pan that moves the wrong way, and copying the vertical version's minus sign
+        // across is exactly how that happens.
+        check (SquareCell::valueFromDragX (0.5f, 100.0f, 170.0f) == 1.0f,
+               "70 px RIGHT from the middle reaches the top",
+               juce::String (SquareCell::valueFromDragX (0.5f, 100.0f, 170.0f), 3));
+        check (SquareCell::valueFromDragX (0.5f, 100.0f, 30.0f) == 0.0f,
+               "70 px LEFT from the middle reaches the bottom",
+               juce::String (SquareCell::valueFromDragX (0.5f, 100.0f, 30.0f), 3));
+
+        if (auto* panParam = cellProc.apvts.getParameter ("op1pan"))
+        {
+            SquareCell panCell ("Op1 Pan", panParam, mixxynth::dstOp1Pan);
+            panCell.setBounds (0, 0, 60, 60);
+            panCell.setAxis (SquareCell::Axis::horizontal);
+
+            check (panCell.getAxisForTest() == SquareCell::Axis::horizontal,
+                   "the pan cell is horizontal", "");
+
+            // Registered where the feedback cell beside it is not, so an LFO can auto-pan it.
+            check (panCell.isModTarget(), "the pan cell accepts a modulation source", "");
+
+            // The fill mode is derived from the parameter's range, not set by the caller, so this
+            // is also a check that the pan parameter is genuinely BIPOLAR.
+            check (panCell.fillsFromCentre(),
+                   "a bipolar horizontal cell fills from its centre", "");
+
+            panParam->setValueNotifyingHost (0.5f);   // centre, which is the default
+
+            check (panCell.fillRect().getWidth() < 1.0f, "pan at centre fills nothing",
+                   juce::String (panCell.fillRect().getWidth(), 2));
+
+            panParam->setValueNotifyingHost (0.0f);   // hard left
+
+            const auto leftFill = panCell.fillRect();
+
+            check (leftFill.getWidth() > 25.0f
+                     && leftFill.getCentreX() < panCell.xForValue01 (0.5f),
+                   "hard left fills to the left of centre",
+                   juce::String (leftFill.getWidth(), 2));
+
+            panParam->setValueNotifyingHost (1.0f);   // hard right
+
+            const auto rightFill = panCell.fillRect();
+
+            check (rightFill.getWidth() > 25.0f
+                     && rightFill.getCentreX() > panCell.xForValue01 (0.5f),
+                   "hard right fills to the right of centre",
+                   juce::String (rightFill.getWidth(), 2));
+
+            // The SAME widget and the SAME parameter, left vertical: nothing about the rotation
+            // leaks into a cell that did not ask for it. This is the check that says the change
+            // is a rotation rather than a replacement.
+            //
+            // The value is put at the bottom of its range first, because that is the one value
+            // where "fills from the bottom" and "fills from the centre" look different: at the
+            // top both fill the whole cell and the check would pass either way.
+            panParam->setValueNotifyingHost (0.0f);
+
+            SquareCell vertical ("Op1 Pan", panParam, mixxynth::dstOff);
+            vertical.setBounds (0, 0, 60, 60);
+
+            check (! vertical.fillsFromCentre(),
+                   "a vertical cell never fills from the centre", "");
+
+            const auto verticalFill = vertical.fillRect();
+
+            check (verticalFill.getHeight() < 1.0f && verticalFill.getWidth() > 50.0f,
+                   "the vertical cell still fills from the bottom",
+                   juce::String (verticalFill.getHeight(), 2));
+
+            // Back to the default, so a later check does not inherit a hard-panned operator.
+            panParam->setValueNotifyingHost (0.5f);
+        }
+
         // The white line sits at value + depth, and stacks one per source.
         cell.setModAssignments ({ { mixxynth::srcLfo1, 0.25f } });
 
@@ -1604,8 +1710,8 @@ int main()
                "the filter page built its cells",
                juce::String (filterPageCount) + " of " + juce::String (3 * MiXXFmVoice::numOps));
 
-        // One for FM Index, then shape/ratio/level/feedback for each operator.
-        const int expected = 1 + 4 * MiXXFmVoice::numOps;
+        // One for FM Index, then shape/ratio/level/feedback/pan for each operator.
+        const int expected = 1 + 5 * MiXXFmVoice::numOps;
 
         check (static_cast<int> (fmCells.size()) == expected,
                "the values view built one cell per value, plus FM Index",
@@ -1753,6 +1859,10 @@ int main()
         auto* op1Ratio = cellFor ("op1ratio");
         auto* op1Fbk   = cellFor ("op1feedback");
 
+        // The VALUES view's last column. Pan is the rightmost of the six, so this - and not the
+        // feedback cell beside it - is what the envelope section has to clear.
+        auto* op1Pan   = cellFor ("op1pan");
+
         const auto envelopes = miXXEditor->getAdsrEditors();
         auto* op1Env = envelopes.empty() ? nullptr : envelopes.front();
 
@@ -1774,7 +1884,8 @@ int main()
             // continuing it. Measured off the grid's own last column, so it has to be wider
             // than the gap between two cells.
             const int cellGap = op1Ratio->getX() - op1Shape->getRight();
-            const int dividerGapPx = op1Env != nullptr ? op1Env->getX() - op1Fbk->getRight() : 0;
+            const int dividerGapPx = (op1Env != nullptr && op1Pan != nullptr)
+                                       ? op1Env->getX() - op1Pan->getRight() : 0;
 
             check (dividerGapPx > cellGap,
                    "the envelope section is set apart by a divider, not a cell gap",
@@ -1791,10 +1902,10 @@ int main()
             auto* vaNoise = cellFor ("vaNoiseLevel");
             auto* indexCell2 = cellFor ("fmIndex");
 
-            if (vaNoise != nullptr && indexCell2 != nullptr && op1Env != nullptr && op1Fbk != nullptr)
+            if (vaNoise != nullptr && indexCell2 != nullptr && op1Env != nullptr && op1Pan != nullptr)
             {
                 const int leftGap  = indexCell2->getX() - vaNoise->getRight();
-                const int rightGap = op1Env->getX() - op1Fbk->getRight();
+                const int rightGap = op1Env->getX() - op1Pan->getRight();
 
                 check (std::abs (leftGap - rightGap) <= 1,
                        "the grid is flanked symmetrically by its two sections",
@@ -2134,6 +2245,196 @@ int main()
                "the temp preset is removed from the bank", "");
 
         proc.randomizer.setLocked (mixxynth::rollFx, false);
+    }
+
+    // ---- 18. the patch moves: saving, undo and redo, and the Snap sweep ----
+    //
+    // Separate from the bar's own block above because these are about the SESSION rather than
+    // about the bar's wiring. The bar has to be fetched again: its pointer is scoped to that
+    // block, and reaching into it from here would be a dangling reference waiting to happen.
+    {
+        auto* bar = miXXEditor->getPatchBar();
+
+        if (bar == nullptr)
+        {
+            std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);
+            return failures == 0 ? 0 : 1;
+        }
+
+    // --- the preset readout has room for two rows ---
+    //
+    // The reported bug: the preset name was cut off at the top AND the bottom. That is what a
+    // wrapped label looks like inside a one-row box - the text is centred vertically, so half the
+    // loss comes off each end. The bar had 20 px of usable height and the label was given 14.
+    {
+        check (bar->statusHeightForTest() >= bar->statusLineHeightForTest() * 2,
+               "the preset readout has room for two rows",
+               juce::String (bar->statusHeightForTest()) + "px for "
+                   + juce::String (bar->statusLineHeightForTest()) + "px rows");
+    }
+
+    // --- the save dialog's pre-fill round-trips ---
+    //
+    // The dialog is filled with "Category - Name" and parses that same string back, so the two
+    // have to agree. They did not: the box was filled with the bare name, so accepting the
+    // pre-fill stripped the category and re-saving wrote a second copy under "Other" rather than
+    // updating the preset that was loaded.
+    {
+        const juce::String category ("Bass");
+        const juce::String name ("My Patch");
+
+        juce::String outCategory;
+        juce::String outName;
+
+        mixxynth::PresetStore::splitName (category + mixxynth::presetNameSeparator + name,
+                                          outCategory, outName);
+
+        check (outCategory == category && outName == name,
+               "the save dialog's pre-fill round-trips",
+               outCategory + " / " + outName);
+    }
+
+    // --- saving two presets keeps both ---
+    //
+    // The reported bug: save one preset, save another, and the first is gone. The check above
+    // deliberately uses a single unique name and only asks whether the bank GREW - which is
+    // exactly the question that cannot see this one.
+    {
+        // `=` rather than parentheses: with parentheses this is a function declaration, not a
+        // variable, because juce::String is a type name - the classic most-vexing parse.
+        const juce::String stamp = juce::String (juce::Time::getMillisecondCounter());
+
+        const juce::String nameA ("Keep A " + stamp);
+        const juce::String nameB ("Keep B " + stamp);
+
+        const int a = bar->saveAs ("Other", nameA);
+        const int b = bar->saveAs ("Other", nameB);
+
+        check (a >= 0 && b >= 0 && a != b, "two saves make two presets",
+               juce::String (a) + " and " + juce::String (b));
+
+        // Both have to still be findable by name. That is what "forgotten" means.
+        check (proc.presets.store().indexOf ("Other", nameA) >= 0,
+               "the first saved preset survives the second save", "");
+
+        check (proc.presets.store().indexOf ("Other", nameB) >= 0,
+               "the second saved preset is in the bank", "");
+
+        proc.presets.remove (proc.presets.store().indexOf ("Other", nameA));
+        proc.presets.remove (proc.presets.store().indexOf ("Other", nameB));
+        bar->refresh();
+    }
+
+    // --- undo steps back one move at a time, and redo comes forward again ---
+    //
+    // The reported bug: undo "goes to a seemingly random place in history". With a single undo
+    // slot and a roll path that did not fill it, the slot still held whatever was captured last -
+    // a preset load, or an older roll - rather than the step before.
+    //
+    // Two explicit parameter moves rather than two rolls: Randomizer::clockSeed() can return the
+    // same value twice inside one millisecond, and then two rolls are the same patch and this
+    // check would pass while testing nothing.
+    {
+        auto setParam = [&proc] (const juce::String& id, float realValue)
+        {
+            if (auto* p = proc.apvts.getParameter (id))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 (realValue));
+                p->endChangeGesture();
+            }
+        };
+
+        proc.presets.loadInit();
+
+        const auto print0 = mixxynth::fingerprint (proc.buildStateTree());
+
+        proc.presets.rememberForUndo();
+        setParam ("op1level", 0.5f);
+        const auto print1 = mixxynth::fingerprint (proc.buildStateTree());
+
+        proc.presets.rememberForUndo();
+        setParam ("op1level", 0.9f);
+        const auto print2 = mixxynth::fingerprint (proc.buildStateTree());
+
+        check (print0 != print1 && print1 != print2, "two moves make two distinct patches", "");
+
+        check (bar->undoRoll(), "undo runs", "");
+
+        const auto afterUndo = mixxynth::fingerprint (proc.buildStateTree());
+
+        check (afterUndo == print1, "undo goes back exactly one step",
+               juce::String (afterUndo == print1 ? 1 : 0));
+
+        check (proc.presets.canRedo(), "undo leaves something to redo", "");
+
+        check (bar->redoRoll(), "redo runs", "");
+
+        check (mixxynth::fingerprint (proc.buildStateTree()) == print2,
+               "redo comes forward again",
+               juce::String (mixxynth::fingerprint (proc.buildStateTree()) == print2 ? 1 : 0));
+
+        // And a second undo keeps walking back rather than restoring the same patch again.
+        check (bar->undoRoll() && bar->undoRoll(), "undo steps back repeatedly", "");
+
+        check (mixxynth::fingerprint (proc.buildStateTree()) == print0,
+               "two undos reach the start",
+               juce::String (mixxynth::fingerprint (proc.buildStateTree()) == print0 ? 1 : 0));
+    }
+
+    // --- every parameter can still be turned with Snap on ---
+    //
+    // The reported bug: with Snap on, knobs in the Voice section refuse to move and set
+    // themselves to zero. That is a property of the snap SET rather than of any one knob, so
+    // this sweeps the whole parameter list and asks whether the snapped value varies at all
+    // across the knob's travel. A parameter whose entire travel snaps to one value is a knob
+    // that cannot be turned.
+    {
+        const bool wasOn = mixxynth::SnapValues::isEnabled();
+        mixxynth::SnapValues::setEnabled (true);
+
+        juce::StringArray stuck;
+        juce::StringArray topClamped;
+
+        for (auto* raw : proc.getParameters())
+        {
+            auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (raw);
+
+            if (ranged == nullptr)
+                continue;
+
+            const auto id = ranged->getParameterID();
+
+            float lowest = 1.0e9f;
+            float highest = -1.0e9f;
+
+            for (int i = 0; i <= 200; ++i)
+            {
+                const float v = mixxynth::SnapValues::snap (*ranged, static_cast<float> (i) / 200.0f);
+                lowest = juce::jmin (lowest, v);
+                highest = juce::jmax (highest, v);
+            }
+
+            if (highest - lowest < 1.0e-4f)
+                stuck.add (id);
+
+            // The other half of the same failure: if the top of the travel cannot be reached,
+            // part of the knob is dead. Reported separately because the cause is different -
+            // a snap set whose points run past the parameter's maximum.
+            const float topSnapped = mixxynth::SnapValues::snap (*ranged, 1.0f);
+
+            if (topSnapped < 0.999f)
+                topClamped.add (id + "=" + juce::String (topSnapped, 3));
+        }
+
+        check (stuck.isEmpty(), "every parameter is turnable with Snap on",
+               stuck.joinIntoString (","));
+
+        check (topClamped.isEmpty(), "every parameter can reach the top with Snap on",
+               topClamped.joinIntoString (","));
+
+        mixxynth::SnapValues::setEnabled (wasOn);
+    }
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

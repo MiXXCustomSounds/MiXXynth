@@ -362,7 +362,7 @@ namespace
     class GridIcon : public juce::Component
     {
     public:
-        enum Kind { shape, ratio, level, feedback };
+        enum Kind { shape, ratio, level, feedback, pan };
 
         explicit GridIcon (Kind k) : kind (k) {}
 
@@ -433,47 +433,34 @@ namespace
                     g.fillPath (head);
                     break;
                 }
+
+                case pan:
+                {
+                    // A left/right bar with the centre marked: the same picture the cell under
+                    // it draws, so the column heading and the control say the same thing.
+                    const float w = s * 0.86f;
+                    const float barH = juce::jmax (1.4f, s * 0.10f);
+                    const float left = c.x - w * 0.5f;
+
+                    g.fillRect (left, c.y - barH * 0.5f, w, barH);
+
+                    // A taller tick at the centre, which is where "no pan" is.
+                    g.fillRect (c.x - 0.8f, c.y - s * 0.34f, 1.6f, s * 0.68f);
+
+                    // Arrowheads at both ends: this control moves BOTH ways, unlike a level.
+                    juce::Path heads;
+                    heads.addTriangle (left, c.y, left + s * 0.26f, c.y - s * 0.24f,
+                                       left + s * 0.26f, c.y + s * 0.24f);
+                    heads.addTriangle (left + w, c.y, left + w - s * 0.26f, c.y - s * 0.24f,
+                                       left + w - s * 0.26f, c.y + s * 0.24f);
+                    g.fillPath (heads);
+                    break;
+                }
             }
         }
 
     private:
         Kind kind;
-    };
-
-    // A square button showing a die face. The word "Dice" told you what the button
-    // did; the die says the same thing in the space the grid has to spare.
-    class DiceButton : public juce::Button
-    {
-    public:
-        DiceButton() : juce::Button ("Dice")
-        {
-            setTooltip ("Randomise every control in this section");
-        }
-
-        void paintButton (juce::Graphics& g, bool over, bool down) override
-        {
-            const auto b = getLocalBounds().toFloat().reduced (1.0f);
-            const bool hot = over || down;
-
-            g.setColour (hot ? juce::Colour (0xff232b34) : juce::Colour (0xff161c22));
-            g.fillRoundedRectangle (b, 4.0f);
-            g.setColour (hot ? juce::Colour (0xffffa53d) : juce::Colour (0xff39434f));
-            g.drawRoundedRectangle (b.reduced (0.5f), 4.0f, 1.5f);
-
-            // Six pips in two columns of three.
-            const auto c = b.getCentre();
-            const float s = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f;
-            const float r = juce::jmax (1.6f, s * 0.12f);
-            const float dx = s * 0.23f, dy = s * 0.27f;
-
-            g.setColour (hot ? juce::Colour (0xffffa53d) : juce::Colour (0xffc2ccd6));
-
-            for (int col = 0; col < 2; ++col)
-                for (int row = 0; row < 3; ++row)
-                    g.fillEllipse (c.x + (col == 0 ? -dx : dx) - r,
-                                   c.y + (static_cast<float> (row) - 1.0f) * dy - r,
-                                   r * 2.0f, r * 2.0f);
-        }
     };
 
     // The operator cell: the label and the on/off switch in one square. The old
@@ -835,9 +822,6 @@ public:
             }
         }
 
-        diceButton.onClick = [this] { rollDice(); };
-        addAndMakeVisible (diceButton);
-
         // Snap or Free. Bound to the parameter so it saves with the patch, and the label is
         // set from the value on the editor's poll rather than here - one place decides what
         // the button says, and it is the same place that tells the controls how to behave.
@@ -855,6 +839,7 @@ public:
         headerIcons.add (new GridIcon (GridIcon::ratio));
         headerIcons.add (new GridIcon (GridIcon::level));
         headerIcons.add (new GridIcon (GridIcon::feedback));
+        headerIcons.add (new GridIcon (GridIcon::pan));
 
         for (auto* icon : headerIcons)
             addAndMakeVisible (icon);
@@ -916,6 +901,34 @@ public:
             addCell (ranged (p, "op" + n + "ratio"), mixxynth::dstOp1Ratio + i, "Op" + n + " Ratio");
             addCell (ranged (p, "op" + n + "level"), mixxynth::dstOp1Level + i, "Op" + n + " Level");
             addCell (ranged (p, "op" + n + "feedback"), mixxynth::dstOff, "Op" + n + " Fb");
+
+            // The pan cell, TURNED 90 DEGREES: it fills outward from its centre and you drag
+            // RIGHT to pan right, LEFT to pan left. A vertical slider for a left/right value is
+            // a control you have to think about, which is why this one is not vertical like the
+            // columns beside it.
+            //
+            // It IS a modulation destination, so an LFO can auto-pan it. That is the difference
+            // between a placement and an effect, and it is why this cell is registered where the
+            // feedback cell beside it is not.
+            auto* pan = addCell (ranged (p, "op" + n + "pan"), mixxynth::dstOp1Pan + i,
+                                 "Op" + n + " Pan");
+            pan->setAxis (SquareCell::Axis::horizontal);
+
+            // "L64" / "C" / "R64" rather than "-0.500". A pan is a POSITION, and a signed number
+            // makes you convert it in your head every time you read it.
+            pan->setValueTextFunction ([] (float v)
+            {
+                const float p = juce::jlimit (-1.0f, 1.0f, v * 2.0f - 1.0f);
+                const int amount = juce::roundToInt (std::abs (p) * 100.0f);
+
+                if (amount == 0)
+                    return juce::String ("C");
+
+                return (p < 0.0f ? juce::String ("L") : juce::String ("R"))
+                         + juce::String (amount);
+            });
+
+            panCell[static_cast<size_t> (i)] = pan;
 
             // The envelope: the same editor the modulation section uses, so an
             // operator envelope looks and behaves like a modulation one. It is not a
@@ -1187,76 +1200,6 @@ public:
         refreshAudibility();
     }
 
-    // Randomises every knob on this page. The roll is constrained to musically
-    // usable ranges rather than 0..max, and at least one carrier is forced to be
-    // audible so a roll can never land on silence.
-    void rollDice()
-    {
-        auto& p = ed.processor();
-
-        auto set = [&p] (const juce::String& id, float realValue)
-        {
-            if (auto* param = ranged (p, id))
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (param->convertTo0to1 (realValue));
-                param->endChangeGesture();
-            }
-        };
-
-        auto read = [&p] (const juce::String& id)
-        {
-            if (auto* param = ranged (p, id))
-                return param->convertFrom0to1 (param->getValue());
-
-            return 0.0f;
-        };
-
-        juce::ignoreUnused (read);
-
-        // Which operators reach the output depends on the algorithm, so work the
-        // carriers out first and make sure one of them actually sounds.
-        const auto isCarrier = carrierMask();
-
-        // Ratio 0 stops an operator's phase advancing, so the roll picks from real
-        // musical ratios rather than the whole range.
-        static const float ratios[] = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f, 7.0f };
-
-        set ("fmIndex", 0.15f + rng.nextFloat() * 1.1f);
-
-        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-        {
-            const juce::String n = juce::String (i + 1);
-
-            set ("op" + n + "ratio", ratios[rng.nextInt (8)]);
-            set ("op" + n + "level", 0.15f + rng.nextFloat() * 0.85f);
-            set ("op" + n + "feedback", rng.nextFloat() * 0.7f);
-            set ("op" + n + "attack", rng.nextFloat() * 0.5f);
-            set ("op" + n + "decay", 0.05f + rng.nextFloat() * 1.95f);
-            set ("op" + n + "sustain", rng.nextFloat());
-            set ("op" + n + "release", 0.05f + rng.nextFloat() * 2.95f);
-            set ("op" + n + "wave", rng.nextFloat());
-        }
-
-        // Guarantee audibility: give one carrier a real ratio, a real level and an
-        // envelope that sustains.
-        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
-        {
-            if (! isCarrier[static_cast<size_t> (i)])
-                continue;
-
-            const juce::String n = juce::String (i + 1);
-
-            set ("op" + n + "ratio", ratios[rng.nextInt (8)]);
-            set ("op" + n + "level", 0.5f + rng.nextFloat() * 0.5f);
-            set ("op" + n + "sustain", 0.4f + rng.nextFloat() * 0.6f);
-            set ("op" + n + "decay", 0.1f + rng.nextFloat() * 1.5f);
-            break;
-        }
-
-        ed.setModStatus ("Dice rolled a new FM patch");
-    }
-
     // refreshWaveLabels is deliberately gone. It existed because the wave morph was
     // shown in a knob's label, and a knob does not know how to rename itself, so
     // something had to poll. The shape cell is given a text function instead, and
@@ -1407,13 +1350,13 @@ public:
         auto b = getLocalBounds().reduced (8);
         b.removeFromTop (18);   // the hint line, drawn in paint()
 
-        // Toolbar: the die, the view switch, then the audibility warning.
+        // Toolbar: the view switch, then the audibility warning. The dice used to lead this row;
+        // it lives in the patch bar now, beside the locks it works with.
         auto toolbar = b.removeFromTop (30);
-        diceButton.setBounds (toolbar.removeFromLeft (30).reduced (2));
-        toolbar.removeFromLeft (6);
 
-        // Beside the die: the two are both about what moving a control does rather than what
-        // it is set to.
+        // The snap switch is still here rather than with the dice, because it is about what
+        // moving a control does rather than about what the patch is - and it governs the
+        // controls on this page.
         snapButton.setBounds (toolbar.removeFromLeft (66).reduced (0, 2));
         toolbar.removeFromLeft (8);
 
@@ -1433,7 +1376,7 @@ public:
         // column and the first four value columns sit at identical x in both, so switching
         // views moves nothing.
         //
-        //   values:  operator, shape, ratio, level, fdbk
+        //   values:  operator, shape, ratio, level, fdbk, pan
         //   routing: operator, then one column per target operator
         //
         // Routing is the wider of the two, so the values view leaves slack on the right
@@ -1490,7 +1433,7 @@ public:
         // Following the view buys a section that hugs the grid in both, and more room for the
         // section's own controls than the routing view leaves. It costs a reflow when you
         // switch, which is the price of not having a permanent hole.
-        const int gridColsShown = routing ? gridSquares : 5;
+        const int gridColsShown = routing ? gridSquares : 6;
 
         const int gridW = gridColsShown * square + (gridColsShown - 1) * gap;
         const int gridH = numRows * square + (numRows - 1) * gap;
@@ -1583,11 +1526,14 @@ public:
             if (i < opOnToggles.size())
                 opOnToggles[i]->setBounds (cellAt (row, 0));
 
-            // Shape, ratio, level, feedback. cells[0] is FM Index, so the operator
-            // rows start at 1.
-            for (int c = 0; c < 4; ++c)
+            // Shape, ratio, level, feedback, pan. cells[0] is FM Index, so the operator
+            // rows start at 1 - and the stride here has to match the order the cells were
+            // CREATED in, which is the same order they are drawn in.
+            constexpr int valueCellsPerOp = 5;
+
+            for (int c = 0; c < valueCellsPerOp; ++c)
             {
-                const int idx = 1 + i * 4 + c;
+                const int idx = 1 + i * valueCellsPerOp + c;
 
                 if (idx < cells.size())
                     cells[idx]->setBounds (cellAt (row, 1 + c));
@@ -2033,8 +1979,6 @@ private:
     // worth more than two more of them on screen.
     static constexpr int modRowHeight = 44;
 
-    DiceButton diceButton;
-
     // Snap or Free, beside the die because they are both about what moving a control DOES
     // rather than what it is set to. The label shows the mode you are IN, not the one you
     // would switch to - a switch that names the other state is a switch people misread.
@@ -2064,6 +2008,11 @@ private:
     juce::OwnedArray<juce::ComboBox> filterTypeBoxes;
     juce::OwnedArray<SquareCell> filterOwned;
     std::array<SquareCell*, MiXXFmVoice::numOps> filterCutoffCell {};
+
+    // The per-operator pan cells. Held so the audit can check they are HORIZONTAL, which is a
+    // property of the control rather than of the layout - a pan cell that silently reverted to
+    // vertical would still be present and sized, and only the drag direction would be wrong.
+    std::array<SquareCell*, MiXXFmVoice::numOps> panCell {};
     std::array<SquareCell*, MiXXFmVoice::numOps> filterResoCell {};
     std::array<SquareCell*, MiXXFmVoice::numOps> filterDriveCell {};
 
@@ -3090,6 +3039,7 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
                               { "unison", "Unison" },
                               { "unisonDetune", "Unison Detune" },
                               { "unisonSpread", "Unison Spread" },
+                              { "voiceSpread", "Voice Spread" },
                               { "unisonPhaseRand", "Phase Random" },
                               { "pitchBendRange", "Bend Range" },
                               { "drift", "Drift" },
@@ -3267,8 +3217,12 @@ void MiXXynthEditor::resized()
 
     // The title and the patch bar share the header row: the bar is the widest thing in the
     // editor that is not a page, so it takes whatever the name does not need.
+    //
+    // 46 rather than 34, because the patch bar's preset readout needs two rows of text: the
+    // "Category / Name *" string wraps on a narrow bar, and a wrapped label in a one-row box
+    // is clipped at both ends. The bar is the thing that grew; the pages lost 12 px.
     {
-        auto header = b.removeFromTop (34);
+        auto header = b.removeFromTop (46);
 
         title.setBounds (header.removeFromLeft (132).reduced (10, 4));
 
@@ -3675,12 +3629,6 @@ void MiXXynthEditor::runTabPolls()
     // slot created by dragging a chip onto a knob never shows up in the list.
     if (fmPage != nullptr)
         fmPage->pollModRows();
-}
-
-void MiXXynthEditor::rollFmDice()
-{
-    if (fmPage != nullptr)
-        fmPage->rollDice();
 }
 
 void MiXXynthEditor::setFmView (int v)

@@ -30,6 +30,14 @@ public:
         float unisonDetune = 10.0f; // total detune spread in cents
         float unisonSpread = 0.5f;  // stereo spread of the unison stack (0..1)
         float phaseRand    = 0.0f;  // 0 = every voice starts in phase, 1 = anywhere
+
+        // Per-NOTE pan spread, independent of the unison stack's own spread above.
+        //
+        // The two are different axes and they compose: unison spread places the voices WITHIN
+        // one note's stack, this places the note itself. A patch with one carrier gets no
+        // stereo from anything operator-level, so this is the control that widens it - and it
+        // is why it is here rather than folded into unisonSpread.
+        float voiceSpread  = 0.0f;  // 0 = every note centred, 1 = hard L/R alternation
     };
 
     void prepare (double sampleRate);
@@ -102,6 +110,12 @@ private:
     bool publishedModValuesValid = false;
     double sampleRate = 44100.0;
     juce::uint64 counter = 0;
+
+    // Incremented once per NOTE rather than once per voice, because the per-note pan spread
+    // has to give every voice of one note the SAME side - a note whose unison stack landed on
+    // both sides at once would be a centred note, not a spread one.
+    juce::uint64 noteSerial = 0;
+
     float mixGain = 1.0f; // smoothed voice-count compensation
     float pitchBendSemitones = 0.0f;
 

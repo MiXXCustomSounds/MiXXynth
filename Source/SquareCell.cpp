@@ -120,7 +120,23 @@ juce::Colour SquareCell::fillColour() const
 juce::Rectangle<float> SquareCell::fillRect() const
 {
     auto b = getLocalBounds().toFloat().reduced (1.5f);
-    return b.removeFromBottom (b.getHeight() * juce::jlimit (0.0f, 1.0f, value01()));
+    const float v = juce::jlimit (0.0f, 1.0f, value01());
+
+    if (axis == Axis::vertical)
+        return b.removeFromBottom (b.getHeight() * v);
+
+    if (fillsFromCentre())
+    {
+        // Outward from the middle, to whichever side the value is on, so a pan at centre is an
+        // empty cell and full left or full right is a bar reaching the edge.
+        const float centre = b.getCentreX();
+        const float edge = b.getX() + b.getWidth() * v;
+
+        return edge >= centre ? b.withLeft (centre).withRight (edge)
+                              : b.withLeft (edge).withRight (centre);
+    }
+
+    return b.removeFromLeft (b.getWidth() * v);
 }
 
 float SquareCell::yForValue01 (float v01) const
@@ -129,9 +145,45 @@ float SquareCell::yForValue01 (float v01) const
     return b.getBottom() - b.getHeight() * juce::jlimit (0.0f, 1.0f, v01);
 }
 
+float SquareCell::xForValue01 (float v01) const
+{
+    auto b = getLocalBounds().toFloat().reduced (1.5f);
+    return b.getX() + b.getWidth() * juce::jlimit (0.0f, 1.0f, v01);
+}
+
+float SquareCell::posForValue01 (float v01) const
+{
+    return axis == Axis::vertical ? yForValue01 (v01) : xForValue01 (v01);
+}
+
+float SquareCell::axisPosOf (juce::Point<int> p) const
+{
+    return axis == Axis::vertical ? static_cast<float> (p.y) : static_cast<float> (p.x);
+}
+
+bool SquareCell::fillsFromCentre() const
+{
+    // Horizontal cells only. A vertical cell keeps filling from the bottom whatever its range:
+    // that is what every existing cell on the panel looks like, and a detune cell - which is
+    // bipolar - growing outward from its middle would be a change to how the whole grid reads.
+    if (axis != Axis::horizontal || source.p == nullptr)
+        return false;
+
+    return source.p->getNormalisableRange().start < 0.0f;
+}
+
 float SquareCell::valueFromDrag (float startValue01, float startY, float currentY)
 {
+    // Screen y grows downwards, so a drag UP is a fall in y and has to be subtracted.
     const float delta = (startY - currentY) / valueDragPixels;
+    return juce::jlimit (0.0f, 1.0f, startValue01 + delta);
+}
+
+float SquareCell::valueFromDragX (float startValue01, float startX, float currentX)
+{
+    // x already grows to the right, so this is the other sign to the vertical version - and
+    // getting that backwards is precisely the bug where a pan control moves the wrong way.
+    const float delta = (currentX - startX) / valueDragPixels;
     return juce::jlimit (0.0f, 1.0f, startValue01 + delta);
 }
 
@@ -237,22 +289,28 @@ void SquareCell::paint (juce::Graphics& g)
     // The crossbar is also the grab handle, which is why depthEdgeAt tests its y.
     {
         const int n = juce::jmax (1, getNumAssignments());
-        const float slot = (b.getWidth() - 6.0f) / static_cast<float> (n);
-        const float valueY = yForValue01 (value01());
+        const bool vert = axis == Axis::vertical;
+
+        // Assignments sit side by side in their own slots, so several on one cell stay readable
+        // instead of drawing over each other. The slots run ACROSS the cell's own axis:
+        // left-to-right for a vertical cell, top-to-bottom for a horizontal one.
+        const float across = vert ? b.getWidth() : b.getHeight();
+        const float slot = (across - 6.0f) / static_cast<float> (n);
+
+        const float valuePos = posForValue01 (value01());
 
         for (int i = 0; i < getNumAssignments(); ++i)
         {
             const bool isDragged = draggingDepth && depthDragIndex == i;
             const float depth = effectiveDepth (i, isDragged, depthDragDepth);
-            const float reachY = yForValue01 (value01() + depth);
+            const float reachPos = posForValue01 (value01() + depth);
             const bool hot = isDragged || overDepthIndex == i;
 
-            // Assignments sit side by side in their own columns, so several on one cell
-            // stay readable instead of drawing over each other.
-            const float cx = b.getX() + 3.0f + slot * (static_cast<float> (i) + 0.5f);
+            const float acrossPos = (vert ? b.getX() : b.getY()) + 3.0f
+                                      + slot * (static_cast<float> (i) + 0.5f);
 
-            const float top = juce::jmin (valueY, reachY);
-            const float bottom = juce::jmax (valueY, reachY);
+            const float lo = juce::jmin (valuePos, reachPos);
+            const float hi = juce::jmax (valuePos, reachPos);
 
             const float stemW = hot ? 3.0f : 2.0f;
             const float barW = juce::jmin (slot * 0.72f, 20.0f);
@@ -260,11 +318,19 @@ void SquareCell::paint (juce::Graphics& g)
 
             g.setColour (hot ? accentOrange : juce::Colours::white.withAlpha (0.9f));
 
-            // The stem. At least a crossbar tall, so a depth dragged to zero still shows a
-            // tick at the value rather than vanishing entirely.
-            g.fillRect (cx - stemW * 0.5f, top, stemW, juce::jmax (barH, bottom - top));
-
-            g.fillRect (cx - barW * 0.5f, reachY - barH * 0.5f, barW, barH);
+            // The same 'T', turned with the cell: the stem runs along the axis and the crossbar
+            // stands across it. The stem is at least a crossbar thick, so a depth dragged to zero
+            // still shows a tick at the value rather than vanishing entirely.
+            if (vert)
+            {
+                g.fillRect (acrossPos - stemW * 0.5f, lo, stemW, juce::jmax (barH, hi - lo));
+                g.fillRect (acrossPos - barW * 0.5f, reachPos - barH * 0.5f, barW, barH);
+            }
+            else
+            {
+                g.fillRect (lo, acrossPos - stemW * 0.5f, juce::jmax (barH, hi - lo), stemW);
+                g.fillRect (reachPos - barH * 0.5f, acrossPos - barW * 0.5f, barH, barW);
+            }
         }
     }
 }
@@ -312,10 +378,14 @@ int SquareCell::depthEdgeAt (juce::Point<int> pos) const
     int best = -1;
     float bestDistance = edgeGrab;
 
+    // The crossbar is the grab handle, and the crossbar stands ACROSS the axis - so for a
+    // horizontal cell the handle is at an x and the pointer's x is what has to be tested.
+    const float pointer = axisPosOf (pos);
+
     for (int i = 0; i < getNumAssignments(); ++i)
     {
-        const float y = yForValue01 (value01() + getAssignments()[static_cast<size_t> (i)].depth);
-        const float distance = std::abs (static_cast<float> (pos.y) - y);
+        const float p = posForValue01 (value01() + getAssignments()[static_cast<size_t> (i)].depth);
+        const float distance = std::abs (pointer - p);
 
         if (distance <= bestDistance)
         {
@@ -355,7 +425,7 @@ void SquareCell::mouseDown (const juce::MouseEvent& e)
         depthDragSrc = a.source;
         depthDragStartDepth = a.depth;
         depthDragDepth = a.depth;
-        depthDragStartY = e.position.y;
+        depthDragStartPos = axisPosOf (e.getPosition());
         repaint();
         return;
     }
@@ -363,7 +433,7 @@ void SquareCell::mouseDown (const juce::MouseEvent& e)
     draggingValue = true;
     dragStartValue01 = value01();
     dragValue01 = dragStartValue01;
-    dragStartY = e.position.y;
+    dragStartPos = axisPosOf (e.getPosition());
     repaint();
 }
 
@@ -371,7 +441,8 @@ void SquareCell::mouseDrag (const juce::MouseEvent& e)
 {
     if (draggingDepth)
     {
-        const float depth = depthFromDrag (depthDragStartDepth, depthDragStartY, e.position.y);
+        const float depth = depthFromDrag (depthDragStartDepth, depthDragStartPos,
+                                           axisPosOf (e.getPosition()));
 
         if (juce::approximatelyEqual (depth, depthDragDepth))
             return;
@@ -395,7 +466,9 @@ void SquareCell::mouseDrag (const juce::MouseEvent& e)
     if (! draggingValue)
         return;
 
-    float v = valueFromDrag (dragStartValue01, dragStartY, e.position.y);
+    float v = axis == Axis::vertical
+                ? valueFromDrag (dragStartValue01, dragStartPos, axisPosOf (e.getPosition()))
+                : valueFromDragX (dragStartValue01, dragStartPos, axisPosOf (e.getPosition()));
 
     if (juce::approximatelyEqual (v, dragValue01))
         return;
@@ -435,7 +508,12 @@ void SquareCell::mouseMove (const juce::MouseEvent& e)
     if (index != overDepthIndex)
     {
         overDepthIndex = index;
-        setMouseCursor (index >= 0 ? juce::MouseCursor::UpDownResizeCursor
+
+        // A horizontal cell's depth handle sits at an x, so the cursor says left/right rather
+        // than up/down - the cursor is the only thing that tells you which way to drag.
+        setMouseCursor (index >= 0 ? (axis == Axis::vertical
+                                        ? juce::MouseCursor::UpDownResizeCursor
+                                        : juce::MouseCursor::LeftRightResizeCursor)
                                    : juce::MouseCursor::NormalCursor);
         repaint();
     }

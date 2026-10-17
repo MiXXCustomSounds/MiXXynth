@@ -13,9 +13,9 @@ namespace mixxynth { class OpWaveTables; }
 
 namespace mixxynth::ui
 {
-// M6: a square grid cell that is both a value readout and a vertical slider.
+// M6: a square grid cell that is both a value readout and a slider.
 //
-//   drag the body        set the value (up = more)
+//   drag the body        set the value (up = more, or right = more when horizontal)
 //   drag a white edge    set that assignment's modulation depth
 //   drop a source on it  assign that source to this cell
 //   right-click          menu: assigned sources, amount presets, clear
@@ -24,12 +24,48 @@ namespace mixxynth::ui
 // chart rather than as a wall of dials. The colour says whether the value is
 // currently being modulated, and the white lines say how far the modulation can
 // push it - which is the pair of things a bare number cannot show.
+//
+// A HORIZONTAL cell is the same widget turned 90 degrees: it fills from the left
+// (or from the centre, when its parameter is bipolar) and you drag RIGHT for more.
+// A pan wants that, because a pan is a horizontal idea - left of centre is left and
+// right of centre is right - and a vertical slider for a left/right value is a
+// control you have to think about.
 class SquareCell : public juce::Component,
                    public juce::DragAndDropTarget,
                    public ModTarget,
                    public sst::jucegui::data::Continuous::DataListener
 {
 public:
+    // Which way the cell runs.
+    //
+    // Both axes are the same arithmetic with x and y exchanged, so this is one widget and not
+    // two: the axis only decides which coordinate is the one that matters. Everything the cell
+    // does - the fill, the drag, the modulation markers and the edge you grab to set a depth -
+    // follows from that single choice.
+    enum class Axis
+    {
+        vertical,    // fills from the bottom, drag up for more. The grid's default.
+        horizontal   // fills from the left (or the centre), drag RIGHT for more.
+    };
+
+    void setAxis (Axis a)
+    {
+        if (axis != a)
+        {
+            axis = a;
+            repaint();
+        }
+    }
+
+    Axis getAxisForTest() const noexcept { return axis; }
+
+    // True when a horizontal cell fills outward from its middle rather than from the left.
+    //
+    // Derived from the parameter's own range rather than set by the caller, so a cell cannot be
+    // told to draw one way and edit another - and so a pan at centre reads as EMPTY, which is
+    // what "neither left nor right" looks like. Half-full would say "half of something".
+    bool fillsFromCentre() const;
+
     SquareCell (const juce::String& labelText,
                 juce::RangedAudioParameter* param,
                 int destIndex,
@@ -115,6 +151,12 @@ public:
     float yForValue01 (float v01) const;
     static float valueFromDrag (float startValue01, float startY, float currentY);
 
+    // The horizontal half of the same two seams. Kept separate rather than folded into one
+    // axis-aware pair, because the audit's existing checks call these by name on vertical cells
+    // and a renamed parameter would be a silent change to what they are measuring.
+    float xForValue01 (float v01) const;
+    static float valueFromDragX (float startValue01, float startX, float currentX);
+
     // ---- Continuous::DataListener ------------------------------------------
     // The cell draws itself from the parameter, but it is not the widget that
     // owns it, so it has to repaint when the parameter moves for any reason.
@@ -134,7 +176,17 @@ private:
     // The value's waveform, for a cell whose value is a shape rather than a number.
     void paintWaveform (juce::Graphics& g, juce::Rectangle<float> area) const;
 
+    // Where the value sits along the cell's OWN axis: the y of the fill's edge for a vertical
+    // cell, the x of it for a horizontal one. Everything positional goes through this, which is
+    // what makes the axis one decision rather than a branch in every routine.
+    float posForValue01 (float v01) const;
+
+    // The same coordinate taken from a pointer position.
+    float axisPosOf (juce::Point<int> p) const;
+
     void setParamFrom01 (float v01);
+
+    Axis axis = Axis::vertical;
 
     ContinuousSource source;
     juce::String text;
@@ -147,14 +199,18 @@ private:
 
     bool draggingValue = false;
     float dragStartValue01 = 0.0f;
-    float dragStartY = 0.0f;
+
+    // Along the cell's own axis, so it is the y for a vertical cell and the x for a horizontal
+    // one. Named for the axis rather than for y, because a field called `dragStartY` that holds
+    // an x is the kind of thing that reads correctly for a year and then does not.
+    float dragStartPos = 0.0f;
     float dragValue01 = 0.0f;
 
     bool draggingDepth = false;
     int depthDragIndex = -1;
     int depthDragSrc = 0;
     float depthDragStartDepth = 0.0f;
-    float depthDragStartY = 0.0f;
+    float depthDragStartPos = 0.0f;
     float depthDragDepth = 0.0f;
 
     int overDepthIndex = -1;

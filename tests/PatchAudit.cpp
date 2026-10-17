@@ -730,9 +730,20 @@ int main()
         check (proc.presets.currentName() == nameBefore,
                "undo puts the selection back too", proc.presets.currentName());
 
-        check (! proc.presets.canUndo(), "the undo point is spent", "");
+        // The history is a history now rather than a single slot, so "the undo point is spent" is
+        // no longer the contract - and neither is "a second undo does nothing". Those two checks
+        // encoded the one-slot design, which is precisely what made undo land somewhere random
+        // once the dice moved out of the patch bar: the slot still held a capture from several
+        // moves ago. What has to hold instead is that the move just undone can be redone, and
+        // that the history stays walkable in both directions.
+        check (proc.presets.canRedo(), "the undone move can be redone", "");
 
-        check (! proc.presets.undo(), "a second undo does nothing", "");
+        check (proc.presets.redo(), "redo runs", "");
+
+        check (mixxynth::fingerprint (proc.buildStateTree()) != before,
+               "redo puts the roll back", "");
+
+        check (proc.presets.canUndo(), "the history is walkable again", "");
     }
 
     std::printf (failures == 0 ? "PATCH AUDIT OK\n" : "PATCH AUDIT FAILED (%d)\n", failures);

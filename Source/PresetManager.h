@@ -76,9 +76,18 @@ namespace mixxynth
 
         // Remembers the patch so undo() can put it back. Called before a roll and before a
         // load, so "undo" means "put back what was there before that happened".
+        //
+        // A HISTORY, not a single slot. One slot was enough while the dice lived in the patch
+        // bar, because the bar was the only thing that remembered; once the roll moved to the
+        // toolbar, the slot could still hold a preset load from several moves ago - which is
+        // exactly why undo appeared to land somewhere random rather than one step back.
         void rememberForUndo();
-        bool canUndo() const { return undoState.isValid(); }
+
+        bool canUndo() const { return ! undoStack.empty(); }
+        bool canRedo() const { return ! redoStack.empty(); }
+
         bool undo();
+        bool redo();
 
         // Re-reads the bank and keeps the selection when the preset still exists.
         void refresh();
@@ -104,14 +113,22 @@ namespace mixxynth
         int current = -1;
         juce::int64 loadedPrint = 0;
 
-        // One level, and only one. This is the roll's undo, not an editor-wide undo stack -
-        // PRODUCT.md lists undo/redo as undecided, and it is not smuggled in through the dice.
-        //
-        // The selection and the fingerprint travel with the tree, so an undo puts back the
-        // whole session position. Restoring the tree alone would leave a hand-edited patch
-        // looking clean, because the fingerprint would be re-taken from the restored patch.
-        juce::ValueTree undoState;
-        int undoIndex = -1;
-        juce::int64 undoPrint = 0;
+        // One entry per move. The selection and the fingerprint travel with the tree, so an
+        // undo puts back the whole session position: restoring the tree alone would leave a
+        // hand-edited patch looking clean, because the fingerprint would be re-taken from the
+        // restored patch.
+        struct HistoryEntry
+        {
+            juce::ValueTree state;
+            int index = -1;
+            juce::int64 print = 0;
+        };
+
+        // Bounded, because each entry is a whole patch and an editor is not the place to grow
+        // without limit. Deep enough that nobody reaches the end of it by accident.
+        static constexpr int kMaxHistory = 64;
+
+        std::vector<HistoryEntry> undoStack;
+        std::vector<HistoryEntry> redoStack;
     };
 }

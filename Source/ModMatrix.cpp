@@ -252,6 +252,7 @@ void publishModulatedValues (const MiXXFmVoice::VoiceParams& vp,
         out[static_cast<size_t> (dstOp1FilterCutoff + i)] = vp.opFilterCutoff[o];
         out[static_cast<size_t> (dstOp1FilterReso + i)]   = vp.opFilterReso[o];
         out[static_cast<size_t> (dstOp1FilterDrive + i)]  = vp.opFilterDrive[o];
+        out[static_cast<size_t> (dstOp1Pan + i)]          = vp.pan[o];
     }
 
     // The 30 matrix depths, walked in the same order mtxIndexToPair walks them. That shared
@@ -352,6 +353,19 @@ void applyModulation (const std::array<float, kNumModDests>& totals,
         else if (dest == dstFilterDrive)
         {
             vp.drive = juce::jlimit (0.0f, 1.0f, vp.drive + amt);
+        }
+        else if (dest >= dstOp1Pan && dest <= dstOp6Pan)
+        {
+            // Full travel is the whole field, so a slot at +1 sweeps an operator from hard left
+            // to hard right. This is auto-pan, and it is the reason pan is a destination at all:
+            // a static pan is a placement, a moving one is an effect.
+            //
+            // It MUST be handled before the matrix fall-through below, which treats any
+            // destination it does not recognise as a routing cell. A pan index reaching that
+            // branch would silently rewrite the FM routing instead.
+            const int i = dest - dstOp1Pan;
+            vp.pan[static_cast<size_t> (i)] =
+                juce::jlimit (-1.0f, 1.0f, vp.pan[static_cast<size_t> (i)] + amt);
         }
         else
         {

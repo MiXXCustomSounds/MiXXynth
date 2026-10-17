@@ -55,7 +55,18 @@ namespace mixxynth
             { dstOp3FilterCutoff, "op3fltCutoff", rollFilter },
             { dstOp4FilterCutoff, "op4fltCutoff", rollFilter },
             { dstOp5FilterCutoff, "op5fltCutoff", rollFilter },
-            { dstOp6FilterCutoff, "op6fltCutoff", rollFilter }
+            { dstOp6FilterCutoff, "op6fltCutoff", rollFilter },
+
+            // The pans belong to the STEREO section, not to the FM one that sets the parameters
+            // they modulate. A lock means "do not touch this", and it has to hold across
+            // sections or it is not a lock: with these filed under FM, rolling FM would move
+            // them while the ST lock was on.
+            { dstOp1Pan,          "op1pan",       rollStereo },
+            { dstOp2Pan,          "op2pan",       rollStereo },
+            { dstOp3Pan,          "op3pan",       rollStereo },
+            { dstOp4Pan,          "op4pan",       rollStereo },
+            { dstOp5Pan,          "op5pan",       rollStereo },
+            { dstOp6Pan,          "op6pan",       rollStereo }
         };
 
         constexpr int kNumModDestinations = static_cast<int> (sizeof (kModDestinations)
@@ -157,6 +168,7 @@ namespace mixxynth
             case rollFilter: return "FILT";
             case rollMod:    return "MOD";
             case rollFx:     return "FX";
+            case rollStereo: return "ST";
             default:         return "?";
         }
     }
@@ -454,6 +466,11 @@ namespace mixxynth
         else if (id.endsWith ("fltCutoff")) set (id, betweenLog (rng, 1200.0f, 6000.0f));
         else if (id.endsWith ("level"))     set (id, between (rng, 0.35f, 0.7f));
         else if (id.endsWith ("ratio"))     set (id, kRatios[rng.nextInt (kNumRatios)]);
+
+        // A pan is placed near the centre rather than anywhere in the field, because the slot is
+        // about to sweep it: starting at an extreme leaves the modulation room to move in ONE
+        // direction only, which halves the effect and reads as a broken slot.
+        else if (id.endsWith ("pan"))       set (id, between (rng, -0.5f, 0.5f));
     }
 
     void Randomizer::rollFxSection (juce::Random& rng)
@@ -520,6 +537,38 @@ namespace mixxynth
         }
     }
 
+    void Randomizer::rollStereoSection (juce::Random& rng)
+    {
+        // The unison stack's spread, the per-note spread, and how far each voice's start phase
+        // is randomised.
+        //
+        // The phase randomisation belongs to this section rather than to the FM or VA rolls
+        // because it is part of the same gesture: a spread stack whose voices all start aligned
+        // is one loud centre with a wide tail, and it is the phase spread that turns it into
+        // several sources. Rolling one without the other would be a half-made decision.
+        set ("unisonSpread", between (rng, 0.25f, 1.0f));
+
+        // Per-note spread, sometimes left at zero rather than always rolled wide. A monophonic
+        // patch has nothing to spread, and a roll that hard-panned every melody would be a roll
+        // you could not use on half your patches - so "centred" stays in the draw.
+        set ("voiceSpread", rng.nextFloat() < 0.3f ? 0.0f : between (rng, 0.2f, 1.0f));
+
+        set ("unisonPhaseRand", between (rng, 0.0f, 1.0f));
+
+        // The per-operator pans, across the whole field.
+        //
+        // This is the section's lock doing real work: a roll that always spread the carriers
+        // would be useless on a patch that wanted to stay centred, and the ST lock is how you
+        // say so without also freezing the ratios and envelopes.
+        //
+        // Every operator is drawn, not just the carriers. A modulator's pan is inaudible, but
+        // which operator is a carrier depends on the ROUTING - and the routing belongs to the FM
+        // roll, which may itself be locked. Rolling only the current carriers would leave a
+        // patch's pans disagreeing with its routing the moment either changed.
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            set ("op" + juce::String (i + 1) + "pan", between (rng, -1.0f, 1.0f));
+    }
+
     void Randomizer::roll (juce::int64 seed)
     {
         // One generator for the whole roll, seeded once, so the seed alone decides the patch
@@ -531,5 +580,6 @@ namespace mixxynth
         if (! isLocked (rollFilter)) rollFilterSection (rng);
         if (! isLocked (rollMod))    rollModSection (rng);
         if (! isLocked (rollFx))     rollFxSection (rng);
+        if (! isLocked (rollStereo)) rollStereoSection (rng);
     }
 }

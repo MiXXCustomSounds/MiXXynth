@@ -45,7 +45,8 @@ namespace mixxynth::ui
         configure (initButton, "INIT", "Start a patch from the init patch");
         configure (saveButton, "SAVE", "Save this patch as a user preset");
         configure (deleteButton, "DEL", "Delete the loaded user preset");
-        configure (undoButton, "UNDO", "Put back the patch from before the last roll or load");
+        configure (undoButton, "UNDO", "Step back one move");
+        configure (redoButton, "REDO", "Step forward again after an undo");
 
         prevButton.onClick = [this] { step (-1); };
         nextButton.onClick = [this] { step (1); };
@@ -53,15 +54,16 @@ namespace mixxynth::ui
         saveButton.onClick = [this] { showSaveDialog(); };
         deleteButton.onClick = [this] { removeSelected(); };
         undoButton.onClick = [this] { undoRoll(); };
+        redoButton.onClick = [this] { redoRoll(); };
 
-        // The roll, and the five locks beside it. A lock reads as the state you are IN, like
-        // the Snap switch: lit means "this section will not move".
-        rollButton.setButtonText ("ROLL");
-        rollButton.setTooltip ("Roll a new patch from the unlocked sections");
-        rollButton.setColour (juce::TextButton::buttonColourId, kBackground);
-        rollButton.setColour (juce::TextButton::textColourOffId, kAccent);
-        rollButton.onClick = [this] { rollNow(); };
-        addAndMakeVisible (rollButton);
+        // The dice, back where the class comment always said it belonged: beside the locks, both
+        // acting on the whole patch.
+        //
+        // It drives rollNow(), which is the Randomizer - so the locks next to it do what their
+        // labels say. The FM page toolbar's own dice rolled FM parameters directly and consulted
+        // nothing, which is what made the locks look like controls that did nothing.
+        diceButton.onClick = [this] { rollNow(); };
+        addAndMakeVisible (diceButton);
 
         for (int s = 0; s < mixxynth::kNumRollSections; ++s)
         {
@@ -86,10 +88,15 @@ namespace mixxynth::ui
 
         status.setJustificationType (juce::Justification::centredLeft);
         status.setColour (juce::Label::textColourId, kText);
+
+        // The font is set explicitly rather than left to the default, because the layout below
+        // reserves TWO rows for this label and needs to know how tall a row is.
+        status.setFont (juce::FontOptions (12.0f));
         addAndMakeVisible (status);
 
         message.setJustificationType (juce::Justification::centredLeft);
         message.setColour (juce::Label::textColourId, kDim);
+        message.setFont (juce::FontOptions (11.0f));
         addAndMakeVisible (message);
 
         refresh();
@@ -162,9 +169,13 @@ namespace mixxynth::ui
         deleteButton.setEnabled (now.index >= 0 && ! now.factory);
 
         const bool canUndo = proc.presets.canUndo();
+        const bool canRedo = proc.presets.canRedo();
 
         undoButton.setEnabled (canUndo);
         undoButton.setColour (juce::TextButton::textColourOffId, canUndo ? kText : kDim);
+
+        redoButton.setEnabled (canRedo);
+        redoButton.setColour (juce::TextButton::textColourOffId, canRedo ? kText : kDim);
 
         for (int s = 0; s < lockButtons.size(); ++s)
             lockButtons[s]->setToggleState (proc.randomizer.isLocked (s),
@@ -249,6 +260,16 @@ namespace mixxynth::ui
         return true;
     }
 
+    bool PatchBar::redoRoll()
+    {
+        if (! proc.presets.redo())
+            return false;
+
+        setMessage ("redone");
+
+        return true;
+    }
+
     void PatchBar::showSaveDialog()
     {
         auto* window = new juce::AlertWindow ("Save preset",
@@ -256,7 +277,21 @@ namespace mixxynth::ui
                                               "so \"Bass - My Patch\" makes a Bass preset.",
                                               juce::MessageBoxIconType::NoIcon);
 
-        window->addTextEditor ("name", proc.presets.currentName(), "Category - Name");
+        // Pre-filled with the SAME "Category - Name" string this field is parsed back into, not
+        // just the bare name.
+        //
+        // The hint said one thing and the box said another: the placeholder was "Category - Name"
+        // but the text was only the name, so accepting the pre-fill silently stripped the
+        // category. Re-saving the preset you had loaded then wrote a SECOND copy under "Other"
+        // instead of updating the one you were on, and the two were indistinguishable in the
+        // list - which is what "the old one gets forgotten" looks like from the outside.
+        const auto now = proc.presets.status();
+
+        const juce::String prefill = now.category.isEmpty()
+            ? now.name
+            : now.category + mixxynth::presetNameSeparator + now.name;
+
+        window->addTextEditor ("name", prefill, "Category - Name");
         window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
         window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
@@ -314,7 +349,10 @@ namespace mixxynth::ui
         deleteButton.setBounds (b.removeFromLeft (42));
         b.removeFromLeft (10);
 
-        rollButton.setBounds (b.removeFromLeft (52));
+        // The dice, then the locks it works with - the gesture first, the exceptions beside it.
+        // Square, because the die is drawn as a face and a wide box would stretch the pips.
+        diceButton.setBounds (b.removeFromLeft (32));
+        b.removeFromLeft (6);
 
         for (auto* lock : lockButtons)
         {
@@ -322,14 +360,25 @@ namespace mixxynth::ui
             lock->setBounds (b.removeFromLeft (40));
         }
 
-        b.removeFromLeft (4);
+        b.removeFromLeft (8);
         undoButton.setBounds (b.removeFromLeft (54));
+        b.removeFromLeft (2);
+        redoButton.setBounds (b.removeFromLeft (54));
         b.removeFromLeft (10);
 
         // The dot needs the last few pixels of the bar to itself.
         auto textArea = b.withTrimmedRight (16);
 
-        status.setBounds (textArea.removeFromTop (juce::jmax (14, textArea.getHeight() / 2)));
+        // TWO rows for the status. "Category / Name *" is long enough to wrap on a narrow bar,
+        // and a label that wraps inside a one-row box is clipped at BOTH ends: the text is
+        // centred vertically, so half the loss comes off the top of the first line and half off
+        // the bottom of the second. Reserving the second row is what stops the name being cut
+        // in half, and the header row in the editor's resized() is what makes room for it.
+        const int statusRow = juce::jmax (12, juce::roundToInt (status.getFont().getHeight()));
+
+        status.setBounds (textArea.removeFromTop (
+            juce::jmin (textArea.getHeight(), statusRow * 2)));
+
         message.setBounds (textArea);
     }
 

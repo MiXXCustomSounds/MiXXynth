@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "DiceButton.h"
 #include "PresetManager.h"
 #include "Randomizer.h"
 
@@ -42,6 +43,7 @@ namespace mixxynth::ui
         bool removeSelected();
         void rollNow();
         bool undoRoll();
+        bool redoRoll();
 
         // What the bar is showing, for the audit.
         juce::String debug() const;
@@ -51,6 +53,15 @@ namespace mixxynth::ui
 
         // The item id the browser has selected, so the audit can check it follows a load.
         int selectedItemId() const { return browser.getSelectedId(); }
+
+        // For the audit: the preset readout's box and the height of one line of its text.
+        // "The text is not clipped" is a claim about the layout, and the only way to check it
+        // without a screenshot is to compare the two numbers.
+        int statusHeightForTest() const { return status.getHeight(); }
+        int statusLineHeightForTest() const
+        {
+            return juce::roundToInt (status.getFont().getHeight());
+        }
 
     private:
         void timerCallback() override;
@@ -62,7 +73,13 @@ namespace mixxynth::ui
 
         juce::ComboBox browser;
         juce::TextButton prevButton, nextButton, initButton, saveButton, deleteButton;
-        juce::TextButton rollButton, undoButton;
+        juce::TextButton undoButton, redoButton;
+
+        // The roll, and the five section locks beside it. This is the arrangement the class
+        // comment above describes, and the one the dice briefly left for the FM page toolbar -
+        // where it rolled FM parameters directly and ignored the locks entirely, so the locks
+        // controlled nothing you could reach.
+        DiceButton diceButton;
         juce::OwnedArray<juce::TextButton> lockButtons;
         juce::Label status;
         juce::Label message;

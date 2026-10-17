@@ -122,6 +122,13 @@ void MiXXVoiceManager::startNote (int channel, int note, float velocity,
     for (const int idx : stolen)
         free.push_back (idx);
 
+    // Which side of the field this NOTE sits on, before its unison stack's own spread is added.
+    //
+    // Alternating rather than random: a melody whose notes landed in unpredictable places is a
+    // melody you fight, and alternation is what "voice spread" means on every synth that has
+    // one. It advances once per note, so every voice of this note gets the same side.
+    const float voicePos = (noteSerial++ % 2 == 0) ? -1.0f : 1.0f;
+
     for (int k = 0; k < uni && k < static_cast<int> (free.size()); ++k)
     {
         auto& s = slots[static_cast<size_t> (free[static_cast<size_t> (k)])];
@@ -138,7 +145,12 @@ void MiXXVoiceManager::startNote (int channel, int note, float velocity,
         s.pressure = 0.0f;
         s.timbre = 0.0f;
         applyDetune (s);
-        s.voice.setPan (pos * poly.unisonSpread);
+
+        // Both spreads, ADDED rather than one replacing the other: the unison stack sits at
+        // `pos` inside the note, and the note itself sits at `voicePos` in the field. Clamped,
+        // because two spreads at full travel can otherwise ask for more than hard left.
+        s.voice.setPan (juce::jlimit (-1.0f, 1.0f,
+                                      pos * poly.unisonSpread + voicePos * poly.voiceSpread));
 
         // Phase randomisation: each unison voice (and each repeated note) starts
         // at its own point in the cycle, scaled by the control. At 0 every voice

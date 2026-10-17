@@ -101,8 +101,8 @@ void MiXXFmVoice::reset()
     noiseState = 0x2545f491u;
     vaDrift = 0.0f;
     vaDriftTarget = 0.0f;
-    svfIc1 = 0.0f;
-    svfIc2 = 0.0f;
+    svfIc1[0] = svfIc1[1] = 0.0f;
+    svfIc2[0] = svfIc2[1] = 0.0f;
     svfLastCutoff = -1.0f;
     svfLastReso = -1.0f;
 
@@ -180,8 +180,8 @@ void MiXXFmVoice::noteOn (int noteNumber, float vel, float phaseOffset01)
     gate = true;
     vaPhase = 0.0;
     vaSubPhase = 0.0;
-    svfIc1 = 0.0f;
-    svfIc2 = 0.0f;
+    svfIc1[0] = svfIc1[1] = 0.0f;
+    svfIc2[0] = svfIc2[1] = 0.0f;
 
     const double startPhase = static_cast<double> (phaseOffset01)
                                 - std::floor (static_cast<double> (phaseOffset01));
@@ -345,9 +345,31 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             3.0f / static_cast<float> (mixxynth::OpWaveTables::numShapes - 1), vaFreq * 0.5);
     }
 
+    // One channel of the voice's TPT state-variable filter.
+    //
+    // A lambda rather than the same eight lines written twice, because the two channels must be
+    // EXACTLY the same arithmetic: a filter that differed between them would be a stereo effect
+    // nobody asked for, and one that is hard to see in a diff.
+    auto runVoiceFilter = [this, &p] (float in, int ch) -> float
+    {
+        if (p.drive > 0.0f)
+            in = std::tanh (in * (1.0f + p.drive * 8.0f));
+
+        const float v3 = in - svfIc2[ch];
+        const float v1 = svfA1 * svfIc1[ch] + svfA2 * v3;
+        const float v2 = svfIc2[ch] + svfA2 * svfIc1[ch] + svfA3 * v3;
+        svfIc1[ch] = 2.0f * v1 - svfIc1[ch];
+        svfIc2[ch] = 2.0f * v2 - svfIc2[ch];
+
+        if (p.filterType == 1)  return in - svfK * v1 - v2;   // high pass
+        if (p.filterType == 2)  return v1;                    // band pass
+        return v2;                                            // low pass
+    };
+
     for (int n = 0; n < numSamples; ++n)
     {
-        float sum = 0.0f;
+        float sumL = 0.0f;
+        float sumR = 0.0f;
 
         // Descending order: every DX7 edge goes from a higher op number to a
         // lower one, so those edges resolve within the current sample.
@@ -458,7 +480,17 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
             if (p.carrier[dst])
             {
                 const float toOutput = (filterOn && route == 1) ? amp : filtered;
-                sum += toOutput * p.level[dst];
+                const float v = toOutput * p.level[dst];
+
+                // Each carrier is placed by its OWN pan, so the FM stack has a stereo image
+                // before the voice is placed in the field - the two are different axes and they
+                // compose. The law is the voice's own: full travel removes a channel rather than
+                // boosting the other, so a centred operator is at unity and panning one never
+                // makes the patch louder.
+                const float pan = juce::jlimit (-1.0f, 1.0f, p.pan[dst]);
+
+                sumL += v * (pan <= 0.0f ? 1.0f : 1.0f - pan);
+                sumR += v * (pan >= 0.0f ? 1.0f : 1.0f + pan);
             }
 
             op.phase += opInc[static_cast<size_t> (dst)];
@@ -550,14 +582,23 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
         // Sub and noise deliberately bypass the blend. They are their own levels, so a
         // patch with the FM stack in charge can still add a sub, which is the whole point
         // of taking them out of the shape list.
-        const float mixed = sum + (va * vaLevelSm + vaExtras) * vaEnv;
+        // The VA layer is one oscillator and stays centred. It is placed by the voice's own pan
+        // like everything else; a second pan control on it would be a control for a layer that
+        // has no stereo of its own to place.
+        const float vaMixed = (va * vaLevelSm + vaExtras) * vaEnv;
 
-        // --- M3b: per-voice TPT state-variable filter ---
-        float filtered = mixed;
+        const float mixedL = sumL + vaMixed;
+        const float mixedR = sumR + vaMixed;
+
+        // --- M3b: per-voice TPT state-variable filter, one pass per channel ---
+        float filteredL = mixedL;
+        float filteredR = mixedR;
 
         if (p.filterOn)
         {
-            // Recompute the TPT coefficients only when cutoff or resonance move.
+            // Recompute the TPT coefficients only when cutoff or resonance move. Shared by both
+            // channels: the filter's response does not depend on which channel it is on, only its
+            // input does.
             if (std::abs (p.cutoff - svfLastCutoff) > 0.01f
                   || std::abs (p.resonance - svfLastReso) > 0.0005f)
             {
@@ -573,33 +614,29 @@ void MiXXFmVoice::renderRange (juce::AudioBuffer<float>& buffer, int startSample
                 svfLastReso = p.resonance;
             }
 
-            float in = mixed;
-
-            if (p.drive > 0.0f)
-                in = std::tanh (in * (1.0f + p.drive * 8.0f));
-
-            const float v3 = in - svfIc2;
-            const float v1 = svfA1 * svfIc1 + svfA2 * v3;
-            const float v2 = svfIc2 + svfA2 * svfIc1 + svfA3 * v3;
-            svfIc1 = 2.0f * v1 - svfIc1;
-            svfIc2 = 2.0f * v2 - svfIc2;
-
-            if (p.filterType == 1)       filtered = in - svfK * v1 - v2; // high pass
-            else if (p.filterType == 2)  filtered = v1;                  // band pass
-            else                         filtered = v2;                  // low pass
+            filteredL = runVoiceFilter (mixedL, 0);
+            filteredR = runVoiceFilter (mixedR, 1);
         }
 
-        const float out = juce::jlimit (-1.0f, 1.0f, filtered * velScale * p.master);
+        const float outL = juce::jlimit (-1.0f, 1.0f, filteredL * velScale * p.master);
+        const float outR = juce::jlimit (-1.0f, 1.0f, filteredR * velScale * p.master);
 
         if (numCh >= 2)
         {
-            buffer.addSample (0, startSample + n, out * panL);
-            buffer.addSample (1, startSample + n, out * panR);
+            // The voice's own pan is a BALANCE on a signal that is already stereo, rather than
+            // the thing that creates the stereo. A hard-panned voice therefore collapses its
+            // per-operator image, which is right: a voice in one speaker is mono.
+            buffer.addSample (0, startSample + n, outL * panL);
+            buffer.addSample (1, startSample + n, outR * panR);
         }
         else
         {
+            // Mono output, where a pan can only change the level. Summed rather than taking the
+            // left, so a hard-panned carrier is not silently dropped from the mono mix.
+            const float mono = (outL + outR) * 0.5f;
+
             for (int ch = 0; ch < numCh; ++ch)
-                buffer.addSample (ch, startSample + n, out);
+                buffer.addSample (ch, startSample + n, mono);
         }
     }
 }

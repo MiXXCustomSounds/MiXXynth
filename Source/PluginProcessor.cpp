@@ -59,6 +59,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             "op" + n + "wave", "Op " + n + " Wave",
             juce::NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.0f));
+
+        // Where this operator sits in the stereo image. Bipolar, and the range is what tells the
+        // grid to draw it as a centre-out horizontal bar rather than a level filling from the
+        // left - so the control reads as a pan the moment you see it.
+        //
+        // Only a carrier's pan is audible: a modulator is heard through what it modulates.
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "op" + n + "pan", "Op " + n + " Pan",
+            juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
     }
 
     // FM Index is applied as a phase offset in CYCLES (see FmVoice::renderRange),
@@ -115,6 +124,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "unisonSpread", "Unison Spread",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+
+    // Per-note pan spread, a different axis from the unison spread above: that one places the
+    // voices WITHIN a note's stack, this one places the note itself. Defaults to 0 - centred -
+    // because unlike the unison spread it changes how a melody sits in the field, and that is
+    // something to opt into rather than something to discover on a patch you already liked.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "voiceSpread", "Voice Spread",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
 
     // M4b: how far each unison voice's start phase is randomised. 0 keeps the
     // stack phase-aligned (a punchy attack); 1 starts each voice anywhere in the
@@ -193,6 +210,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout MiXXynthProcessor::createLay
 
     for (int i = 0; i < MiXXFmVoice::numOps; ++i)
         modDests.add ("Op" + juce::String (i + 1) + " Filter Drive");
+
+    // The per-operator pans, in the same order as the enum - APPENDED after the filter block so
+    // that every index before them keeps the meaning it already had in a saved preset.
+    for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        modDests.add ("Op" + juce::String (i + 1) + " Pan");
 
     for (int s = 0; s < MiXXFmVoice::numOps; ++s)
         for (int d = 0; d < MiXXFmVoice::numOps; ++d)
@@ -810,6 +832,7 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         vp.release[i]   = getParam (apvts, "op" + n + "release");
         vp.opOn[i]      = getParam (apvts, "op" + n + "on") > 0.5f;
         vp.opWave[i]    = getParam (apvts, "op" + n + "wave");
+        vp.pan[i]       = getParam (apvts, "op" + n + "pan");
     }
 
     vp.waveTables = &waveTables;
@@ -886,6 +909,7 @@ void MiXXynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     poly.unison         = static_cast<int> (getParam (apvts, "unison"));
     poly.unisonDetune   = getParam (apvts, "unisonDetune");
     poly.unisonSpread   = getParam (apvts, "unisonSpread");
+    poly.voiceSpread    = getParam (apvts, "voiceSpread");
     poly.phaseRand      = getParam (apvts, "unisonPhaseRand");
 
     // Performance sources come from incoming MIDI.

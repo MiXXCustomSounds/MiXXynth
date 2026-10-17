@@ -8,6 +8,7 @@
 #include "../Source/Fx/WeirdVerbFx.h"
 #include "../Source/Fx/VastVerbFx.h"
 #include "../Source/Fx/AbyssVerbFx.h"
+#include "../Source/Fx/RotaryFx.h"
 #include "../Source/Fx/ConvolutionFx.h"
 #include "../Source/Fx/JunoChorusFx.h"
 #include "../Source/Fx/DistortionFx.h"
@@ -345,6 +346,154 @@ int main()
         ok = check (peak > 0.001f, "dense poly audible", peak) && ok;
     }
 
+    // --- 9b. Per-note pan spread alternates the notes across the field ---
+    //
+    // Two notes played in turn, each measured on its own. The drain between them is what makes
+    // that true: without it the second measurement is the second note plus the first one's tail,
+    // and the tail still carries the first note's pan - which would quietly weaken the check into
+    // one that passes for the wrong reason.
+    {
+        auto channelEnergy = [&] (float spread, int noteIndex)
+        {
+            MiXXVoiceManager vm;
+            vm.prepare (sr);
+
+            MiXXVoiceManager::PolyParams poly;
+            poly.polyphony = 16;
+            poly.unison = 1;
+            poly.unisonSpread = 0.0f;   // zero, so the per-note spread is the only thing moving
+            poly.voiceSpread = spread;
+
+            auto p = paramsForAlgo (4);
+            p.master = 0.5f;
+            p.index = 4.0f;
+
+            // A short envelope, so draining a note between measurements is a few blocks rather
+            // than a second of test time.
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                p.attack[i] = 0.002f;
+                p.decay[i] = 0.05f;
+                p.sustain[i] = 0.5f;
+                p.release[i] = 0.02f;
+            }
+
+            float left = 0.0f, right = 0.0f;
+
+            for (int i = 0; i <= noteIndex; ++i)
+            {
+                juce::AudioBuffer<float> buf (2, blockLen);
+                juce::MidiBuffer midi;
+
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+                midi.addEvent (juce::MidiMessage::noteOff (1, 60), blockLen / 2);
+
+                vm.renderBlock (buf, midi, p, mod, poly);
+
+                if (i == noteIndex)
+                {
+                    left = buf.getRMSLevel (0, 0, blockLen);
+                    right = buf.getRMSLevel (1, 0, blockLen);
+                }
+
+                // Drain, so the next note starts against silence. Bounded, because a voice that
+                // somehow failed to end would otherwise hang the whole test.
+                for (int d = 0; d < 64 && vm.getActiveVoiceCount() > 0; ++d)
+                {
+                    juce::AudioBuffer<float> quiet (2, blockLen);
+                    juce::MidiBuffer none;
+                    vm.renderBlock (quiet, none, p, mod, poly);
+                }
+            }
+
+            return std::pair<float, float> (left, right);
+        };
+
+        const auto centred = channelEnergy (0.0f, 0);
+        const auto first = channelEnergy (1.0f, 0);
+        const auto second = channelEnergy (1.0f, 1);
+
+        ok = check (std::abs (centred.first - centred.second) < 1.0e-4f,
+                    "voice spread at zero keeps the note centred",
+                    std::abs (centred.first - centred.second)) && ok;
+
+        ok = check (first.first > first.second * 1.5f, "the first note goes left",
+                    first.first / juce::jmax (1.0e-6f, first.second)) && ok;
+
+        ok = check (second.second > second.first * 1.5f, "the second note goes right",
+                    second.second / juce::jmax (1.0e-6f, second.first)) && ok;
+    }
+
+    // --- 9c. Per-operator pan places the carriers independently ---
+    //
+    // Two carriers and NO modulation, so each is a plain sine and what the channels show is the
+    // pan and nothing else. Their levels differ on purpose: two equal carriers would put equal
+    // energy in each channel however they were panned, and the check would pass while measuring
+    // nothing.
+    {
+        auto panned = [&] (float pan1, float pan2)
+        {
+            auto p = paramsForAlgo (-1);   // no algorithm: the patch is set up by hand below
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                p.level[i] = 0.0f;
+                p.carrier[i] = false;
+            }
+
+            p.carrier[0] = true;
+            p.carrier[1] = true;
+            p.level[0] = 0.9f;
+            p.level[1] = 0.25f;
+            p.ratio[0] = 1.0f;
+            p.ratio[1] = 2.0f;
+            p.pan[0] = pan1;
+            p.pan[1] = pan2;
+            p.index = 0.0f;                // no FM, so the two carriers do not interact
+            p.master = 0.5f;
+
+            for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+            {
+                p.attack[i] = 0.001f;
+                p.decay[i] = 1.0f;
+                p.sustain[i] = 1.0f;
+                p.release[i] = 0.05f;
+            }
+
+            MiXXFmVoice v;
+            v.setSampleRate (sr);
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+            v.renderBlock (buf, midi, p);
+
+            return std::pair<float, float> (buf.getRMSLevel (0, 0, blockLen),
+                                            buf.getRMSLevel (1, 0, blockLen));
+        };
+
+        // Both centred: the two channels run the same arithmetic on the same numbers, so they
+        // are identical - which is also why a patch that never touches pan is unchanged.
+        const auto centre = panned (0.0f, 0.0f);
+
+        ok = check (std::abs (centre.first - centre.second) < 1.0e-6f,
+                    "pan at centre keeps the voice centred",
+                    std::abs (centre.first - centre.second)) && ok;
+
+        // The loud carrier hard left, the quiet one hard right.
+        const auto split = panned (-1.0f, 1.0f);
+
+        ok = check (split.first > split.second * 1.5f, "panning puts the loud carrier left",
+                    split.first / juce::jmax (1.0e-6f, split.second)) && ok;
+
+        // The same patch with the pans swapped: the channels swap with it. This is the check that
+        // separates a PAN from a LEVEL - a level would move both channels the same way.
+        const auto swapped = panned (1.0f, -1.0f);
+
+        ok = check (swapped.second > swapped.first * 1.5f, "swapping the pans swaps the channels",
+                    swapped.second / juce::jmax (1.0e-6f, swapped.first)) && ok;
+    }
+
     // --- 10. Modulation identity: an Off source is a no-op ---
     {
         auto base = paramsForAlgo (4);
@@ -403,6 +552,126 @@ int main()
             diff += std::abs (a.getSample (0, i) - b.getSample (0, i));
 
         ok = check (diff > 1.0, "mod: LFO->FM Index changes output", diff) && ok;
+    }
+
+    // --- 11b. Op pan as a modulation destination: the engine, then the audio ---
+    //
+    // Checked in two steps, because they fail for different reasons. First the destination
+    // itself: does a slot on Op pan reach the voice's pan at all? Then the audio: does that
+    // movement show up as the channel balance changing, which is what auto-pan means.
+    {
+        // A shape with its POINTS SET EXPLICITLY, and that is not optional here. A
+        // default-constructed ModShape has every point at {0,0}, so a shape left at its defaults
+        // is a FLAT LINE - a placeholder rather than a waveform, since the editor always sets
+        // real points. A test that forgets this measures a constant, which is exactly what this
+        // one did on its first run: the "LFO" reported -1.0 for the whole block.
+        //
+        // A one-shot ENV ramp rather than an LFO, because it is deterministic: the pan sweeps
+        // once from centre to hard right, so the two halves of the block cannot average out to
+        // the same balance however the timing falls.
+        auto rampMod = [] (const mixxynth::ModParams& base)
+        {
+            auto m = base;
+            auto& ramp = m.shapes.shapes[mixxynth::kDefaultLfos];   // index 1 is Env 1
+
+            ramp.numPoints = 2;
+            ramp.points[0] = { 0.0f, 0.0f, 0.0f };
+            ramp.points[1] = { 1.0f, 1.0f, 0.0f };
+            ramp.mode = mixxynth::shapeOneShot;
+            ramp.rateHz = 1.0f;
+            ramp.bipolar = false;
+
+            return m;
+        };
+
+        // --- step one: the modulation engine ---
+        auto slotMod = rampMod (mod);
+        slotMod.slots[0] = { mixxynth::srcEnv1, mixxynth::dstOp1Pan, 1.0f };
+
+        auto base = paramsForAlgo (-1);
+        base.pan[0] = 0.0f;
+
+        // Half a second in, so the ramp is halfway up and the pan is clearly off centre.
+        mixxynth::ModState state;
+        state.noteOn (slotMod);
+
+        std::array<float, mixxynth::kNumModSources> sources {};
+        mixxynth::computeSources (state, slotMod, 1.0f, 60, 0.0f, 0.0f, blockLen / 2, sources);
+
+        auto modulated = base;
+        mixxynth::applyModulation (mixxynth::modTotals (sources, slotMod), modulated);
+
+        ok = check (modulated.pan[0] > 0.1f, "a slot on Op pan reaches the voice's pan",
+                    modulated.pan[0]) && ok;
+
+        // --- step two: the audio ---
+        auto p = paramsForAlgo (-1);
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            p.level[i] = 0.0f;
+            p.carrier[i] = false;
+        }
+
+        p.carrier[0] = true;
+        p.level[0] = 0.8f;
+        p.ratio[0] = 1.0f;
+        p.index = 0.0f;
+        p.master = 0.5f;
+
+        for (int i = 0; i < MiXXFmVoice::numOps; ++i)
+        {
+            p.attack[i] = 0.001f;
+            p.decay[i] = 1.0f;
+            p.sustain[i] = 1.0f;
+            p.release[i] = 0.05f;
+        }
+
+        MiXXVoiceManager::PolyParams poly;
+        poly.polyphony = 16;
+        poly.unison = 1;
+        poly.unisonSpread = 0.0f;   // so the slot is the only thing moving the image
+
+        const int half = blockLen / 2;
+
+        auto balanceOf = [] (const juce::AudioBuffer<float>& b, int from, int count)
+        {
+            const float l = b.getRMSLevel (0, from, count);
+            const float r = b.getRMSLevel (1, from, count);
+
+            return l / juce::jmax (1.0e-9f, l + r);
+        };
+
+        auto renderWith = [&] (const mixxynth::ModParams& m)
+        {
+            MiXXVoiceManager vm;
+            vm.prepare (sr);
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+            vm.renderBlock (buf, midi, p, m, poly);
+
+            return std::pair<float, float> (balanceOf (buf, 0, half),
+                                            balanceOf (buf, half, blockLen - half));
+        };
+
+        auto m = rampMod (mod);
+        m.slots[0] = { mixxynth::srcEnv1, mixxynth::dstOp1Pan, 1.0f };
+
+        const auto swept = renderWith (m);
+
+        ok = check (std::abs (swept.first - swept.second) > 0.05f,
+                    "a slot on Op pan moves the operator across the field",
+                    std::abs (swept.first - swept.second)) && ok;
+
+        // The same patch with no slot on pan: the image holds still. Without this, the check above
+        // would pass for ANY modulation, including one that merely changed the level.
+        const auto held = renderWith (mod);
+
+        ok = check (std::abs (held.first - held.second) < 1.0e-4f,
+                    "with no slot on pan the image holds still",
+                    std::abs (held.first - held.second)) && ok;
     }
 
     // --- 12. Mod envelope -> master acts over time ---
@@ -1904,6 +2173,150 @@ int main()
                                                      - untouched.getSample (ch, i)));
 
         ok = check (worst == 0.0f, "AbyssVerb Mix at zero is dry", worst) && ok;
+    }
+
+    // --- 24l. Rotary: the two channels move against each other ---
+    //
+    // The claim here is not "it wobbles" - a tremolo wobbles. It is that the two channels are
+    // doing DIFFERENT things, which is what makes a rotary a stereo effect rather than a panner.
+    // The two mics sit at different points of the rotor's travel, so at any instant one is on the
+    // way up while the other is on the way down.
+    {
+        mixxynth::RotaryFx rotary;
+        rotary.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::RotaryFx::pRate] = 0.7f;        // fast enough that a block spans real movement
+        p[mixxynth::RotaryFx::pDepth] = 1.0f;
+        p[mixxynth::RotaryFx::pWidth] = 1.0f;
+        p[mixxynth::RotaryFx::pCrossover] = 0.5f;
+        p[mixxynth::RotaryFx::pBalance] = 0.5f;
+        p[mixxynth::RotaryFx::pDrive] = 0.0f;
+        p[mixxynth::RotaryFx::pMix] = 1.0f;
+
+        // Two tones either side of the crossover, because a single sine can sit in one band and
+        // miss the other rotor entirely - and both rotors running is the whole point of the split.
+        juce::AudioBuffer<float> buf (2, blockLen);
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float t = static_cast<float> (i) / static_cast<float> (sr);
+
+            const float v = 0.3f * std::sin (2.0f * juce::MathConstants<float>::pi * 220.0f * t)
+                              + 0.2f * std::sin (2.0f * juce::MathConstants<float>::pi * 2200.0f * t);
+
+            buf.setSample (0, i, v);
+            buf.setSample (1, i, v);
+        }
+
+        rotary.process (buf, p);
+
+        // How far apart the channels are, relative to how much signal there is. A mono effect
+        // leaves this at zero however loud it is.
+        float sum = 0.0f, diff = 0.0f;
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float l = buf.getSample (0, i);
+            const float r = buf.getSample (1, i);
+
+            sum += l * l + r * r;
+            diff += (l - r) * (l - r);
+        }
+
+        ok = check (diff > sum * 0.05f, "Rotary puts the two channels out of step",
+                    std::sqrt (diff / juce::jmax (1.0e-9f, sum))) && ok;
+    }
+
+    // --- 24m. Rotary: Mix at zero is a true bypass, bit for bit ---
+    {
+        mixxynth::RotaryFx rotary;
+        rotary.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::RotaryFx::pRate] = 0.7f;
+        p[mixxynth::RotaryFx::pDepth] = 1.0f;
+        p[mixxynth::RotaryFx::pDrive] = 1.0f;
+        p[mixxynth::RotaryFx::pMix] = 0.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            buf.setSample (0, i, v);
+            buf.setSample (1, i, v);
+        }
+
+        juce::AudioBuffer<float> reference;
+        reference.makeCopyOf (buf);
+
+        rotary.process (buf, p);
+
+        float worst = 0.0f;
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < blockLen; ++i)
+                worst = juce::jmax (worst, std::abs (buf.getSample (ch, i)
+                                                     - reference.getSample (ch, i)));
+
+        ok = check (worst == 0.0f, "Rotary Mix at zero is dry", worst) && ok;
+    }
+
+    // --- 24n. Rotary: finite at every corner of its controls ---
+    //
+    // The corners rather than the middle, because the failure this guards against is a delay read
+    // that runs past the end of its line - which needs the sweep at its largest, and the sweep is
+    // what Depth and Rate both drive.
+    {
+        const float corners[4][3] = {
+            { 0.0f, 0.0f, 0.0f },   // slowest, no depth, mics together
+            { 1.0f, 1.0f, 1.0f },   // fastest, full depth, mics apart
+            { 0.0f, 1.0f, 1.0f },   // slow but deep
+            { 1.0f, 0.0f, 0.0f }    // fast but still
+        };
+
+        const char* names[4] = { "Rotary slow and still is finite",
+                                 "Rotary fast and wide is finite",
+                                 "Rotary slow and wide is finite",
+                                 "Rotary fast and still is finite" };
+
+        for (int c = 0; c < 4; ++c)
+        {
+            mixxynth::RotaryFx rotary;
+            rotary.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::RotaryFx::pRate] = corners[c][0];
+            p[mixxynth::RotaryFx::pDepth] = corners[c][1];
+            p[mixxynth::RotaryFx::pWidth] = corners[c][2];
+            p[mixxynth::RotaryFx::pCrossover] = 0.5f;
+            p[mixxynth::RotaryFx::pBalance] = 0.5f;
+            p[mixxynth::RotaryFx::pDrive] = 1.0f;
+            p[mixxynth::RotaryFx::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.9f * std::sin (2.0f * juce::MathConstants<float>::pi * 110.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            rotary.process (buf, p);
+
+            bool finite = true;
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < blockLen; ++i)
+                    if (! std::isfinite (buf.getSample (ch, i)))
+                        finite = false;
+
+            ok = check (finite, names[c], 0.0) && ok;
+        }
     }
 
     // --- 25. Infinite decay sustains, but does not run away ---

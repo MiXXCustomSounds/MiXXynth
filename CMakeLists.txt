@@ -78,6 +78,7 @@ target_sources(MiXXynth PRIVATE
     Source/WheelComponent.h
     Source/ParamSources.h
     Source/EditorTheme.h
+    Source/DiceButton.h
     Source/FmVoice.cpp
     Source/FmVoice.h
     Source/VoiceManager.cpp
@@ -124,6 +125,8 @@ target_sources(MiXXynth PRIVATE
     Source/Fx/VastVerbFx.h
     Source/Fx/AbyssVerbFx.cpp
     Source/Fx/AbyssVerbFx.h
+    Source/Fx/RotaryFx.cpp
+    Source/Fx/RotaryFx.h
     Source/PresetStore.cpp
     Source/PresetStore.h
     Source/PresetManager.cpp
@@ -186,6 +189,7 @@ add_executable(MiXXynthSmoke
     Source/Fx/MiXXDriveFx.cpp
     Source/Fx/VastVerbFx.cpp
     Source/Fx/AbyssVerbFx.cpp
+    Source/Fx/RotaryFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -248,6 +252,7 @@ add_executable(MiXXynthEditorAudit
     Source/Fx/MiXXDriveFx.cpp
     Source/Fx/VastVerbFx.cpp
     Source/Fx/AbyssVerbFx.cpp
+    Source/Fx/RotaryFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils
@@ -309,6 +314,7 @@ add_executable(MiXXynthPatchAudit
     Source/Fx/MiXXDriveFx.cpp
     Source/Fx/VastVerbFx.cpp
     Source/Fx/AbyssVerbFx.cpp
+    Source/Fx/RotaryFx.cpp
 )
 target_link_libraries(MiXXynthPatchAudit PRIVATE
     juce::juce_audio_utils

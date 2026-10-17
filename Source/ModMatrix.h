@@ -65,6 +65,18 @@ namespace mixxynth
         dstOp4FilterReso, dstOp5FilterReso, dstOp6FilterReso,
         dstOp1FilterDrive, dstOp2FilterDrive, dstOp3FilterDrive,
         dstOp4FilterDrive, dstOp5FilterDrive, dstOp6FilterDrive,
+
+        // The per-operator pans. APPENDED, like the filter block above and for the same reason.
+        //
+        // These exist so an LFO can auto-pan, which is the whole reason pan is worth having as a
+        // destination rather than only as a knob: a static pan is a placement, and a moving one
+        // is an effect.
+        //
+        // Only a CARRIER's pan is audible, so a slot aimed at a modulator's pan will do nothing
+        // you can hear. That is a property of FM rather than of this list, and it is why the roll
+        // is allowed to pick these without checking the routing.
+        dstOp1Pan, dstOp2Pan, dstOp3Pan, dstOp4Pan, dstOp5Pan, dstOp6Pan,
+
         dstMtxFirst // 30 matrix depths follow
     };
 

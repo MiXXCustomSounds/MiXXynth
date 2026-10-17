@@ -60,6 +60,17 @@ namespace mixxynth
         {
             const float* points;
             int count;
+
+            // True for the fallback set, whose points are fractions OF THE PARAMETER'S RANGE
+            // rather than absolute values.
+            //
+            // That distinction is the whole of a real bug. Ratios, times and frequencies are
+            // absolute - 2.0 means a 2:1 ratio whatever the parameter's width - but "a round
+            // fraction" only means something relative to the thing being fractioned. As absolute
+            // 0..1 values the fallback pinned every control whose range is not 0..1: fmIndex runs
+            // 0..2, so its top half was unreachable, and a knob running 1..32 could only snap to
+            // its own bottom, because every point in the set lay below its minimum.
+            bool fractionsOfRange = false;
         };
 
         // Which set a parameter uses, by name. Ordered: the first match wins, so the more
@@ -88,8 +99,11 @@ namespace mixxynth
                 return { kFrequencies, static_cast<int> (sizeof (kFrequencies) / sizeof (kFrequencies[0])) };
 
             // The fallback, for levels and depths and mixes. A parameter with no set at all
-            // would make the switch look broken on most of the panel.
-            return { kFractions, static_cast<int> (sizeof (kFractions) / sizeof (kFractions[0])) };
+            // would make the switch look broken on most of the panel. These are fractions OF THE
+            // RANGE, not absolute values - see SnapSet::fractionsOfRange.
+            return { kFractions,
+                     static_cast<int> (sizeof (kFractions) / sizeof (kFractions[0])),
+                     true };
         }
     }
 
@@ -113,27 +127,75 @@ namespace mixxynth
         if (! snapFlag)
             return normalised;
 
-        const auto set = setFor (param.getParameterID());
-
-        if (set.count <= 0)
+        // Discrete parameters are already on a grid, and their ranges are INDICES rather than
+        // quantities - an algorithm number is not a distance that can be fractioned. Snapping one
+        // against a set of real-unit points is how the Voice section's Polyphony and Unison knobs
+        // ended up pinned at their minimum and refusing to turn: every point in the fallback set
+        // lies below a range that starts at 1, so the nearest one was always the first, and the
+        // first converted back to zero.
+        if (dynamic_cast<const juce::AudioParameterChoice*> (&param) != nullptr
+              || dynamic_cast<const juce::AudioParameterInt*> (&param) != nullptr)
             return normalised;
 
-        const float real = param.convertFrom0to1 (juce::jlimit (0.0f, 1.0f, normalised));
+        const float clamped = juce::jlimit (0.0f, 1.0f, normalised);
 
-        // The nearest point in real units, not in normalised ones. A ratio range is skewed, so
-        // snapping the normalised value would put 2.0 nowhere near where it looks like it
-        // should be.
-        float best = set.points[0];
-        float bestDistance = std::abs (real - best);
+        const float real = param.convertFrom0to1 (clamped);
+        const float low = param.convertFrom0to1 (0.0f);
+        const float high = param.convertFrom0to1 (1.0f);
 
-        for (int i = 1; i < set.count; ++i)
+        const auto set = setFor (param.getParameterID());
+
+        float best = real;
+
+        if (set.fractionsOfRange)
         {
-            const float distance = std::abs (real - set.points[i]);
+            // Round fractions of the range, which is what makes this correct for a parameter of
+            // any width rather than only for one running 0..1.
+            const float span = high - low;
 
-            if (distance < bestDistance)
+            if (span <= 0.0f)
+                return clamped;
+
+            constexpr float step = 0.05f;
+            const float snapped = low + std::round ((real - low) / (span * step)) * (span * step);
+
+            best = juce::jlimit (low, high, snapped);
+        }
+        else
+        {
+            // Absolute points, and only those that actually lie inside the range. A set whose
+            // points all fall outside must not snap at all - otherwise the knob is pinned to
+            // whichever end of the range the nearest out-of-range point clamps to, which is the
+            // same failure in a different disguise.
+            //
+            // The parameter's own extremes are candidates too. Without them a set that stops
+            // short of the range leaves the top of the knob unreachable: the envelope times stop
+            // at 30 s, and a decay knob running to 4 s could never get past 2.
+            float bestDistance = std::abs (real - low);
+            best = low;
+
+            const float distanceToHigh = std::abs (real - high);
+
+            if (distanceToHigh < bestDistance)
             {
-                bestDistance = distance;
-                best = set.points[i];
+                bestDistance = distanceToHigh;
+                best = high;
+            }
+
+            for (int i = 0; i < set.count; ++i)
+            {
+                const float p = set.points[i];
+
+                if (p < low || p > high)
+                    continue;
+
+                const float distance = std::abs (real - p);
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = p;
+                }
             }
         }
 

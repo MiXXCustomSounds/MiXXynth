@@ -8,7 +8,11 @@ class MiXXynthProcessor;
 
 namespace mixxynth
 {
-    // The five things a roll can move, and the five things it can be told not to.
+    // The things a roll can move, and the things it can be told not to.
+    //
+    // APPEND ONLY, like the FX type list: a lock's index is its identity in the bar's row of
+    // buttons and in the debug string, so inserting one in the middle would silently repoint
+    // every lock at its neighbour.
     enum RollSection
     {
         rollFm = 0,
@@ -16,10 +20,19 @@ namespace mixxynth
         rollFilter,
         rollMod,
         rollFx,
+
+        // The panning and spread controls, deliberately their own section rather than folded
+        // into the FM and VA rolls that set the same parameters.
+        //
+        // A section per AXIS is what makes "roll the patch but leave my stereo placement alone"
+        // expressible: with pan inside the FM roll, keeping it meant locking FM - which keeps
+        // the ratios and envelopes too. This is the lock that isolates it.
+        rollStereo,
+
         kNumRollSections
     };
 
-    // Short name for a lock button: "FM", "VA", "FILT", "MOD", "FX".
+    // Short name for a lock button: "FM", "VA", "FILT", "MOD", "FX", "ST".
     const char* rollSectionName (int section) noexcept;
 
     // The smart randomizer (M7, and SPEC S8's "randomization CORE").
@@ -64,6 +77,7 @@ namespace mixxynth
         void rollFilterSection (juce::Random&);
         void rollModSection (juce::Random&);
         void rollFxSection (juce::Random&);
+        void rollStereoSection (juce::Random&);
 
         // Puts a modulation destination somewhere the modulation can be heard, so a rolled
         // slot does something instead of sweeping a parameter that has no room left.

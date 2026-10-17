@@ -165,34 +165,59 @@ namespace mixxynth
 
     void PresetManager::rememberForUndo()
     {
-        undoState = proc.buildStateTree();
-        undoIndex = current;
-        undoPrint = loadedPrint;
+        undoStack.push_back ({ proc.buildStateTree(), current, loadedPrint });
+
+        if (static_cast<int> (undoStack.size()) > kMaxHistory)
+            undoStack.erase (undoStack.begin());
+
+        // A new move invalidates the future: you cannot redo past an edit. Without this, a
+        // redo after a roll would reinstate a patch the roll had already replaced.
+        redoStack.clear();
     }
 
     bool PresetManager::undo()
     {
-        if (! undoState.isValid())
+        if (undoStack.empty())
             return false;
 
-        const auto target = undoState;
-        const int targetIndex = undoIndex;
-        const juce::int64 targetPrint = undoPrint;
+        const auto entry = undoStack.back();
 
-        // Cleared first, so an undo cannot be undone back into itself and a second undo does
-        // not silently restore the same patch twice.
-        undoState = juce::ValueTree();
-        undoIndex = -1;
-        undoPrint = 0;
+        // Captured BEFORE the restore, so redo is the exact inverse rather than a
+        // re-derivation of where we think we were.
+        const HistoryEntry leaving { proc.buildStateTree(), current, loadedPrint };
 
-        if (! proc.applyStateTree (target))
+        if (! proc.applyStateTree (entry.state))
             return false;
 
-        // The selection and the fingerprint come back with the patch, rather than being
-        // re-derived: a patch that was already edited when the roll happened is still edited
+        // Popped only once the restore has succeeded, so a failed undo does not eat the entry.
+        undoStack.pop_back();
+        redoStack.push_back (leaving);
+
+        // The selection and the fingerprint come back with the patch rather than being
+        // re-derived: a patch that was already edited when the move happened is still edited
         // after the undo, and the bar has to keep saying so.
-        current = targetIndex;
-        loadedPrint = targetPrint;
+        current = entry.index;
+        loadedPrint = entry.print;
+
+        return true;
+    }
+
+    bool PresetManager::redo()
+    {
+        if (redoStack.empty())
+            return false;
+
+        const auto entry = redoStack.back();
+        const HistoryEntry leaving { proc.buildStateTree(), current, loadedPrint };
+
+        if (! proc.applyStateTree (entry.state))
+            return false;
+
+        redoStack.pop_back();
+        undoStack.push_back (leaving);
+
+        current = entry.index;
+        loadedPrint = entry.print;
 
         return true;
     }

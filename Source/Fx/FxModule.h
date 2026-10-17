@@ -50,6 +50,7 @@ namespace mixxynth
         fxMiXXDrive,
         fxVastVerb,
         fxAbyssVerb,
+        fxRotary,
         kNumFxTypes
     };
 

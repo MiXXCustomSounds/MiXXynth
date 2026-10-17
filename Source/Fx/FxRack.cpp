@@ -14,6 +14,7 @@
 #include "MiXXDriveFx.h"
 #include "VastVerbFx.h"
 #include "AbyssVerbFx.h"
+#include "RotaryFx.h"
 
 namespace mixxynth
 {
@@ -36,6 +37,7 @@ namespace mixxynth
             case fxMiXXDrive:   return "MiXX Drive";
             case fxVastVerb:    return "VastVerb";
             case fxAbyssVerb:   return "AbyssVerb";
+            case fxRotary:      return "Rotary";
             default:            break;
         }
 
@@ -60,6 +62,7 @@ namespace mixxynth
             case fxMiXXDrive:   return MiXXDriveFx::descriptor();
             case fxVastVerb:    return VastVerbFx::descriptor();
             case fxAbyssVerb:   return AbyssVerbFx::descriptor();
+            case fxRotary:      return RotaryFx::descriptor();
             default:            break;
         }
 
@@ -107,6 +110,7 @@ namespace mixxynth
                 case fxMiXXDrive:   module = std::make_unique<MiXXDriveFx>(); break;
                 case fxVastVerb:    module = std::make_unique<VastVerbFx>(); break;
                 case fxAbyssVerb:   module = std::make_unique<AbyssVerbFx>(); break;
+                case fxRotary:      module = std::make_unique<RotaryFx>(); break;
                 default:            return nullptr;
             }
 

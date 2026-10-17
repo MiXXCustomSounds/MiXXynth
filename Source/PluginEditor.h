@@ -80,10 +80,6 @@ public:
     // moves and turns blue instead of only being able to say that it could.
     void pushModulatedValues();
 
-    // Rolls the FM tab's dice. Exposed so the audit can check the roll's
-    // invariants without driving a button.
-    void rollFmDice();
-
     // The FM page's per-operator envelope editors, in operator order. They are not
     // ModTargets - an operator envelope only controls its own operator - so they are
     // not in modTargets and need their own way out for the audit.
