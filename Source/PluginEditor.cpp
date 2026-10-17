@@ -3055,6 +3055,11 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
     title.setFont (juce::FontOptions (22.0f));
     addAndMakeVisible (title);
 
+    // The patch bar, in the header beside the name: the preset browser and the roll, which are
+    // the two controls that act on the whole patch.
+    patchBar = std::make_unique<mixxynth::ui::PatchBar> (proc);
+    addAndMakeVisible (*patchBar);
+
     railTitle.setText ("MODULATION", juce::dontSendNotification);
     railTitle.setJustificationType (juce::Justification::centredLeft);
     railTitle.setColour (juce::Label::textColourId, juce::Colour (0xff8b98a5));
@@ -3242,6 +3247,11 @@ MiXXynthEditor::MiXXynthEditor (MiXXynthProcessor& p)
 
 MiXXynthEditor::~MiXXynthEditor() = default;
 
+juce::Component* MiXXynthEditor::getPatchBarComponent() const
+{
+    return patchBar.get();
+}
+
 void MiXXynthEditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff0b0d10));
@@ -3255,7 +3265,17 @@ void MiXXynthEditor::resized()
 {
     auto b = getLocalBounds();
 
-    title.setBounds (b.removeFromTop (34).reduced (10, 4));
+    // The title and the patch bar share the header row: the bar is the widest thing in the
+    // editor that is not a page, so it takes whatever the name does not need.
+    {
+        auto header = b.removeFromTop (34);
+
+        title.setBounds (header.removeFromLeft (132).reduced (10, 4));
+
+        if (patchBar != nullptr)
+            patchBar->setBounds (header.removeFromRight (juce::jmax (420, header.getWidth()))
+                                     .reduced (6, 3));
+    }
 
     // The scope sits directly under the title and spans the full width, so it is on screen
     // whatever tab or section is showing. That is the whole reason it is here rather than

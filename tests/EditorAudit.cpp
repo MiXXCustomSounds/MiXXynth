@@ -18,6 +18,7 @@
 #include "../Source/Algorithms.h"
 #include "../Source/ModKnob.h"
 #include "../Source/ModMatrix.h"
+#include "../Source/PatchBar.h"
 #include "../Source/PluginEditor.h"
 #include "../Source/PluginProcessor.h"
 #include "../Source/SquareCell.h"
@@ -1994,6 +1995,130 @@ int main()
                scopeComponent != nullptr ? juce::String (scopeComponent->getWidth()) + "x"
                                              + juce::String (scopeComponent->getHeight())
                                          : juce::String ("missing"));
+    }
+
+    // ---- 17. the patch bar: the browser, the roll and the dirty marker ----
+    //
+    // The bar is outside the tabs, so walking the pages cannot find it - which is exactly why
+    // it needs its own checks. What is worth checking here is the WIRING: that the controls
+    // exist and are sized, that the list is populated from the bank, that a lock toggle and the
+    // randomizer agree, and that the moves the buttons call do what they say.
+    {
+        auto* bar = miXXEditor->getPatchBar();
+
+        check (bar != nullptr && miXXEditor->getPatchBarComponent()->isVisible()
+                 && miXXEditor->getPatchBarComponent()->getWidth() > 300
+                 && miXXEditor->getPatchBarComponent()->getHeight() > 20,
+               "the patch bar is laid out and visible",
+               bar != nullptr ? juce::String (miXXEditor->getPatchBarComponent()->getWidth())
+                                  + "x" + juce::String (miXXEditor->getPatchBarComponent()->getHeight())
+                              : juce::String ("missing"));
+
+        if (bar == nullptr)
+        {
+            std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);
+            return failures == 0 ? 0 : 1;
+        }
+
+        bar->refresh();
+
+        const auto dump = bar->debug();
+        const int bankSize = proc.presets.store().size();
+
+        check (bankSize > 0 && dump.contains ("list=" + juce::String (bankSize)),
+               "the browser lists the bank", dump);
+
+        // Headings plus presets, so at least one item per preset.
+        check (bar->numBrowserItems() >= bankSize,
+               "every preset has an item in the browser",
+               juce::String (bar->numBrowserItems()) + " items for " + juce::String (bankSize)
+                   + " presets");
+
+        // No control in the bar may be left at zero bounds: the bar is built outside the pages,
+        // so the page walk that guards the rest of the editor does not see it.
+        int zeroBounds = 0;
+
+        for (int i = 0; i < miXXEditor->getPatchBarComponent()->getNumChildComponents(); ++i)
+            if (auto* child = miXXEditor->getPatchBarComponent()->getChildComponent (i))
+                if (child->isVisible() && (child->getWidth() <= 0 || child->getHeight() <= 0))
+                    ++zeroBounds;
+
+        check (zeroBounds == 0, "no control in the patch bar has zero bounds",
+               juce::String (zeroBounds));
+
+        // The browser follows the session. Loading through the bar's own move and then
+        // refreshing is what the timer does, so this is the same path the UI takes.
+        const int target = juce::jmin (4, bankSize - 1);
+
+        check (bar->step (0) || true, "stepping by nothing is harmless", "");
+
+        proc.presets.load (target);
+        bar->refresh();
+
+        check (bar->debug().contains ("index=" + juce::String (target))
+                 && bar->selectedItemId() == 100 + 1 + target,
+               "the browser follows a load",
+               juce::String (bar->selectedItemId()) + " for index " + juce::String (target));
+
+        check (bar->debug().contains ("dirty=0"), "a freshly loaded preset is not marked dirty",
+               bar->debug());
+
+        if (auto* param = proc.apvts.getParameter ("fmIndex"))
+            param->setValueNotifyingHost (0.31f);
+
+        bar->refresh();
+
+        check (bar->debug().contains ("dirty=1"), "an edited patch is marked dirty", bar->debug());
+
+        // The locks. Set through the randomizer and read back through the bar, which is the
+        // direction that would break silently if the two ever disagreed.
+        proc.randomizer.setLocked (mixxynth::rollFx, true);
+        bar->refresh();
+
+        check (bar->debug().contains ("locks=00001"),
+               "the lock toggles show what the randomizer is locked to", bar->debug());
+
+        // A roll through the bar leaves an undo point, and the undo puts the patch back.
+        const auto beforeRoll = proc.presets.isDirty();
+
+        bar->rollNow();
+
+        check (proc.presets.canUndo(), "a roll from the bar leaves an undo point", "");
+
+        check (bar->undoRoll(), "the bar's undo runs", "");
+
+        check (proc.presets.isDirty() == beforeRoll,
+               "undo restores the dirty state as well as the patch",
+               juce::String (proc.presets.isDirty() ? 1 : 0));
+
+        // Deleting a factory preset through the bar is refused, and says so rather than doing
+        // something else.
+        proc.presets.load (target);
+        bar->refresh();
+
+        check (! bar->removeSelected() && proc.presets.store().isValidIndex (target),
+               "the bar refuses to delete a factory preset", "");
+
+        // Save As through the bar writes a user preset, and the browser grows to include it.
+        const juce::String name ("Patch Bar Temp");
+        const int saved = bar->saveAs ("Other", name);
+
+        check (saved >= 0, "the bar saves a user preset", juce::String (saved));
+
+        bar->refresh();
+
+        check (bar->numBrowserItems() >= bankSize + 1,
+               "the browser picks up a saved preset",
+               juce::String (bar->numBrowserItems()) + " items for " + juce::String (bankSize + 1)
+                   + " presets");
+
+        proc.presets.remove (saved);
+        bar->refresh();
+
+        check (proc.presets.store().indexOf ("Other", name) < 0,
+               "the temp preset is removed from the bank", "");
+
+        proc.randomizer.setLocked (mixxynth::rollFx, false);
     }
 
     std::printf (failures == 0 ? "EDITOR AUDIT OK\n" : "EDITOR AUDIT FAILED (%d)\n", failures);

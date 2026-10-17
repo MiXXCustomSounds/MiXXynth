@@ -69,7 +69,7 @@ land on musical values or move freely.
 **Constraints.** Everything drawn procedurally in JUCE; no external art. Four parameters per FX
 slot, fixed at construction, so an FX module declares a bounded set.
 
-**Undecided.** Presets are designed but not built. Undo/redo is not wired. The graphical EQ's curve
+**Undecided.** Undo/redo is not wired beyond the roll's one-level undo. The graphical EQ's curve
 is drawn but not draggable.
 
 ## Brand Commitments

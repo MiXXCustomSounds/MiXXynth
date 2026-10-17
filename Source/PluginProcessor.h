@@ -6,6 +6,8 @@
 #include "VoiceManager.h"
 #include "ModMatrix.h"
 #include "Limiter.h"
+#include "PresetManager.h"
+#include "Randomizer.h"
 #include "Fx/FxRack.h"
 
 // Polyphonic 6-op FM synth with per-voice modulation.
@@ -40,16 +42,46 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 10.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return "Init"; }
+    // The host's program list IS the preset bank rather than a second list, so a DAW sees the
+    // same presets the browser does. See PresetManager.
+    int getNumPrograms() override;
+    int getCurrentProgram() override;
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    // ---- the patch, in memory (M7) ------------------------------------------
+    // get/setStateInformation are now the XML wrapper around these, so there is one
+    // definition of "what a patch is" for the host, for a preset, for Init and for the
+    // roll's undo. Before this, the only route in or out of a patch was a MemoryBlock,
+    // which meant a preset had to serialise in order to read its own state.
+    //
+    // See docs/PLAN-M7.md for why the init tree exists and what "partial over init" means.
+    // NOT const, and that is the honest signature: copying the state flushes every parameter
+    // into the tree first, which is a write. A const version would have to lie about that.
+    juce::ValueTree buildStateTree();
+
+    // True when the tree was usable. Forces the algorithm to Free, because there is no UI
+    // that can move it off Free any more and a state naming a DX7 algorithm would silently
+    // override the routing matrix (the bug M6 set out to kill).
+    bool applyStateTree (const juce::ValueTree& tree);
+
+    // Every parameter at its default, the default modulation modules and an empty rack.
+    juce::ValueTree buildInitState() const;
+    void applyInitState();
+
     juce::AudioProcessorValueTreeState apvts;
+
+    // The patch session: the preset bank, the loaded preset, and whether the patch has been
+    // edited since. Owned by the processor rather than the editor, because the host's program
+    // calls have to reach it with no window open.
+    mixxynth::PresetManager presets { *this };
+
+    // The smart randomizer, owned here for the same reason.
+    mixxynth::Randomizer randomizer { *this };
 
     // Shared with the editor's performance bar so the on-screen keyboard and
     // wheels can show (and drive) live MIDI state.

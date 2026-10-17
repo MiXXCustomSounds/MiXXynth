@@ -10,6 +10,7 @@
 #include "AdsrEditor.h"
 #include "ModKnob.h"
 #include "ModShape.h"
+#include "PatchBar.h"
 #include "ShapeEditorComponent.h"
 #include "WheelComponent.h"
 
@@ -165,6 +166,11 @@ private:
     MiXXynthProcessor& proc;
 
     juce::Label title;
+
+    // The patch bar: the preset browser and the roll, in the header row beside the name. It
+    // sits outside the tabs because it acts on the whole patch rather than on a page.
+    std::unique_ptr<mixxynth::ui::PatchBar> patchBar;
+
     juce::Component rail;
     juce::Label railTitle;
     juce::Viewport modViewport;
@@ -194,6 +200,10 @@ public:
     // in the .cpp, because ScopeComponent is only forward-declared at this point and the
     // compiler cannot see that it is a Component.
     juce::Component* getScopeComponent() const;
+
+    // The patch bar's, for the same reason: it sits outside the tabs too.
+    juce::Component* getPatchBarComponent() const;
+    mixxynth::ui::PatchBar* getPatchBar() const { return patchBar.get(); }
 
 private:
     // The output limiter's controls, which live in the bar beside Master because that is

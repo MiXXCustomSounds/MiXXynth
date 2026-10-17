@@ -5,24 +5,47 @@ MiXXynth is an **entirely separate project from MiXXFX**. No shared source, no s
 - Type: modern VST synth (VST3 + Standalone planned, JUCE-based)
 - Focus: modern framework, drag-and-drop LFOs / modulation, complex built-in multi-FX rack, complex FM synthesis
 - Workspace: `MiXXynth.code-workspace`
-- Status: scaffolding + research + tooling setup + spec (no DSP/UI build yet)
+- Status: **a working synth.** Six-operator FM with a free routing matrix, a VA layer with its
+  own filter, per-operator filters, 32 modulation slots over editable shapes, twelve FX modules,
+  an output safety limiter, a categorized preset bank with a smart randomizer, and an editor of
+  three tabs. The visual pass has not happened yet.
 
-## Requirements (planned)
+## Gates
+
+Every claim above is checked by one of these, and CI runs all of them:
+
+| Gate | What it covers |
+|---|---|
+| `MiXXynthSmoke` | DSP, offline: audible output, stability, every module's own behaviour |
+| `MiXXynthEditorAudit` | Every control wired to the parameter and modulation destination it should be |
+| `MiXXynthPatchAudit` | The patch: the preset bank, partial-over-init loads, the host programs, the roll |
+| `pluginval --strictness-level 5` | The plugin in a host |
+
+```sh
+cmake -S . -B build-vs2026 -G "Visual Studio 18 2026" -A x64
+cmake --build build-vs2026 --config Release --target MiXXynth_VST3 MiXXynth_Standalone
+cmake --build build-vs2026 --config Release --target MiXXynthSmoke MiXXynthEditorAudit MiXXynthPatchAudit
+```
+
+## Requirements
 
 - Windows 10/11
 - Visual Studio 2026 with Desktop development with C++ workload
-- CMake 3.22+
-- Git (JUCE fetched on first configure, isolated to this repo's build dir)
-- Node 18+ / npm (for impeccable + skills)
-- Python 3.10+ (for skill tests + hippo-memory) — **currently missing, to install**
+- CMake 3.25+
+- Git (JUCE and sst-jucegui are fetched on first configure, isolated to this repo's build dir)
+- Node 18+ (only to regenerate the factory bank: `node tools/make-factory-presets.mjs`)
 
-## Layout (planned)
+## Layout
 
 - `MiXXynth.code-workspace` — VS Code workspace
-- `RESEARCH.md` — modern VST synth design research + helpful repos table
-- `SPEC-MiXXynth.md` — spec sheet (draft then Q&A before build)
-- `Source/` — created only after spec sign-off
-- `CMakeLists.txt` — created only after spec sign-off (own JUCE FetchContent, IS_SYNTH TRUE)
+- `Source/` — the plugin. `Fx/` holds the rack's modules; `PresetStore`, `PresetManager` and
+  `Randomizer` are the patch; `PatchBar` is the browser and the roll
+- `presets/` — the factory bank, as text. Embedded in the binary at build time
+- `tests/` — the three gates
+- `tools/` — pluginval, and the factory bank's generator
+- `docs/` — the design record: `PLAN-M4B`, `PLAN-M5`, `PLAN-M6`, `PLAN-M7`, `PRESETS`,
+  `ALGORITHMS`, `MOD-SHAPES`, `MATRIX-AND-VA`, `PERFORMANCE-AND-MPE`, `EDITOR-AUDIT`
+- `VST3/` — the staged installable bundle, written by the build
 
 ## Separation from MiXXFX
 

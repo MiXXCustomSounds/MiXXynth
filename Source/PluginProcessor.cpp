@@ -445,6 +445,39 @@ MiXXynthProcessor::MiXXynthProcessor()
     shapeBuffers[0].numLfos = mixxynth::kDefaultLfos;
     shapeBuffers[0].numEnvs = mixxynth::kDefaultEnvs;
     shapeBuffers[1] = shapeBuffers[0];
+
+    // The preset session's baseline: the patch as it is right here, which is the init patch.
+    // Taken at the end of this body rather than in PresetManager's own constructor, because
+    // member constructors run BEFORE this body - and a baseline taken then would be a
+    // fingerprint of the modulation modules before the lines above had set them, which would
+    // make every fresh instance read as dirty.
+    presets.resetBaseline();
+}
+
+// ---------------------------------------------------------------------------
+// The host's programs, which are the preset bank (M7)
+// ---------------------------------------------------------------------------
+int MiXXynthProcessor::getNumPrograms()
+{
+    return presets.numPrograms();
+}
+
+int MiXXynthProcessor::getCurrentProgram()
+{
+    return presets.currentProgram();
+}
+
+void MiXXynthProcessor::setCurrentProgram (int index)
+{
+    // Guarded, because a host is free to ask for a program that is not there - and loading
+    // nothing is a better answer than loading whatever index 900 happens to mean.
+    if (index >= 0 && index < presets.numPrograms())
+        presets.load (index);
+}
+
+const juce::String MiXXynthProcessor::getProgramName (int index)
+{
+    return presets.programName (index);
 }
 
 MiXXynthProcessor::~MiXXynthProcessor() = default;
@@ -1057,7 +1090,15 @@ juce::AudioProcessorEditor* MiXXynthProcessor::createEditor()
     return new MiXXynthEditor (*this);
 }
 
-void MiXXynthProcessor::getStateInformation (juce::MemoryBlock& destData)
+// ---------------------------------------------------------------------------
+// The patch, in memory (M7)
+//
+// get/setStateInformation used to be the only route in or out of a patch, so a preset,
+// Init and the roll's undo would each have had to serialise in order to read state that
+// was already in memory. These are that path with the XML stripped off; the two
+// overrides below are now the wrapper rather than the implementation.
+// ---------------------------------------------------------------------------
+juce::ValueTree MiXXynthProcessor::buildStateTree()
 {
     auto state = apvts.copyState();
 
@@ -1068,28 +1109,41 @@ void MiXXynthProcessor::getStateInformation (juce::MemoryBlock& destData)
 
     // The module counts travel with the node, so the patch reloads with the same
     // modules it was saved with.
+    const int buffer = activeShapeBuffer.load (std::memory_order_acquire);
+
     shapesNode.setProperty ("numLfos", getNumShapeModules() > 0
-                                        ? shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].numLfos
+                                        ? shapeBuffers[static_cast<size_t> (buffer)].numLfos
                                         : 0, nullptr);
-    shapesNode.setProperty ("numEnvs", shapeBuffers[activeShapeBuffer.load (std::memory_order_acquire)].numEnvs, nullptr);
+    shapesNode.setProperty ("numEnvs", shapeBuffers[static_cast<size_t> (buffer)].numEnvs, nullptr);
 
     for (int i = 0; i < getNumShapeModules(); ++i)
         shapesNode.appendChild (mixxynth::shapeToValueTree (getShape (i), "shape"), nullptr);
 
     state.appendChild (shapesNode, nullptr);
 
-    if (auto xml = state.createXml())
-        copyXmlToBinary (*xml, destData);
+    return state;
 }
 
-void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
+bool MiXXynthProcessor::applyStateTree (const juce::ValueTree& incoming)
 {
-    auto xml = getXmlFromBinary (data, sizeInBytes);
+    if (! incoming.isValid() || ! incoming.hasType (apvts.state.getType()))
+        return false;
 
-    if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
-        return;
+    // A copy, because the algorithm is forced below and mutating the caller's tree would
+    // corrupt a fingerprint taken before the load.
+    auto tree = incoming.createCopy();
 
-    auto tree = juce::ValueTree::fromXml (*xml);
+    // M6 removed the algorithm selector and pinned the parameter to Free, so the routing
+    // matrix is the single source of routing truth. A state that names one of the 32 DX7
+    // algorithms would restore an invisible control that overrides the matrix, and no UI
+    // is left that could move it off again - so every route in forces it, once, here.
+    //
+    // Through the parameter's own node, because that is where a value lives: setting a root
+    // property named "algorithm" would look right and do nothing.
+    if (auto algo = tree.getChildWithProperty (mixxynth::presetState::idProperty, "algorithm");
+        algo.isValid())
+        algo.setProperty (mixxynth::presetState::valueProperty,
+                          static_cast<float> (mixxynth::kFreeAlgorithm), nullptr);
 
     // Restore the modules before handing the tree to APVTS so a missing or partial
     // "shapes" node simply leaves the defaults in place.
@@ -1111,9 +1165,9 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
             const int current = activeShapeBuffer.load (std::memory_order_acquire);
             const int next = 1 - current;
 
-            shapeBuffers[next] = shapeBuffers[current];
-            shapeBuffers[next].numLfos = numLfos;
-            shapeBuffers[next].numEnvs = total - numLfos;
+            shapeBuffers[static_cast<size_t> (next)] = shapeBuffers[static_cast<size_t> (current)];
+            shapeBuffers[static_cast<size_t> (next)].numLfos = numLfos;
+            shapeBuffers[static_cast<size_t> (next)].numEnvs = total - numLfos;
 
             for (int i = 0; i < total; ++i)
             {
@@ -1123,7 +1177,7 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
 
                 mixxynth::ModShape shape;
                 mixxynth::shapeFromValueTree (fallback, shapesNode.getChild (i), shape);
-                shapeBuffers[next].shapes[static_cast<size_t> (i)] = shape;
+                shapeBuffers[static_cast<size_t> (next)].shapes[static_cast<size_t> (i)] = shape;
             }
 
             activeShapeBuffer.store (next, std::memory_order_release);
@@ -1139,6 +1193,78 @@ void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
     // Tell the editor this was a load, not a user edit, so pages that watch
     // parameters for changes can resync instead of reacting.
     ++stateLoadCount;
+
+    return true;
+}
+
+juce::ValueTree MiXXynthProcessor::buildInitState() const
+{
+    // Built from the parameter list rather than captured at construction, so "the init
+    // patch" is a definition rather than a memory: it cannot go stale, it is the same
+    // answer on any thread, and it cannot be knocked out of shape by whatever happens to
+    // be loaded when the question is asked.
+    juce::ValueTree tree (apvts.state.getType());
+
+    for (auto* p : getParameters())
+    {
+        auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p);
+
+        if (ranged == nullptr)
+            continue;
+
+        // One PARAM child per parameter, which is the shape APVTS reads and writes. A value
+        // written as a property of the ROOT is silently ignored on load - which is exactly the
+        // bug the first version of the preset bank had, and the patch audit now checks it.
+        juce::ValueTree node (mixxynth::presetState::parameterNode);
+        node.setProperty (mixxynth::presetState::idProperty, ranged->paramID, nullptr);
+        node.setProperty (mixxynth::presetState::valueProperty,
+                          ranged->convertFrom0to1 (ranged->getDefaultValue()), nullptr);
+        tree.appendChild (node, nullptr);
+    }
+
+    juce::ValueTree shapesNode ("shapes");
+    shapesNode.setProperty ("numLfos", mixxynth::kDefaultLfos, nullptr);
+    shapesNode.setProperty ("numEnvs", mixxynth::kDefaultEnvs, nullptr);
+
+    for (int i = 0; i < mixxynth::kDefaultLfos; ++i)
+        shapesNode.appendChild (mixxynth::shapeToValueTree (mixxynth::ModShape::defaultLfo(), "shape"), nullptr);
+
+    for (int i = 0; i < mixxynth::kDefaultEnvs; ++i)
+        shapesNode.appendChild (mixxynth::shapeToValueTree (mixxynth::ModShape::defaultEnv(), "shape"), nullptr);
+
+    tree.appendChild (shapesNode, nullptr);
+
+    // The algorithm is pinned to Free, and applyStateTree forces it there on every route in.
+    // The init patch therefore HAS the algorithm at Free, and writing the parameter's own
+    // default here instead would make the init patch a patch that cannot exist - which is what
+    // "is this the init patch" then gets wrong.
+    if (auto algo = tree.getChildWithProperty (mixxynth::presetState::idProperty, "algorithm");
+        algo.isValid())
+        algo.setProperty (mixxynth::presetState::valueProperty,
+                          static_cast<float> (mixxynth::kFreeAlgorithm), nullptr);
+
+    return tree;
+}
+
+void MiXXynthProcessor::applyInitState()
+{
+    applyStateTree (buildInitState());
+}
+
+void MiXXynthProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    if (auto xml = buildStateTree().createXml())
+        copyXmlToBinary (*xml, destData);
+}
+
+void MiXXynthProcessor::setStateInformation (const void* data, int sizeInBytes)
+{
+    auto xml = getXmlFromBinary (data, sizeInBytes);
+
+    if (xml == nullptr)
+        return;
+
+    applyStateTree (juce::ValueTree::fromXml (*xml));
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,12 @@ jobs:
       - name: Run editor audit (knob wiring + drag-drop)
         run: ./build/Release/MiXXynthEditorAudit.exe
 
+      - name: Build patch audit
+        run: cmake --build build --config Release --target MiXXynthPatchAudit
+
+      - name: Run patch audit (presets, programs, randomizer)
+        run: ./build/Release/MiXXynthPatchAudit.exe
+
       - name: Build VST3 and Standalone
         run: cmake --build build --config Release --target MiXXynth_VST3 MiXXynth_Standalone
 

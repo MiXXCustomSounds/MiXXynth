@@ -101,6 +101,33 @@ destinations are wired to the knob they should be. The knob count fell from 142 
 121 because the 21 LFO/envelope/MSEG controls moved out of the parameter list and
 onto the shapes in the sidebar.
 
+> **The counts above are from M4b and are kept for the record.** The parameter count
+> has grown since (the per-operator filters, the FX rack, the preset bank); what
+> matters is that the reachability and destination checks still pass, which they do.
+
+## 17. The patch bar (M7)
+
+The bar sits in the header row beside the plugin's name and outside the tabs, so the
+page walk that guards the rest of the editor cannot see it. These checks are its
+equivalent of that walk:
+
+| # | Check | Why |
+|---|---|---|
+| 25 | The bar is laid out, visible and wider than 300px | It is outside the pages, so nothing else would notice a bar that was never given bounds |
+| 26 | The browser lists the bank (`list=N`) | A combo that never learned about the bank is a combo that loads nothing |
+| 27 | Every preset has an item in the browser | Catches a category loop that skips one |
+| 28 | No control in the bar has zero bounds | Same guard as #14, for the one component the page walk misses |
+| 29 | The browser follows a load | The list has to follow the session, not only lead it - a host program change moves the patch |
+| 30 | A freshly loaded preset is not marked dirty | The dirty marker must not fire on a load |
+| 31 | An edited patch IS marked dirty | And it must fire on an edit, or it is decoration |
+| 32 | The lock toggles show what the randomizer is locked to | Two sources of truth for a lock would drift |
+| 33 | A roll from the bar leaves an undo point | The pair (remember, roll) is one gesture; forgetting half of it breaks undo silently |
+| 34 | The bar's undo runs, and restores the dirty state with the patch | An undo that leaves the marker lying is an undo people stop trusting |
+| 35 | The bar refuses to delete a factory preset, and saves a user one | The two moves whose refusal matters |
+
+The bar's own moves are the ones the buttons call, so a check on one is a check on
+the other. `MiXXynthPatchAudit` covers the model behind them - see `docs/PRESETS.md`.
+
 ## Interactive checklist (standalone)
 
 Run the standalone and confirm by ear/eye:
