@@ -316,3 +316,42 @@ if (MSVC)
     # again. See the note on MiXXynthSmoke for why this is explicit.
     target_link_options(MiXXynthPatchAudit PRIVATE /STACK:8388608)
 endif()
+
+# M8: the FX measurement harness. A separate target because it is a HOST rather than a plugin:
+# it loads a VST3 from an absolute path, renders through it offline, and measures the result.
+#
+# JUCE_PLUGINHOST_VST3 is what enables the hosting half of juce_audio_processors, and it is off
+# everywhere else in this project deliberately - MiXXynth hosts nothing, and enabling it there
+# would link a plugin scanner into a plugin.
+#
+# This is a console program rather than a gate: it takes arguments, it measures things outside
+# this repository, and a missing plugin on a given machine is not a build failure.
+add_executable(MiXXynthFxMeasure
+    tests/FxMeasure.cpp
+    Source/FxMeasure/TestSignals.cpp
+    Source/FxMeasure/Analysis.cpp
+    Source/FxMeasure/PluginHost.cpp
+)
+target_link_libraries(MiXXynthFxMeasure PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    juce::juce_gui_basics
+    PUBLIC juce::juce_recommended_config_flags
+           juce::juce_recommended_warning_flags
+)
+target_compile_features(MiXXynthFxMeasure PRIVATE cxx_std_20)
+target_compile_definitions(MiXXynthFxMeasure PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_STANDALONE_APPLICATION=0
+    JUCE_PLUGINHOST_VST3=1
+)
+
+if (MSVC)
+    # A sweep measurement holds several transform-sized buffers at once - a three-second sweep
+    # at 48 kHz deconvolves through a 262144-point transform - and the self-test holds more on
+    # top of that. Same reasoning as MiXXynthSmoke: an explicit budget rather than an accidental
+    # one, because the failure mode without it is a crash before any output at all.
+    target_link_options(MiXXynthFxMeasure PRIVATE /STACK:16777216)
+endif()
