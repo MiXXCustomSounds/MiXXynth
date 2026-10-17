@@ -48,6 +48,8 @@ namespace mixxynth
         fxMultiband,
         fxGraphicEq,
         fxMiXXDrive,
+        fxVastVerb,
+        fxAbyssVerb,
         kNumFxTypes
     };
 

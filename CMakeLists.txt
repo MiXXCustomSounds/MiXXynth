@@ -120,6 +120,10 @@ target_sources(MiXXynth PRIVATE
     Source/Fx/EqFx.h
     Source/Fx/MiXXDriveFx.cpp
     Source/Fx/MiXXDriveFx.h
+    Source/Fx/VastVerbFx.cpp
+    Source/Fx/VastVerbFx.h
+    Source/Fx/AbyssVerbFx.cpp
+    Source/Fx/AbyssVerbFx.h
     Source/PresetStore.cpp
     Source/PresetStore.h
     Source/PresetManager.cpp
@@ -180,6 +184,8 @@ add_executable(MiXXynthSmoke
     Source/Fx/MultibandFx.cpp
     Source/Fx/EqFx.cpp
     Source/Fx/MiXXDriveFx.cpp
+    Source/Fx/VastVerbFx.cpp
+    Source/Fx/AbyssVerbFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -240,6 +246,8 @@ add_executable(MiXXynthEditorAudit
     Source/Fx/MultibandFx.cpp
     Source/Fx/EqFx.cpp
     Source/Fx/MiXXDriveFx.cpp
+    Source/Fx/VastVerbFx.cpp
+    Source/Fx/AbyssVerbFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils
@@ -299,6 +307,8 @@ add_executable(MiXXynthPatchAudit
     Source/Fx/MultibandFx.cpp
     Source/Fx/EqFx.cpp
     Source/Fx/MiXXDriveFx.cpp
+    Source/Fx/VastVerbFx.cpp
+    Source/Fx/AbyssVerbFx.cpp
 )
 target_link_libraries(MiXXynthPatchAudit PRIVATE
     juce::juce_audio_utils

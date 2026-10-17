@@ -12,6 +12,8 @@
 #include "MultibandFx.h"
 #include "EqFx.h"
 #include "MiXXDriveFx.h"
+#include "VastVerbFx.h"
+#include "AbyssVerbFx.h"
 
 namespace mixxynth
 {
@@ -32,6 +34,8 @@ namespace mixxynth
             case fxMultiband:   return "Multiband";
             case fxGraphicEq:   return "Graphic EQ";
             case fxMiXXDrive:   return "MiXX Drive";
+            case fxVastVerb:    return "VastVerb";
+            case fxAbyssVerb:   return "AbyssVerb";
             default:            break;
         }
 
@@ -54,6 +58,8 @@ namespace mixxynth
             case fxMultiband:   return MultibandFx::descriptor();
             case fxGraphicEq:   return EqFx::descriptor();
             case fxMiXXDrive:   return MiXXDriveFx::descriptor();
+            case fxVastVerb:    return VastVerbFx::descriptor();
+            case fxAbyssVerb:   return AbyssVerbFx::descriptor();
             default:            break;
         }
 
@@ -99,6 +105,8 @@ namespace mixxynth
                 case fxMultiband:   module = std::make_unique<MultibandFx>(); break;
                 case fxGraphicEq:   module = std::make_unique<EqFx>(); break;
                 case fxMiXXDrive:   module = std::make_unique<MiXXDriveFx>(); break;
+                case fxVastVerb:    module = std::make_unique<VastVerbFx>(); break;
+                case fxAbyssVerb:   module = std::make_unique<AbyssVerbFx>(); break;
                 default:            return nullptr;
             }
 

@@ -6,6 +6,8 @@
 #include "../Source/VoiceManager.h"
 #include "../Source/Fx/FxRack.h"
 #include "../Source/Fx/WeirdVerbFx.h"
+#include "../Source/Fx/VastVerbFx.h"
+#include "../Source/Fx/AbyssVerbFx.h"
 #include "../Source/Fx/ConvolutionFx.h"
 #include "../Source/Fx/JunoChorusFx.h"
 #include "../Source/Fx/DistortionFx.h"
@@ -1435,6 +1437,473 @@ int main()
 
         ok = check (withDuck < noDuck * 0.9, "ducking pulls the wet down",
                     withDuck / juce::jmax (1.0e-9, noDuck)) && ok;
+    }
+
+    // --- 24d. VastVerb: the second reverb voice ---
+    //
+    // A separate module from WeirdVerb rather than a mode of it, and these checks are
+    // written against the three claims that make it separate: Hadamard mixing instead of
+    // Householder, tank lines an order of magnitude longer, and modulation depth that is
+    // capped rather than purely proportional.
+    {
+        // Every corner of the parameter space is finite and bounded. Size 1.0 puts the
+        // longest line over a second and Decay 0.9 is a 35-second tail, so this is where
+        // a runaway would show up first.
+        const char* names[4] = { "VastVerb small and short is finite",
+                                 "VastVerb huge and long is finite",
+                                 "VastVerb at full Drift is finite",
+                                 "VastVerb frozen is finite" };
+
+        const float combos[4][5] =
+        {
+            { 0.0f, 0.1f, 0.0f, 0.5f, 0.0f },
+            { 1.0f, 0.9f, 0.5f, 1.0f, 0.0f },
+            { 0.6f, 0.6f, 1.0f, 1.0f, 0.0f },
+            { 0.6f, 0.7f, 0.5f, 1.0f, 1.0f }
+        };
+
+        for (int c = 0; c < 4; ++c)
+        {
+            mixxynth::VastVerbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::VastVerbFx::pSize] = combos[c][0];
+            p[mixxynth::VastVerbFx::pDecay] = combos[c][1];
+            p[mixxynth::VastVerbFx::pDrift] = combos[c][2];
+            p[mixxynth::VastVerbFx::pMix] = combos[c][3];
+            p[mixxynth::VastVerbFx::pFreeze] = combos[c][4];
+            p[mixxynth::VastVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::VastVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::VastVerbFx::pWidth] = 0.5f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            const double tail = rmsOf (buf, static_cast<int> (sr * 0.2), static_cast<int> (sr * 0.5));
+
+            float peak = 0.0f;
+
+            for (int ch = 0; ch < 2; ++ch)
+                peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+            ok = check (std::isfinite (tail) && peak <= 1.0f, names[c], peak) && ok;
+        }
+    }
+
+    // --- 24e. VastVerb: Mix at zero is a true bypass, bit for bit ---
+    {
+        mixxynth::VastVerbFx verb;
+        verb.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::VastVerbFx::pSize] = 0.6f;
+        p[mixxynth::VastVerbFx::pDecay] = 0.8f;
+        p[mixxynth::VastVerbFx::pMix] = 0.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            buf.setSample (0, i, v);
+            buf.setSample (1, i, v);
+        }
+
+        juce::AudioBuffer<float> reference;
+        reference.makeCopyOf (buf);
+
+        verb.process (buf, p);
+
+        float worst = 0.0f;
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < blockLen; ++i)
+                worst = juce::jmax (worst, std::abs (buf.getSample (ch, i)
+                                                     - reference.getSample (ch, i)));
+
+        ok = check (worst == 0.0f, "VastVerb Mix at zero is dry", worst) && ok;
+    }
+
+    // --- 24f. VastVerb: Freeze sustains the tail ---
+    //
+    // This is also the strongest available evidence that the Hadamard transform is
+    // genuinely orthonormal. With feedback at exactly unity a lossless matrix holds the
+    // energy it was given, so any scaling error in the butterfly shows up here as a tail
+    // that either decays anyway or grows without bound.
+    {
+        // Freeze is engaged between two blocks, because on its own it mutes the input -
+        // it holds what is already in the tank, so something has to be in there first.
+        // Decay is short on purpose, so the unfrozen tail is long gone by measurement.
+        auto heldTail = [] (bool freeze)
+        {
+            mixxynth::VastVerbFx verb;
+            verb.prepare (sr, blockLen * 2, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::VastVerbFx::pSize] = 0.5f;
+            p[mixxynth::VastVerbFx::pDecay] = 0.15f;
+            p[mixxynth::VastVerbFx::pDrift] = 0.0f;
+            p[mixxynth::VastVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::VastVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::VastVerbFx::pWidth] = 0.5f;
+            p[mixxynth::VastVerbFx::pMix] = 1.0f;
+
+            // Block one: a burst goes in.
+            juce::AudioBuffer<float> first (2, blockLen);
+            first.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                first.setSample (0, i, v);
+                first.setSample (1, i, v);
+            }
+
+            verb.process (first, p);
+
+            // Block two: silence, with Freeze either holding the tank or letting it decay.
+            p[mixxynth::VastVerbFx::pFreeze] = freeze ? 1.0f : 0.0f;
+
+            juce::AudioBuffer<float> second (2, blockLen);
+            second.clear();
+
+            verb.process (second, p);
+
+            return rmsOf (second, static_cast<int> (sr * 0.6), static_cast<int> (sr * 0.3));
+        };
+
+        const double running = heldTail (false);
+        const double held = heldTail (true);
+
+        ok = check (held > running * 2.0 && std::isfinite (held),
+                    "VastVerb Freeze sustains the tail",
+                    held / juce::jmax (1.0e-9, running)) && ok;
+    }
+
+    // --- 24g. VastVerb: the two channels are decorrelated ---
+    //
+    // Correlation exactly 1.0 is the giveaway of a cheap reverb: it means the tank evolved
+    // identically on both sides. Correlation near -1 is the other failure, and the one
+    // this check was written after - anti-phase channels cancel when summed to mono. Both
+    // directions are checked, because the first version of this module read -0.88 and a
+    // one-sided test would have called that a pass.
+    {
+        mixxynth::VastVerbFx verb;
+        verb.prepare (sr, blockLen, 2);
+
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::VastVerbFx::pSize] = 0.5f;
+        p[mixxynth::VastVerbFx::pDecay] = 0.6f;
+        p[mixxynth::VastVerbFx::pDrift] = 0.0f;
+        p[mixxynth::VastVerbFx::pDiffusion] = 0.7f;
+        p[mixxynth::VastVerbFx::pHighCut] = 1.0f;
+        p[mixxynth::VastVerbFx::pWidth] = 0.5f;
+        p[mixxynth::VastVerbFx::pMix] = 1.0f;
+
+        juce::AudioBuffer<float> buf (2, blockLen);
+        buf.clear();
+
+        for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            buf.setSample (0, i, v);
+            buf.setSample (1, i, v);
+        }
+
+        verb.process (buf, p);
+
+        // Over the tail, where the tank's own decorrelation is what is being measured.
+        double sumLR = 0.0;
+        double sumLL = 0.0;
+        double sumRR = 0.0;
+
+        for (int i = static_cast<int> (sr * 0.2); i < static_cast<int> (sr * 0.9); ++i)
+        {
+            const double l = buf.getSample (0, i);
+            const double r = buf.getSample (1, i);
+
+            sumLR += l * r;
+            sumLL += l * l;
+            sumRR += r * r;
+        }
+
+        const double corr = sumLR / std::sqrt (juce::jmax (1.0e-12, sumLL * sumRR));
+
+        // Both directions matter: near +1 is a mono reverb, near -1 cancels in mono.
+        ok = check (std::abs (corr) < 0.6, "VastVerb channels are decorrelated", corr) && ok;
+    }
+
+    // --- 24h. VastVerb: the drawn decay curve is the applied one ---
+    //
+    // The card draws this module's band profile, and the standard here is that the curve
+    // it draws is the curve it applies. At both neutral ratio points the three bands decay
+    // at the same rate, so the drawn response has to be flat - which is a property of the
+    // shared maths rather than of the drawing code.
+    {
+        float p[mixxynth::kMaxFxParams] {};
+        p[mixxynth::VastVerbFx::pSize] = 0.5f;
+        p[mixxynth::VastVerbFx::pDecay] = 0.6f;
+        p[mixxynth::VastVerbFx::pBass] = 0.5f;    // bassRatio == 1
+        p[mixxynth::VastVerbFx::pDamping] = 0.0f; // dampRatio == 1
+
+        const float dc = mixxynth::VastVerbFx::decayResponseDb (p, 20.0f, sr);
+        const float nyq = mixxynth::VastVerbFx::decayResponseDb (p, static_cast<float> (sr * 0.49), sr);
+
+        ok = check (std::abs (dc) < 0.25f && std::abs (nyq) < 0.25f,
+                    "VastVerb's curve is flat at neutral ratios",
+                    juce::jmax (std::abs (dc), std::abs (nyq))) && ok;
+
+        // Bass above neutral makes the low band hang on, so the drawn low end must rise;
+        // Damping has to do the opposite at the top. The thresholds are in decay time
+        // rather than loop gain: +6 dB here is a doubled tail, and the loop gain behind
+        // it moved by under 1 dB.
+        p[mixxynth::VastVerbFx::pBass] = 1.0f;
+        p[mixxynth::VastVerbFx::pDamping] = 1.0f;
+
+        const float dcLong = mixxynth::VastVerbFx::decayResponseDb (p, 20.0f, sr);
+        const float nyqShort = mixxynth::VastVerbFx::decayResponseDb (p, static_cast<float> (sr * 0.49), sr);
+
+        ok = check (dcLong > dc + 4.0f && nyqShort < nyq - 8.0f,
+                    "VastVerb's curve follows Bass and Damping",
+                    dcLong - nyqShort) && ok;
+    }
+
+    // --- 24i. VastVerb: Swell holds the tail back ---
+    {
+        auto earlyTail = [] (float swell)
+        {
+            mixxynth::VastVerbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::VastVerbFx::pSize] = 0.5f;
+            p[mixxynth::VastVerbFx::pDecay] = 0.6f;
+            p[mixxynth::VastVerbFx::pSwell] = swell;
+            p[mixxynth::VastVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::VastVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::VastVerbFx::pWidth] = 0.5f;
+            p[mixxynth::VastVerbFx::pMix] = 1.0f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+
+            for (int i = 0; i < static_cast<int> (sr * 0.05); ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            return rmsOf (buf, static_cast<int> (sr * 0.05), static_cast<int> (sr * 0.2));
+        };
+
+        const double instant = earlyTail (0.0f);
+        const double swelled = earlyTail (1.0f);
+
+        ok = check (swelled < instant * 0.8, "VastVerb Swell holds the tail back",
+                    swelled / juce::jmax (1.0e-9, instant)) && ok;
+    }
+
+    // --- 24j. The three reverbs are in the same loudness neighbourhood ---
+    //
+    // This is the check the reported problem asked for. VastVerb was audibly quieter than
+    // WeirdVerb, and the cause was arithmetic rather than taste: the output trim was applied
+    // twice, once in the pickup vectors and again in the level normalisation, and the
+    // normalisation divided by sqrt(T60) where the tank's gain actually goes as
+    // sqrt(1 - g^2). Between them, 15 dB.
+    //
+    // Measured rather than asserted, because "about the same loudness" is exactly the kind
+    // of claim that is easy to believe and hard to notice being wrong. The tolerance is 6 dB
+    // in either direction - the point is not that they match to a tenth of a dB, it is that
+    // no module is in a different league.
+    {
+        // A burst of deterministic noise rather than a sine. A single tone can sit in a null
+        // of one network and on a resonance of another, and the comparison then measures the
+        // test signal rather than the reverb - which is exactly what the first version of
+        // this check did, reporting WeirdVerb at -44 dB because a 220 Hz tone barely excites
+        // a network whose shortest line was 17 samples. Noise excites everything equally.
+        auto wetRmsOf = [] (mixxynth::FxModule& m, const float* p)
+        {
+            m.prepare (sr, blockLen, 2);
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+            buf.clear();
+
+            unsigned int rng = 0x12345678u;
+
+            for (int i = 0; i < static_cast<int> (sr * 0.1); ++i)
+            {
+                rng ^= rng << 13;
+                rng ^= rng >> 17;
+                rng ^= rng << 5;
+
+                const float v = 0.5f * (static_cast<float> (rng) / 2147483648.0f - 1.0f);
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            m.process (buf, p);
+
+            return rmsOf (buf, static_cast<int> (sr * 0.3), static_cast<int> (sr * 0.6));
+        };
+
+        // Each module gets its own block, because their parameter layouts differ - WeirdVerb
+        // starts with Mode where the other two start with Size.
+        //
+        // WeirdVerb is put in Hall at mid Size, and every module gets neutral Bass and
+        // Damping. That matters: left at its defaults WeirdVerb runs Plate at Size zero,
+        // which its prime quantisation clamps to 17-sample lines, and a network that short
+        // is a resonator rather than a reverb.
+        float pWeird[mixxynth::kMaxFxParams] {};
+        pWeird[mixxynth::WeirdVerbFx::pMode] = 0.75f;   // Hall
+        pWeird[mixxynth::WeirdVerbFx::pSize] = 0.5f;
+        pWeird[mixxynth::WeirdVerbFx::pDecay] = 0.55f;
+        pWeird[mixxynth::WeirdVerbFx::pBass] = 0.5f;    // neutral
+        pWeird[mixxynth::WeirdVerbFx::pDamping] = 0.0f; // neutral
+        pWeird[mixxynth::WeirdVerbFx::pDiffusion] = 0.7f;
+        pWeird[mixxynth::WeirdVerbFx::pHighCut] = 1.0f;
+        pWeird[mixxynth::WeirdVerbFx::pWidth] = 0.5f;
+        pWeird[mixxynth::WeirdVerbFx::pMix] = 1.0f;
+
+        float pVast[mixxynth::kMaxFxParams] {};
+        pVast[mixxynth::VastVerbFx::pSize] = 0.5f;
+        pVast[mixxynth::VastVerbFx::pDecay] = 0.55f;
+        pVast[mixxynth::VastVerbFx::pBass] = 0.5f;    // neutral
+        pVast[mixxynth::VastVerbFx::pDamping] = 0.0f; // neutral
+        pVast[mixxynth::VastVerbFx::pDiffusion] = 0.7f;
+        pVast[mixxynth::VastVerbFx::pHighCut] = 1.0f;
+        pVast[mixxynth::VastVerbFx::pWidth] = 0.5f;
+        pVast[mixxynth::VastVerbFx::pMix] = 1.0f;
+
+        float pAbyss[mixxynth::kMaxFxParams] {};
+        pAbyss[mixxynth::AbyssVerbFx::pSize] = 0.5f;
+        pAbyss[mixxynth::AbyssVerbFx::pDecay] = 0.55f;
+        pAbyss[mixxynth::AbyssVerbFx::pBass] = 0.5f;    // neutral
+        pAbyss[mixxynth::AbyssVerbFx::pDamping] = 0.0f; // neutral
+        pAbyss[mixxynth::AbyssVerbFx::pDiffusion] = 0.7f;
+        pAbyss[mixxynth::AbyssVerbFx::pHighCut] = 1.0f;
+        pAbyss[mixxynth::AbyssVerbFx::pWidth] = 0.5f;
+        pAbyss[mixxynth::AbyssVerbFx::pMix] = 1.0f;
+
+        mixxynth::WeirdVerbFx weird;
+        mixxynth::VastVerbFx vast;
+        mixxynth::AbyssVerbFx abyss;
+
+        const double weirdRms = wetRmsOf (weird, pWeird);
+        const double vastRms = wetRmsOf (vast, pVast);
+        const double abyssRms = wetRmsOf (abyss, pAbyss);
+
+        auto within6dB = [] (double a, double b)
+        {
+            return a > 0.0 && b > 0.0
+                && std::abs (20.0 * std::log10 (a / b)) < 6.0;
+        };
+
+        ok = check (within6dB (vastRms, weirdRms), "VastVerb is level-matched to WeirdVerb",
+                    vastRms) && ok;
+
+        ok = check (within6dB (abyssRms, weirdRms), "AbyssVerb is level-matched to WeirdVerb",
+                    abyssRms) && ok;
+    }
+
+    // --- 24k. AbyssVerb: bounded, and a true bypass at Mix zero ---
+    //
+    // Deliberately brief. The density is the thing to judge by ear, so this covers only the
+    // two things an ear cannot: that nothing runs away, and that Mix at zero is bit-exact.
+    {
+        const char* names[3] = { "AbyssVerb small and short is finite",
+                                 "AbyssVerb huge and long is finite",
+                                 "AbyssVerb at full Drift is finite" };
+
+        const float combos[3][3] =
+        {
+            { 0.0f, 0.1f, 0.0f },
+            { 1.0f, 0.9f, 0.5f },
+            { 0.6f, 0.6f, 1.0f }
+        };
+
+        for (int c = 0; c < 3; ++c)
+        {
+            mixxynth::AbyssVerbFx verb;
+            verb.prepare (sr, blockLen, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[mixxynth::AbyssVerbFx::pSize] = combos[c][0];
+            p[mixxynth::AbyssVerbFx::pDecay] = combos[c][1];
+            p[mixxynth::AbyssVerbFx::pDrift] = combos[c][2];
+            p[mixxynth::AbyssVerbFx::pMix] = 1.0f;
+            p[mixxynth::AbyssVerbFx::pDiffusion] = 0.7f;
+            p[mixxynth::AbyssVerbFx::pHighCut] = 1.0f;
+            p[mixxynth::AbyssVerbFx::pWidth] = 0.5f;
+
+            juce::AudioBuffer<float> buf (2, blockLen);
+
+            for (int i = 0; i < blockLen; ++i)
+            {
+                const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                                  * static_cast<float> (i) / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+            }
+
+            verb.process (buf, p);
+
+            const double tail = rmsOf (buf, static_cast<int> (sr * 0.2), static_cast<int> (sr * 0.5));
+
+            float peak = 0.0f;
+
+            for (int ch = 0; ch < 2; ++ch)
+                peak = juce::jmax (peak, buf.getMagnitude (ch, 0, blockLen));
+
+            ok = check (std::isfinite (tail) && peak <= 1.0f, names[c], peak) && ok;
+        }
+
+        mixxynth::AbyssVerbFx bypass;
+        bypass.prepare (sr, blockLen, 2);
+
+        float pb[mixxynth::kMaxFxParams] {};
+        pb[mixxynth::AbyssVerbFx::pDecay] = 0.8f;
+        pb[mixxynth::AbyssVerbFx::pMix] = 0.0f;
+
+        juce::AudioBuffer<float> bypassed (2, blockLen);
+
+        for (int i = 0; i < blockLen; ++i)
+        {
+            const float v = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f
+                                              * static_cast<float> (i) / static_cast<float> (sr));
+            bypassed.setSample (0, i, v);
+            bypassed.setSample (1, i, v);
+        }
+
+        juce::AudioBuffer<float> untouched;
+        untouched.makeCopyOf (bypassed);
+
+        bypass.process (bypassed, pb);
+
+        float worst = 0.0f;
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < blockLen; ++i)
+                worst = juce::jmax (worst, std::abs (bypassed.getSample (ch, i)
+                                                     - untouched.getSample (ch, i)));
+
+        ok = check (worst == 0.0f, "AbyssVerb Mix at zero is dry", worst) && ok;
     }
 
     // --- 25. Infinite decay sustains, but does not run away ---
