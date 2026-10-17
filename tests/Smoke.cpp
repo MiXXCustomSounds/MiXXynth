@@ -9,6 +9,7 @@
 #include "../Source/Fx/ConvolutionFx.h"
 #include "../Source/Fx/JunoChorusFx.h"
 #include "../Source/Fx/DistortionFx.h"
+#include "../Source/Fx/MiXXDriveFx.h"
 #include "../Source/Fx/PingPongDelayFx.h"
 #include "../Source/Fx/FlangerFx.h"
 #include "../Source/Fx/PhaserFx.h"
@@ -2892,6 +2893,588 @@ int main()
             const double mean = sum / 1024.0;
 
             ok = check (std::abs (mean) < 0.01, "an asymmetric curve does not leak DC", mean) && ok;
+        }
+    }
+
+    // --- 36c. MiXX Drive: the MiXXFX distortion, and the three things it adds ---
+    //
+    // The module is a port, so its curves are checked the way DistortionFx's are. Then the
+    // features that distinguish it are each measured, because "it has a character control" is
+    // not a claim anyone can test.
+    {
+        using Drive = mixxynth::MiXXDriveFx;
+
+        // Registered, named, and described the way the rack expects. The choice parameter's
+        // item list is built from fxTypeName, so a mismatch would show up as a wrong label in
+        // the FX menu rather than as a failure anywhere else.
+        {
+            ok = check (juce::String (mixxynth::fxTypeName (mixxynth::fxMiXXDrive)) == "MiXX Drive",
+                        "the MiXX drive is named in the FX list",
+                        static_cast<double> (mixxynth::fxMiXXDrive)) && ok;
+
+            const auto desc = mixxynth::FxRack::descriptorFor (mixxynth::fxMiXXDrive);
+
+            ok = check (juce::String (desc.name) == "MiXX Drive"
+                          && desc.numParams == Drive::kNumParams
+                          && desc.numParams <= mixxynth::kMaxFxParams,
+                        "the MiXX drive declares its parameters, inside the slot budget",
+                        desc.numParams) && ok;
+
+            // A choice's value is a normalised index over (count - 1), so its item list has to
+            // agree with the enum it maps to or every position but the ends reads wrong.
+            ok = check (desc.params[Drive::pAlgorithm].isChoice
+                          && desc.params[Drive::pAlgorithm].choices.size() == Drive::kNumAlgorithms,
+                        "the MiXX drive algorithm list matches its enum",
+                        desc.params[Drive::pAlgorithm].choices.size()) && ok;
+        }
+
+        // Smooth through the origin, and finite. Clip has a hard corner and Destroy quantises,
+        // so both are deliberate exceptions - the same way Crush is for DistortionFx.
+        {
+            float worstJump = 0.0f;
+
+            for (int alg = 0; alg < Drive::kNumAlgorithms; ++alg)
+            {
+                if (alg == Drive::algClip || alg == Drive::algDestroy)
+                    continue;
+
+                for (int i = 0; i < 400; ++i)
+                {
+                    const float x = -2.0f + 4.0f * static_cast<float> (i) / 400.0f;
+                    constexpr float h = 0.002f;
+
+                    const float d1 = (Drive::shape (alg, x + h, 0.5f)
+                                        - Drive::shape (alg, x, 0.5f)) / h;
+                    const float d2 = (Drive::shape (alg, x + 2.0f * h, 0.5f)
+                                        - Drive::shape (alg, x + h, 0.5f)) / h;
+
+                    worstJump = juce::jmax (worstJump, std::abs (d2 - d1));
+                }
+            }
+
+            ok = check (worstJump < 0.1f, "every smooth MiXX drive curve stays smooth",
+                        worstJump) && ok;
+
+            // And every algorithm passes through zero, so Drive on its own does not shift level.
+            float worstZero = 0.0f;
+
+            for (int alg = 0; alg < Drive::kNumAlgorithms; ++alg)
+                worstZero = juce::jmax (worstZero, std::abs (Drive::shape (alg, 0.0f, 0.7f)));
+
+            ok = check (worstZero < 1.0e-6f, "every MiXX drive curve passes through zero",
+                        worstZero) && ok;
+        }
+
+        // Bounded, finite and audible, for every algorithm at every oversampling setting. A
+        // silent module and a wrong algorithm both look like "it works" from the outside.
+        {
+            int bad = 0;
+            float worstPeak = 0.0f;
+
+            for (int alg = 0; alg < Drive::kNumAlgorithms; ++alg)
+            {
+                for (int ov = 0; ov < 3; ++ov)
+                {
+                    Drive drive;
+                    drive.prepare (sr, 512, 2);
+
+                    float p[mixxynth::kMaxFxParams] {};
+                    p[Drive::pAlgorithm] = static_cast<float> (alg)
+                                             / static_cast<float> (Drive::kNumAlgorithms - 1);
+                    p[Drive::pDrive] = 0.45f;
+                    p[Drive::pColor] = 0.5f;
+                    p[Drive::pEqLow] = 0.5f;
+                    p[Drive::pEqMid] = 0.5f;
+                    p[Drive::pEqHigh] = 0.5f;
+                    p[Drive::pEqPosition] = 1.0f;
+                    p[Drive::pPreserveCharacter] = 0.0f;
+                    p[Drive::pPreserveSub] = 0.0f;
+                    p[Drive::pCrossover] = 0.2f;
+                    p[Drive::pMix] = 1.0f;
+                    p[Drive::pNoise] = 0.0f;
+                    p[Drive::pNoiseColor] = 0.5f;
+                    p[Drive::pOversample] = static_cast<float> (ov) / 2.0f;
+
+                    juce::AudioBuffer<float> buf (2, 512);
+                    float peak = 0.0f;
+
+                    for (int b = 0; b < 8; ++b)
+                    {
+                        for (int i = 0; i < 512; ++i)
+                        {
+                            const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                               * 330.0f * static_cast<float> (i)
+                                                               / static_cast<float> (sr));
+                            buf.setSample (0, i, v);
+                            buf.setSample (1, i, v);
+                        }
+
+                        drive.process (buf, p);
+
+                        for (int ch = 0; ch < 2; ++ch)
+                            peak = juce::jmax (peak, buf.getMagnitude (ch, 0, 512));
+                    }
+
+                    if (! std::isfinite (peak) || peak <= 0.01f || peak > 2.5f)
+                        ++bad;
+
+                    worstPeak = juce::jmax (worstPeak, peak);
+                }
+            }
+
+            ok = check (bad == 0, "every MiXX drive algorithm and oversampling setting is sane",
+                        worstPeak) && ok;
+        }
+
+        // Mix at zero is a true bypass, not "almost dry". Anything else would mean the module
+        // colouring a signal it is supposed to pass through untouched.
+        {
+            Drive drive;
+            drive.prepare (sr, 512, 2);
+
+            float p[mixxynth::kMaxFxParams] {};
+            p[Drive::pDrive] = 0.9f;
+            p[Drive::pEqPosition] = 1.0f;
+            p[Drive::pMix] = 0.0f;          // fully dry
+            p[Drive::pOversample] = 0.0f;   // no resampling, so the path is exact
+
+            juce::AudioBuffer<float> buf (2, 512);
+            juce::AudioBuffer<float> reference (2, 512);
+
+            for (int i = 0; i < 512; ++i)
+            {
+                const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi * 330.0f
+                                                   * static_cast<float> (i)
+                                                   / static_cast<float> (sr));
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, v);
+                reference.setSample (0, i, v);
+                reference.setSample (1, i, v);
+            }
+
+            drive.process (buf, p);
+
+            float worst = 0.0f;
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 512; ++i)
+                    worst = juce::jmax (worst, std::abs (buf.getSample (ch, i)
+                                                           - reference.getSample (ch, i)));
+
+            ok = check (worst < 1.0e-6f, "Mix at zero is a true bypass", worst) && ok;
+        }
+
+        // Drive adds harmonics, which is the whole job. Measured on exact DFT bins, so that
+        // window leakage cannot be mistaken for distortion.
+        {
+            constexpr int window = 8192;
+            constexpr int fundamentalBin = 31;      // 333.4 Hz at 44.1 kHz, exactly bin 31
+            const double fundamentalHz = static_cast<double> (sr) * fundamentalBin / window;
+
+            auto magnitudeAt = [] (const juce::AudioBuffer<float>& b, double freq, double rate)
+            {
+                double re = 0.0;
+                double im = 0.0;
+
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                {
+                    const double t = 2.0 * juce::MathConstants<double>::pi * freq
+                                       * static_cast<double> (i) / rate;
+                    const double v = static_cast<double> (b.getSample (0, i));
+                    re += v * std::cos (t);
+                    im += v * std::sin (t);
+                }
+
+                return 2.0 * std::sqrt (re * re + im * im)
+                         / static_cast<double> (b.getNumSamples());
+            };
+
+            auto thirdHarmonicRatio = [&] (float driveAmount)
+            {
+                Drive drive;
+                drive.prepare (sr, window, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Drive::pAlgorithm] = 0.0f;    // Warm
+                p[Drive::pDrive] = driveAmount;
+                p[Drive::pColor] = 0.5f;
+                p[Drive::pEqLow] = 0.5f;
+                p[Drive::pEqMid] = 0.5f;
+                p[Drive::pEqHigh] = 0.5f;
+                p[Drive::pEqPosition] = 1.0f;
+                p[Drive::pMix] = 1.0f;
+                p[Drive::pOversample] = 0.0f;
+
+                juce::AudioBuffer<float> buf (2, window);
+
+                // Twice, so the module's own filters are settled before the measurement: the
+                // second pass starts from the first pass's steady state.
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    for (int i = 0; i < window; ++i)
+                    {
+                        const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                           * static_cast<float> (fundamentalHz)
+                                                           * static_cast<float> (i)
+                                                           / static_cast<float> (sr));
+                        buf.setSample (0, i, v);
+                        buf.setSample (1, i, v);
+                    }
+
+                    drive.process (buf, p);
+                }
+
+                const double first = magnitudeAt (buf, fundamentalHz, sr);
+                const double third = magnitudeAt (buf, fundamentalHz * 3.0, sr);
+
+                return first > 1.0e-9 ? third / first : 0.0;
+            };
+
+            const double gentle = thirdHarmonicRatio (0.05f);
+            const double driven = thirdHarmonicRatio (0.85f);
+
+            ok = check (driven > gentle * 2.0 && driven > 0.02, "Drive adds harmonics",
+                        driven - gentle) && ok;
+        }
+
+        // Preserve Sub holds the low band back from the curve, which is the difference between
+        // driving a bass and destroying it. Measured as harmonic content on a 60 Hz tone: with
+        // the sub held back, far less of the curve's distortion reaches the output.
+        {
+            constexpr int window = 8192;
+            constexpr int lowBin = 11;              // 59.2 Hz at 44.1 kHz, exactly bin 11
+            const double lowHz = static_cast<double> (sr) * lowBin / window;
+
+            auto thirdOverFirst = [&] (bool preserveSub)
+            {
+                Drive drive;
+                drive.prepare (sr, window, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Drive::pAlgorithm] = 0.0f;        // Warm
+                p[Drive::pDrive] = 0.85f;
+                p[Drive::pColor] = 0.5f;
+                p[Drive::pEqLow] = 0.5f;
+                p[Drive::pEqMid] = 0.5f;
+                p[Drive::pEqHigh] = 0.5f;
+                p[Drive::pEqPosition] = 1.0f;
+                p[Drive::pPreserveSub] = preserveSub ? 1.0f : 0.0f;
+                p[Drive::pCrossover] = 1.0f;        // 250 Hz, so a 60 Hz tone is well inside
+                p[Drive::pMix] = 1.0f;
+                p[Drive::pOversample] = 0.0f;
+
+                juce::AudioBuffer<float> buf (2, window);
+
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    for (int i = 0; i < window; ++i)
+                    {
+                        const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                           * static_cast<float> (lowHz)
+                                                           * static_cast<float> (i)
+                                                           / static_cast<float> (sr));
+                        buf.setSample (0, i, v);
+                        buf.setSample (1, i, v);
+                    }
+
+                    drive.process (buf, p);
+                }
+
+                auto magnitudeAt = [&] (double freq)
+                {
+                    double re = 0.0;
+                    double im = 0.0;
+
+                    for (int i = 0; i < window; ++i)
+                    {
+                        const double t = 2.0 * juce::MathConstants<double>::pi * freq
+                                           * static_cast<double> (i) / static_cast<double> (sr);
+                        const double v = static_cast<double> (buf.getSample (0, i));
+                        re += v * std::cos (t);
+                        im += v * std::sin (t);
+                    }
+
+                    return 2.0 * std::sqrt (re * re + im * im) / static_cast<double> (window);
+                };
+
+                const double first = magnitudeAt (lowHz);
+                const double third = magnitudeAt (lowHz * 3.0);
+
+                return first > 1.0e-9 ? third / first : 0.0;
+            };
+
+            const double withoutSub = thirdOverFirst (false);
+            const double withSub = thirdOverFirst (true);
+
+            ok = check (withSub < withoutSub * 0.75,
+                        "Preserve Sub holds the low band out of the curve",
+                        withSub - withoutSub) && ok;
+        }
+
+        // Noise at zero adds nothing at all, and at one it is really there. A silent input makes
+        // both halves of that visible, with no signal to hide behind.
+        {
+            auto noisePeak = [] (float noiseAmount, double rate)
+            {
+                Drive drive;
+                drive.prepare (rate, 512, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Drive::pAlgorithm] = 0.0f;
+                p[Drive::pDrive] = 0.5f;
+                p[Drive::pColor] = 0.5f;
+                p[Drive::pEqLow] = 0.5f;
+                p[Drive::pEqMid] = 0.5f;
+                p[Drive::pEqHigh] = 0.5f;
+                p[Drive::pEqPosition] = 1.0f;
+                p[Drive::pMix] = 1.0f;
+                p[Drive::pNoise] = noiseAmount;
+                p[Drive::pNoiseColor] = 0.5f;
+                p[Drive::pOversample] = 0.0f;
+
+                juce::AudioBuffer<float> buf (2, 512);
+                float peak = 0.0f;
+
+                for (int b = 0; b < 8; ++b)
+                {
+                    buf.clear();
+                    drive.process (buf, p);
+                    peak = juce::jmax (peak, buf.getMagnitude (0, 0, 512));
+                }
+
+                return peak;
+            };
+
+            const float silent = noisePeak (0.0f, sr);
+            const float hissing = noisePeak (1.0f, sr);
+
+            ok = check (silent < 1.0e-6f && hissing > 0.01f,
+                        "Noise at zero adds nothing, and at one it is there",
+                        hissing - silent) && ok;
+        }
+
+        // Preserve Character has to actually change the result, or the switch is a lie. The
+        // comparison is on the mean-removed shape, because the conformal map also shifts the
+        // signal's average, and that shift is a separate thing from the character change.
+        {
+            auto shapeDeviation = [&] (bool preserve)
+            {
+                Drive drive;
+                drive.prepare (sr, 512, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Drive::pAlgorithm] = 0.0f;    // Warm
+                p[Drive::pDrive] = 0.85f;
+                p[Drive::pColor] = 0.5f;
+                p[Drive::pEqLow] = 0.5f;
+                p[Drive::pEqMid] = 0.5f;
+                p[Drive::pEqHigh] = 0.5f;
+                p[Drive::pEqPosition] = 1.0f;
+                p[Drive::pPreserveCharacter] = preserve ? 1.0f : 0.0f;
+                p[Drive::pMix] = 1.0f;
+                p[Drive::pOversample] = 0.0f;
+
+                juce::AudioBuffer<float> buf (2, 512);
+
+                for (int b = 0; b < 4; ++b)
+                {
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        const float v = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                           * 220.0f * static_cast<float> (i)
+                                                           / static_cast<float> (sr));
+                        buf.setSample (0, i, v);
+                        buf.setSample (1, i, v);
+                    }
+
+                    drive.process (buf, p);
+                }
+
+                double sum = 0.0;
+
+                for (int i = 0; i < 512; ++i)
+                    sum += static_cast<double> (buf.getSample (0, i));
+
+                const double mean = sum / 512.0;
+                double deviation = 0.0;
+
+                for (int i = 0; i < 512; ++i)
+                    deviation += std::abs (static_cast<double> (buf.getSample (0, i)) - mean);
+
+                return deviation / 512.0;
+            };
+
+            const double plain = shapeDeviation (false);
+            const double preserved = shapeDeviation (true);
+
+            ok = check (std::abs (preserved - plain) > 0.01,
+                        "Preserve Character changes the result", preserved - plain) && ok;
+        }
+
+        // The EQ curve the card draws. A centred EQ has to be EXACTLY flat, because the three
+        // bands sum back to the input - and a band at its limit has to lift its own end of the
+        // spectrum while leaving the other end alone.
+        {
+            float flat[mixxynth::kMaxFxParams] {};
+            float lowUp[mixxynth::kMaxFxParams] {};
+            float highUp[mixxynth::kMaxFxParams] {};
+
+            flat[Drive::pEqLow] = flat[Drive::pEqMid] = flat[Drive::pEqHigh] = 0.5f;
+
+            lowUp[Drive::pEqLow] = 1.0f;
+            lowUp[Drive::pEqMid] = lowUp[Drive::pEqHigh] = 0.5f;
+
+            highUp[Drive::pEqHigh] = 1.0f;
+            highUp[Drive::pEqLow] = highUp[Drive::pEqMid] = 0.5f;
+
+            float worstFlat = 0.0f;
+
+            for (int i = 0; i <= 60; ++i)
+            {
+                const float hz = 20.0f * std::pow (1000.0f, static_cast<float> (i) / 60.0f);
+                worstFlat = juce::jmax (worstFlat, std::abs (Drive::eqResponseDb (flat, hz, sr)));
+            }
+
+            ok = check (worstFlat < 0.001f, "a centred MiXX drive EQ is exactly flat",
+                        worstFlat) && ok;
+
+            // Low band at the top: a big lift at the bottom, and nothing at the top.
+            {
+                const float atLow = Drive::eqResponseDb (lowUp, 40.0f, sr);
+                const float atHigh = Drive::eqResponseDb (lowUp, 20000.0f, sr);
+
+                ok = check (atLow > 9.0f && std::abs (atHigh) < 1.0f,
+                            "the MiXX drive low band lifts only the bottom",
+                            atLow - atHigh) && ok;
+            }
+
+            // High band at the top: the same claim the other way round.
+            {
+                const float atHigh = Drive::eqResponseDb (highUp, 12000.0f, sr);
+                const float atLow = Drive::eqResponseDb (highUp, 40.0f, sr);
+
+                ok = check (atHigh > 9.0f && std::abs (atLow) < 1.0f,
+                            "the MiXX drive high band lifts only the top",
+                            atHigh - atLow) && ok;
+            }
+
+            // All three at a corner at once is still finite and bounded, which is what stops a
+            // stray logarithm reaching the display.
+            {
+                float extreme[mixxynth::kMaxFxParams] {};
+                extreme[Drive::pEqLow] = 1.0f;
+                extreme[Drive::pEqMid] = 0.0f;
+                extreme[Drive::pEqHigh] = 1.0f;
+
+                float worst = 0.0f;
+
+                for (int i = 0; i <= 80; ++i)
+                {
+                    const float hz = 20.0f * std::pow (1000.0f, static_cast<float> (i) / 80.0f);
+                    worst = juce::jmax (worst, std::abs (Drive::eqResponseDb (extreme, hz, sr)));
+                }
+
+                ok = check (std::isfinite (worst) && worst < 40.0f,
+                            "the MiXX drive EQ response stays finite at the extremes", worst) && ok;
+            }
+        }
+
+        // And the curve the card draws is the curve the module applies, which is the standard the
+        // Graphic EQ sets. Measured as a RATIO between two settings, so the curve's own
+        // small-signal gain cancels and what is left is the EQ's response alone.
+        {
+            constexpr int window = 8192;
+
+            // Exact bins, so window leakage cannot be mistaken for a response.
+            const double lowHz = static_cast<double> (sr) * 11.0 / window;      // 59.2 Hz
+            const double highHz = static_cast<double> (sr) * 1486.0 / window;   // 8.0 kHz
+
+            auto measuredGain = [&] (float eqLow, float eqHigh, double hz)
+            {
+                Drive drive;
+                drive.prepare (sr, window, 2);
+
+                float p[mixxynth::kMaxFxParams] {};
+                p[Drive::pAlgorithm] = 0.0f;
+                p[Drive::pDrive] = 0.0f;        // unity drive, so the curve stays near-linear
+                p[Drive::pColor] = 0.5f;        // and the colour split is unity
+                p[Drive::pEqLow] = eqLow;
+                p[Drive::pEqMid] = 0.5f;
+                p[Drive::pEqHigh] = eqHigh;
+                p[Drive::pEqPosition] = 1.0f;   // post, so the EQ is the last thing in the path
+                p[Drive::pMix] = 1.0f;
+                p[Drive::pOversample] = 0.0f;
+
+                juce::AudioBuffer<float> buf (2, window);
+
+                // A tiny amplitude, so the curve is linear and the EQ is all that is left to
+                // measure. Twice, because the window holds a whole number of periods, so the
+                // second pass starts exactly where the first one ended.
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    for (int i = 0; i < window; ++i)
+                    {
+                        const float v = 0.001f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                             * static_cast<float> (hz)
+                                                             * static_cast<float> (i)
+                                                             / static_cast<float> (sr));
+                        buf.setSample (0, i, v);
+                        buf.setSample (1, i, v);
+                    }
+
+                    drive.process (buf, p);
+                }
+
+                double re = 0.0;
+                double im = 0.0;
+
+                for (int i = 0; i < window; ++i)
+                {
+                    const double t = 2.0 * juce::MathConstants<double>::pi * hz
+                                       * static_cast<double> (i) / static_cast<double> (sr);
+                    const double v = static_cast<double> (buf.getSample (0, i));
+                    re += v * std::cos (t);
+                    im += v * std::sin (t);
+                }
+
+                return 2.0 * std::sqrt (re * re + im * im) / static_cast<double> (window);
+            };
+
+            float flat[mixxynth::kMaxFxParams] {};
+            float lowUp[mixxynth::kMaxFxParams] {};
+            float highUp[mixxynth::kMaxFxParams] {};
+
+            flat[Drive::pEqLow] = flat[Drive::pEqMid] = flat[Drive::pEqHigh] = 0.5f;
+
+            lowUp[Drive::pEqLow] = 1.0f;
+            lowUp[Drive::pEqMid] = lowUp[Drive::pEqHigh] = 0.5f;
+
+            highUp[Drive::pEqHigh] = 1.0f;
+            highUp[Drive::pEqLow] = highUp[Drive::pEqMid] = 0.5f;
+
+            // The low end, with the low band at the top.
+            {
+                const double measured = 20.0 * std::log10 (measuredGain (1.0f, 0.5f, lowHz)
+                                                              / measuredGain (0.5f, 0.5f, lowHz));
+                const double drawn = Drive::eqResponseDb (lowUp, static_cast<float> (lowHz), sr)
+                                       - Drive::eqResponseDb (flat, static_cast<float> (lowHz), sr);
+
+                ok = check (std::abs (measured - drawn) < 0.5,
+                            "the MiXX drive draws the EQ curve it applies (low)",
+                            measured - drawn) && ok;
+            }
+
+            // And the high end, with the high band at the top.
+            {
+                const double measured = 20.0 * std::log10 (measuredGain (0.5f, 1.0f, highHz)
+                                                              / measuredGain (0.5f, 0.5f, highHz));
+                const double drawn = Drive::eqResponseDb (highUp, static_cast<float> (highHz), sr)
+                                       - Drive::eqResponseDb (flat, static_cast<float> (highHz), sr);
+
+                ok = check (std::abs (measured - drawn) < 0.5,
+                            "the MiXX drive draws the EQ curve it applies (high)",
+                            measured - drawn) && ok;
+            }
         }
     }
 

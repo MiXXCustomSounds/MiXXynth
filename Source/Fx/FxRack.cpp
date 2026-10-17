@@ -11,6 +11,7 @@
 #include "LimiterFx.h"
 #include "MultibandFx.h"
 #include "EqFx.h"
+#include "MiXXDriveFx.h"
 
 namespace mixxynth
 {
@@ -30,6 +31,7 @@ namespace mixxynth
             case fxLimiter:     return "Limiter";
             case fxMultiband:   return "Multiband";
             case fxGraphicEq:   return "Graphic EQ";
+            case fxMiXXDrive:   return "MiXX Drive";
             default:            break;
         }
 
@@ -51,6 +53,7 @@ namespace mixxynth
             case fxLimiter:     return LimiterFx::descriptor();
             case fxMultiband:   return MultibandFx::descriptor();
             case fxGraphicEq:   return EqFx::descriptor();
+            case fxMiXXDrive:   return MiXXDriveFx::descriptor();
             default:            break;
         }
 
@@ -95,6 +98,7 @@ namespace mixxynth
                 case fxLimiter:     module = std::make_unique<LimiterFx>(); break;
                 case fxMultiband:   module = std::make_unique<MultibandFx>(); break;
                 case fxGraphicEq:   module = std::make_unique<EqFx>(); break;
+                case fxMiXXDrive:   module = std::make_unique<MiXXDriveFx>(); break;
                 default:            return nullptr;
             }
 

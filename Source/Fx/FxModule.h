@@ -47,6 +47,7 @@ namespace mixxynth
         fxLimiter,
         fxMultiband,
         fxGraphicEq,
+        fxMiXXDrive,
         kNumFxTypes
     };
 

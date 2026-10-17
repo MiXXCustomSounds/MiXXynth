@@ -2048,7 +2048,19 @@ int main()
 
         // The browser follows the session. Loading through the bar's own move and then
         // refreshing is what the timer does, so this is the same path the UI takes.
-        const int target = juce::jmin (4, bankSize - 1);
+        //
+        // The target is the first FACTORY preset rather than a fixed index, because the bank
+        // also holds whatever user presets the machine has - one saved from a session, or a file
+        // left behind by an interrupted run. Index 4 is only a factory preset while no user
+        // preset sorts ahead of it, and the delete guard below depends on it being one.
+        int target = -1;
+
+        for (int i = 0; i < bankSize && target < 0; ++i)
+            if (proc.presets.store().isFactory (i))
+                target = i;
+
+        check (target >= 0, "the bank has a factory preset for the delete guard",
+               juce::String (target));
 
         check (bar->step (0) || true, "stepping by nothing is harmless", "");
 
@@ -2100,7 +2112,10 @@ int main()
                "the bar refuses to delete a factory preset", "");
 
         // Save As through the bar writes a user preset, and the browser grows to include it.
-        const juce::String name ("Patch Bar Temp");
+        // The name is unique per run, because saving over a preset of the same name leaves the
+        // bank exactly the size it was - and this check is about the bank growing.
+        const juce::String name ("Patch Bar Temp "
+                                   + juce::String (juce::Time::getMillisecondCounter()));
         const int saved = bar->saveAs ("Other", name);
 
         check (saved >= 0, "the bar saves a user preset", juce::String (saved));

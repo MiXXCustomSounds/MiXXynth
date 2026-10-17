@@ -118,6 +118,8 @@ target_sources(MiXXynth PRIVATE
     Source/Fx/MultibandFx.h
     Source/Fx/EqFx.cpp
     Source/Fx/EqFx.h
+    Source/Fx/MiXXDriveFx.cpp
+    Source/Fx/MiXXDriveFx.h
     Source/PresetStore.cpp
     Source/PresetStore.h
     Source/PresetManager.cpp
@@ -177,6 +179,7 @@ add_executable(MiXXynthSmoke
     Source/Fx/LimiterFx.cpp
     Source/Fx/MultibandFx.cpp
     Source/Fx/EqFx.cpp
+    Source/Fx/MiXXDriveFx.cpp
 )
 target_link_libraries(MiXXynthSmoke PRIVATE
     juce::juce_audio_utils
@@ -236,6 +239,7 @@ add_executable(MiXXynthEditorAudit
     Source/Fx/LimiterFx.cpp
     Source/Fx/MultibandFx.cpp
     Source/Fx/EqFx.cpp
+    Source/Fx/MiXXDriveFx.cpp
 )
 target_link_libraries(MiXXynthEditorAudit PRIVATE
     juce::juce_audio_utils
@@ -294,6 +298,7 @@ add_executable(MiXXynthPatchAudit
     Source/Fx/LimiterFx.cpp
     Source/Fx/MultibandFx.cpp
     Source/Fx/EqFx.cpp
+    Source/Fx/MiXXDriveFx.cpp
 )
 target_link_libraries(MiXXynthPatchAudit PRIVATE
     juce::juce_audio_utils
